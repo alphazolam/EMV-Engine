@@ -76,8 +76,8 @@ static_funcs.get_enum_values_func = sdk.find_type_definition("System.Enum"):get_
 
 local scene = static_objs.scene_manager and sdk.call_native_func(static_objs.scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
 
-base_mesh = nil
-current_figure = nil
+local base_mesh = nil
+local current_figure = nil
 local figure_mgr
 local current_light_set
 local current_figure_name
@@ -90,13 +90,13 @@ local toks = 0
 local current_em_name
 local figure_start_time
 local held_transforms_count = 0
-ev_object = nil
-figure_settings = nil
+local ev_object = nil
+local figure_settings = nil
 local figure_behavior
-current_fig_name = nil
+local current_fig_name = nil
 local fig_mgr_name
 local cutscene_cam
-re2_figure_container_obj = nil
+local re2_figure_container_obj = nil
 local total_objects_names = {}
 local sorted_held_transforms = {}
 local cached_text_boxes = {}
@@ -106,7 +106,7 @@ local motlists = {}
 local motlist_mot_names = {}
 local lights = {}
 local non_lights = {}
-lightsets = {}
+local lightsets = {}
 
 -----------------------------------------------------------------------------------------------------------------EMV_Engine
 --EMV Classes
@@ -139,11 +139,9 @@ local merge_indexed_tables = EMV.merge_indexed_tables
 local merge_tables = EMV.merge_tables
 local deep_copy = EMV.deep_copy
 local vector_to_table = EMV.vector_to_table
-local constructor = EMV.constructor
 local find_index = EMV.find_index
 local can_index = EMV.can_index
 local orderedPairs = EMV.orderedPairs
-local orderedNext = EMV.orderedNext
 local split = EMV.split
 local Split = EMV.Split
 local create_resource = EMV.create_resource

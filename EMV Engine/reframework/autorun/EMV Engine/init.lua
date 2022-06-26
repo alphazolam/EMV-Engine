@@ -44,7 +44,7 @@ SettingsCache = {
 local next = next
 local ipairs = ipairs
 local pairs = pairs
---tmp:trigger26{ tmp._.gameobj, -621435095, tmp._.gameobj, 0, req, false, false, false, 12.0, }
+
 --Local variables ---------------------------------------------------------------------------------------------------------------------------
 local uptime = os.clock()
 local tics, toks = 0, 0
@@ -58,7 +58,7 @@ local chain_bone_names = {}
 local CachedActions = {}
 local CachedGlobals  = {}
 Hotkeys = {}
-re3_keys = {}		
+local re3_keys = {}		
 local cached_chain_settings = {}
 local cached_chain_settings_names = {}
 local bool_to_number = { [true]=1, [false]=0 }
@@ -401,7 +401,7 @@ local function __genOrderedIndex( t , do_multitype)
         orderedIndex[#orderedIndex+1] = key
     end
 	table.sort( orderedIndex, do_multitype and cmp_multitype )
-	log.info("__genOrderedIndex " .. tics)
+	--log.info("__genOrderedIndex " .. tics)
     return orderedIndex
 end
 
@@ -409,14 +409,14 @@ local function orderedNext(t, state)
     local key = nil
     if state == nil then
 		local do_multitype = type(state) ~= "string" and type(state) ~= "number"
-		if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
+		--if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
 			t.__orderedIndex = __genOrderedIndex(t , do_multitype)
-			G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
-		end
-		t.__orderedIndex = G_ordered[t].ords or __genOrderedIndex( t , do_multitype)
+		--	G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
+		--end
+		--t.__orderedIndex = G_ordered[t].ords or __genOrderedIndex( t , do_multitype)
         key = t.__orderedIndex[1]
     elseif t.__orderedIndex then
-		t.__orderedIndex = G_ordered[t].ords
+		--t.__orderedIndex = G_ordered[t].ords
         for i = 1, #t.__orderedIndex do
             if t.__orderedIndex[i] == state then
                 key = t.__orderedIndex[i+1]
@@ -1262,7 +1262,7 @@ local function check_key_released(key_id, down_timer)
 end
 
 --Check if any key was released, and return its key ID and name:
-local function get_any_key_released()
+local function check_any_key_released()
 	for key_id, key_name in pairs(Hotkey.keys) do
 		if check_key_released(key_id) then
 			return key_id, key_name
@@ -1272,14 +1272,16 @@ end
 
 -- Set a hotkey in Imgui ------------------------------------------------------------------------------------------------------------------
 local function show_hotkey_setter(button_txt, imgui_keyname, deferred_call, dfc_args, dfcall_json)
-	
+	if not imgui_keyname then return end
 	imgui.same_line()
 	local hk_tbl = Hotkeys[imgui_keyname]
 	imgui.push_id(imgui_keyname.."K")
 		
 		if hk_tbl and (hk_tbl.key_name == "[Press a Key]") then
-			local key_id, key_name = get_any_key_released()
+			--imgui.text("checking")
+			local key_id, key_name = check_any_key_released()
 			if key_id then
+				--re.msg("re")
 				hk_tbl = Hotkey:new({button_txt=button_txt, imgui_keyname=imgui_keyname, key_id=key_id, key_name=key_name, dfcall=deferred_call, obj=deferred_call.obj, dfcall_json=dfcall_json})
 				if deferred_call then
 					if deferred_call.args == nil then
@@ -1293,15 +1295,6 @@ local function show_hotkey_setter(button_txt, imgui_keyname, deferred_call, dfc_
 		end
 		
 		if imgui.button((hk_tbl and hk_tbl.key_name) or "?") then
-			
-			--[[if not hk_tbl then 
-				Hotkey.used[hk_tbl.imgui_keyname] = nil
-				Hotkey.set_key()
-				hk_tbl = nil
-			elseif not hk_tbl.key_id then 
-				hk_tbl.key_name = "[Press a Key]"
-				hk_tbl.key_id = nil
-			end]]
 			
 			if not hk_tbl then 
 				hk_tbl = {}
@@ -1392,7 +1385,7 @@ Hotkey = {
 				for i, arg in ipairs(tbl.dfcall.args or {}) do 
 					local is_obj = is_obj_or_vt(arg)
 					if is_obj then 
-						local setn_arg = (arg:get_type_definition():get_name()=="SetNodeInfo") and {__is_vt=true} --awful hack fix, but it only works as a valuetype, not a REManagedObject (which it says it is)
+						local setn_arg = (arg:get_type_definition():get_name()=="SetNodeInfo") and {__is_vt=true, __is_setn=true} --awful hack fix, but it only works as a valuetype, not a REManagedObject (which it says it is)
 						dmp_tbl.dfcall.args[i] = obj_to_json(arg, true, setn_arg or tbl.dfcall_json) --convert ValueType/object to json
 					end
 				end
@@ -1887,9 +1880,14 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 					if not is_valid_obj(obj) then 
 						
 						if typedef and (tbl.__is_vt or args.is_vt) then --create valuetypes
-							obj = ValueType.new(typedef)
-							if obj then obj:call(".ctor()") end
-						
+							if tbl.__is_setn then 
+								obj = static_objs.setn --hack fix
+							else
+								obj = ValueType.new(typedef)
+								if obj then 
+									obj:call(".ctor()") 
+								end
+							end
 						elseif tbl.__gameobj_name then 
 							
 							local gameobj = scene:call("findGameObject(System.String)", tbl.__gameobj_name)
@@ -5824,31 +5822,28 @@ local BHVTAction = {
 local BHVTNode = {
 	new = function(self, args, o)
 		o = o or {}
-		o.obj = args.obj
-		log.info("making node")
-		local owner = args.layer or args.BHVT
-		if not owner or not o.obj then return end
-		o.name = args.name or o.obj:get_full_name() or o.name
+		o.obj = args.obj or o.obj
+		o.owner = args.owner or o.owner
+		o.name = o.obj:get_full_name() or o.name
+		if not o.owner or not o.obj then return end
 		o.id = o.obj:get_id()
-		o.tree_idx = args.tree_idx
-		owner.node_names = owner.node_names or {}
-		owner.node_names[o.name] = o
+		o.tree_idx = args.tree_idx or o.tree_idx
 		for i, child in ipairs(o.obj:get_children()) do 
 			if child.get_full_name then 
 				o.children = o.children or {}
-				local child_obj = self:get_node_obj(child, owner, o.tree_idx)
+				local child_obj = self:get_node_obj(child, o.owner, o.tree_idx)
 				o.children[#o.children+1] = child_obj
 			end
 		end
 		for i, action in ipairs(o.obj:get_actions()) do 
 			o.actions = o.actions or {}
-			local action_obj = BHVTAction:new{obj=action, node_obj=o} --self:get_action_obj(action, owner)
+			local action_obj = BHVTAction:new{obj=action, node_obj=o} --self:get_action_obj(action, o.owner)
 			o.actions[i] = action_obj
 		end
 		for i, transition in ipairs(o.obj:get_transitions()) do 
 			if transition.get_full_name then 
 				o.transitions = o.transitions or {}
-				local transition_obj = self:get_node_obj(transition, owner, o.tree_idx)
+				local transition_obj = self:get_node_obj(transition, o.owner, o.tree_idx)
 				o.transitions[#o.transitions+1] = transition_obj
 			end
 		end
@@ -5857,6 +5852,7 @@ local BHVTNode = {
 	end,
 	
 	get_node_obj = function(self, node, owner, tree_idx)
+		--log.info("getting node " .. node.name)
 		return self:new({obj=node, owner=owner, name=node:get_full_name(), tree_idx=tree_idx})
 	end,
 }
@@ -5871,19 +5867,17 @@ local BHVTCoreHandle = {
 		o.name = get_mgd_obj_name(o.obj)
 		o.nodes = {}
 		o.nodes_indexed = {}
-		testes = o
 		for j, node in ipairs(o.tree:get_nodes() or {}) do
-			local node_obj = BHVTNode:new{obj=node, layer=o, tree_idx=o.index}
+			local node_obj = BHVTNode:new{obj=node, owner=o, tree_idx=o.index}
 			o.nodes[node:get_full_name()] = node_obj
 			table.insert(o.nodes_indexed, node_obj)
 		end
-		local new_node_names = {}
-		for name, node in orderedPairs(o.node_names or {}) do 
+		o.parent_nodes = {}
+		for name, node_obj in orderedPairs(o.nodes) do 
 			if not name:find("%.") then
-				table.insert(new_node_names, {name=name, obj=node})
+				table.insert(o.parent_nodes, node_obj)
 			end
 		end
-		o.node_names_indexed = new_node_names
 		self.__index = self
 		return setmetatable(o, self)
 	end,
@@ -5917,7 +5911,7 @@ local BHVT = {
 				o.variables = o.variables or {}
 				o.core_handles = o.core_handles or {}
 				for i, core_handle in ipairs(core_handles) do 
-					o.core_handles[get_mgd_obj_name(core_handle) or i] = BHVTCoreHandle:new{obj=core_handle, index=i-1}
+					o.core_handles[i] = BHVTCoreHandle:new{obj=core_handle, index=i-1}
 					local variable = core_handle:call("get_UserVariable")
 					o.variables[core_handle.name or i] = (variable and (variable:call("get_VariableSum()") > 0) and variable) or nil
 				end
@@ -5933,7 +5927,12 @@ local BHVT = {
 	imgui_bhvt_nodes = function(self, node, name, imgui_keyname, dfcall_template, dfcall_json)
 		
 		--imgui.text(node.tree_idx)
-		if imgui.button_w_hotkey(name, self.imgui_keyname .. "." .. name, dfcall_template, {name,  node.tree_idx, static_objs.setn}, dfcall_json) then
+		local dfcall_args = {
+			name,  
+			node.tree_idx, 
+			static_objs.setn
+		}
+		if imgui.button_w_hotkey(name, self.imgui_keyname .. "." .. name, dfcall_template, dfcall_args, dfcall_json) then
 			self:set_node(name)
 		end
 		
@@ -6053,14 +6052,14 @@ local BHVT = {
 						__gameobj_name = self.object.name,
 						__typedef = "via.motion.MotionFsm2",
 						__copy_json = true, --this makes jsonify_table create a json-table backup of the object when converting back to in-engine
-						down_timer = 0.0,
+						--down_timer = 0.0,
 						--__component_name = self.obj:get_type_definition():get_full_name(),
 						--__getter = "getLayer",
 						--__idx = layer.index, --these three^ can locate a field of a component in jsonify_table
 					}
-					for core_name, core_handle in orderedPairs(self.core_handles) do
-						if imgui.tree_node(core_name) then
-							for i, node_tbl in ipairs(core_handle.nodes_indexed) do 
+					for i, core_handle in ipairs(self.core_handles) do
+						if imgui.tree_node(core_handle.name) then
+							for j, node_tbl in ipairs(core_handle.parent_nodes) do 
 								self:imgui_bhvt_nodes(node_tbl, node_tbl.name, self.imgui_keyname, dfcall_template, dfcall_json)
 							end
 							imgui.tree_pop()
@@ -6549,7 +6548,7 @@ local function init_resources()
 end
 
 --Load other settings, enums, misc tables:
-default_SettingsCache = deep_copy(SettingsCache)
+local default_SettingsCache = deep_copy(SettingsCache)
 local function init_settings()
 	
 	local try, new_cache = pcall(json.load_file, "EMV_Engine\\SettingsCache.json")
@@ -6849,13 +6848,17 @@ re.on_draw_ui(function()
 					json.dump_file("EMV_Engine\\Hotkeys.json", Hotkey.used)
 				end
 				local last_name
-				for key_name, hk_tbl in orderedPairs(Hotkeys) do
+				for key_name, hk_tbl in orderedPairs(Hotkey.used) do
 					if hk_tbl.gameobj_name and  hk_tbl.gameobj_name ~= last_name then 
 						last_name = hk_tbl.gameobj_name
 						imgui.text(last_name)
 					end
 					imgui.text("    ")
 					imgui.same_line()
+					if not hk_tbl.display_imgui_button then
+						hk_tbl = Hotkey:new(hk_tbl, hk_tbl)
+						Hotkeys[key_name] = hk_tbl
+					end
 					hk_tbl:display_imgui_button()
 				end
 				imgui.tree_pop()

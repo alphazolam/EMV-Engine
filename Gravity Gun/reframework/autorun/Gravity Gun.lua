@@ -892,9 +892,7 @@ local function on_pre_test(args)
 	counter = counter + 1
 end
 
-hooked_funcs = {}
-
-function on_pre_generic_hook(args)
+local function on_pre_generic_hook(args)
 	if is_calling_hooked_function == false then 
 		local obj = hooked_funcs[sdk.to_managed_object(args[2])]
 		if not obj or not obj.exclusive_hook then 
@@ -906,7 +904,7 @@ function on_pre_generic_hook(args)
 	end
 end
 
-function on_post_generic_hook(retval)
+local function on_post_generic_hook(retval)
 	return retval
 end
 
@@ -921,7 +919,6 @@ local function on_pre_forced_func(args)
 		end
 	end
 end
-resource_exts = {}
 
 
 --[[args_table = {}

@@ -22,7 +22,7 @@ This script creates an interactive Lua Console in the game, for use in researchi
 It has access to all global variables and a variety of useful functions from EMV Engine.
 
 ## Gravity Gun
-The Gravity Gun allows you to manipulate 3D objects using the camera and the mouse. 
+The Gravity Gun allows you to manipulate 3D objects using the camera and the mouse. Thanks to praydog for creating the initial version.
 Hold middle mouse button to fire a beam that detects the closest collidable object to the camera, and grabs it when you let go.
 Roll the mouse in and out to reel the object in or push it away.
 
