@@ -69,7 +69,7 @@ local tds = {
 	guid = sdk.find_type_definition(sdk.game_namespace("GuidExtention")),
 }
 
-static_objs = {
+local static_objs = {
 	playermanager = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager")) or sdk.get_managed_singleton("snow.player.PlayerManager"),
 	via_hid_mouse = sdk.get_native_singleton("via.hid.Mouse"),
 	via_hid_keyboard = sdk.get_native_singleton("via.hid.Keyboard"),
