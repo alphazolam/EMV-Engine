@@ -3,7 +3,7 @@
 
 --This file a placeholder for Monster Hunter Rise resources
 
-local EMV = require("EMV Engine\\EMV Engine.lua")
+local EMV = require("EMV Engine.lua")
 
 local game_name = reframework.get_game_name()
 local create_resource = EMV.create_resource

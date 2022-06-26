@@ -1,7 +1,7 @@
 --Enhanced Model Viewer RE8 global resources
 --by alphaZomega
 
-local EMV = require("EMV Engine\\EMV Engine.lua")
+local EMV = require("EMV Engine")
 
 local game_name = reframework.get_game_name()
 local create_resource = EMV.create_resource

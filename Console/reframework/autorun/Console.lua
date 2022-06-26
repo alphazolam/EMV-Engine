@@ -4,7 +4,7 @@
 
 --if true then return end
 --EMV local functions and tables:
-local EMV = require("EMV Engine\\EMV Engine")
+local EMV = require("EMV Engine")
 
 local GameObject = EMV.GameObject
 local kb_state = EMV.kb_state

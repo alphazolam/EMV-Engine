@@ -3,7 +3,7 @@
 --if true then return end
 _G["is" .. reframework.get_game_name():sub(1, 4):upper()] = true
 if not (isRE2 or isRE3) then return end
-local EMV = require("EMV Engine\\EMV Engine")
+local EMV = require("EMV Engine")
 
 SettingsCache.loiter_by_default = false
 local spawned_prefabs = {}

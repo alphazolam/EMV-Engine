@@ -1,6 +1,6 @@
 --Enhanced Model Viewer DMC5 global resources
 --by alphaZomega
-local EMV = require("EMV Engine\\EMV Engine.lua")
+local EMV = require("EMV Engine")
 
 local game_name = reframework.get_game_name()
 local ran_once = false

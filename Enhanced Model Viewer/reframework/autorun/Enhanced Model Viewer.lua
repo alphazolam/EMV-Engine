@@ -6,7 +6,7 @@
 log.info("Initializing Enhanced Model Viewer")
 log.debug("Initializing Enhanced Model Viewer")
 local game_name = reframework.get_game_name()
-local EMV = require("EMV Engine\\EMV Engine")
+local EMV = require("EMV Engine")
 local res = require("Enhanced Model Viewer\\enhanced_model_viewer_" .. game_name .. "_resources")
 
 --Global Persistent Settings

@@ -4,7 +4,7 @@
 --if true then return end
 log.info("initializing Gravity Gun")
 log.debug("initializing Gravity Gun")
-local EMV = require("EMV Engine\\EMV Engine")
+local EMV = require("EMV Engine")
 
 ----------------------------------------------------------------------------------------------------------[[GLOBALS]]
 local game_name = reframework.get_game_name()
