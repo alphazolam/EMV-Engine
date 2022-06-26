@@ -1,6 +1,6 @@
 # REFramework-Scripts
 
-This is a repository of my RE Engine Lua script mods for use with REFramework. The scripts are meant to work in all RE Engine games.
+This is a repository of my RE Engine Lua script mods for use with REFramework by praydog and Cursey. The scripts are meant to work in all RE Engine games.
 Download REFramework from https://github.com/praydog/REFramework-nightly/releases
 
 ## Installation
@@ -15,6 +15,7 @@ You must install this script first to use any of my other scripts.
 ## Enhanced Model Viewer
 Enhanced Model Viewer is an animation and cutscene viewer that allows you to control animations and sequences in real time. 
 It will appear automatically inside the model viewers of RE2R, RE3R, DMC5 and RE8, as well as in the cutscenes of RE2R, RE3R and DMC5.
+Additionally, you can force the animation viewer to appear on most animatable objects by clicking "Enable Animation Viewer" button when viewing their object in UI elements created by EMV Engine.
 
 ## Console
 This script creates an interactive Lua Console in the game, for use in researching the game engine and testing Lua code. 
@@ -28,5 +29,5 @@ Roll the mouse in and out to reel the object in or push it away.
 ## Enemy Spawner
 This script for RE2R and RE3R allows you to spawn enemies at the last location that the Gravity gun was fired at.
 
-### Thanks to praydog for making REFramework and for all the guidance in making these scripts
+### Thanks to praydog for making REFramework and for all the guidance
 * These scripts are each a work-in-progress and may have bugs across the various game and engine versions
