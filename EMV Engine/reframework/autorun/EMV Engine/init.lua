@@ -36,6 +36,7 @@ SettingsCache = {
 	show_console = true,
 	show_uvars = true,
 	detach_collection = false,
+	show_editable_tables = false,
 }
 
 --tmp:call("trigger", )
@@ -640,25 +641,37 @@ end
 
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
 local temptxt = {}
-local function editable_table_field(owner_tbl, key, value)
-	local m_tbl =  temptxt[owner_tbl]
-	if m_tbl and m_tbl[key] ~= nil and m_tbl[key] ~= tostring(value) then 
-		imgui.push_id(key)
-			if imgui.button("Set") then
-				local try, out = pcall(load("return " .. ((type(value) == "string") and ("'" .. m_tbl[key] .. "'") or (m_tbl[key]))))
-				if try and (out ~= nil) then 
-					owner_tbl[key] = out
-				end
-				m_tbl[key] = nil
+local function editable_table_field(key, value, owner_tbl)
+	if type(value)=="table" then 
+		if( next(value) ~= nil) and imgui.tree_node(key) then 
+			for k, v in pairs(value) do 
+				editable_table_field(k, v, value)
 			end
-		imgui.pop_id()
-		imgui.same_line() 
-	end
-	local changed, new_value = imgui.input_text(key, (m_tbl and m_tbl[key]) or tostring(value))
-	if changed then
-		temptxt[owner_tbl] = temptxt[owner_tbl] or {}
-		temptxt[owner_tbl][key] = new_value
-		temptxt[owner_tbl].__tics = tics
+			imgui.tree_pop()
+		end
+		return true
+	elseif type(value) ~= "function" and type(value) ~= "userdata" then
+		local owner_key = owner_tbl or key
+		local m_tbl =  temptxt[owner_key]
+		if m_tbl and m_tbl[key] ~= nil and m_tbl[key] ~= tostring(value) then 
+			imgui.push_id(key)
+				if imgui.button("Set") then
+					local try, out = pcall(load("return " .. ((type(value) == "string") and ("'" .. m_tbl[key] .. "'") or (m_tbl[key]))))
+					if try and (out ~= nil) then 
+						owner_tbl[key] = out
+					end
+					m_tbl[key] = nil
+				end
+			imgui.pop_id()
+			imgui.same_line() 
+		end
+		local changed, new_value = imgui.input_text(key, (m_tbl and m_tbl[key]) or tostring(value))
+		if changed then
+			temptxt[owner_key] = temptxt[owner_key] or {}
+			temptxt[owner_key][key] = new_value
+			temptxt[owner_key].__tics = tics
+		end
+		return true
 	end
 end
 
@@ -750,7 +763,9 @@ local ImguiTable = {
 }
 
 --Read a table or dictionary in imgui, using ImguiTable to store metadata
-local function read_imgui_pairs_table(tbl, key, is_array)
+local function read_imgui_pairs_table(tbl, key, is_array, editable)
+	
+	editable = editable or SettingsCache.show_editable_tables
 	
 	local tbl_obj = G_ordered[key] or ImguiTable:new{tbl=tbl or {}, key=key, is_array=is_array}
 	
@@ -797,7 +812,7 @@ local function read_imgui_pairs_table(tbl, key, is_array)
 	end]]
 	
 	local do_subtables = ordered_idxes and (#ordered_idxes > SettingsCache.max_element_size)
-	
+	--imgui.text(tostring(editable) .. asd)
 	for j = 1, #ordered_idxes, ((do_subtables and SettingsCache.max_element_size) or #ordered_idxes) do 
 		
 		j = math.floor(j)
@@ -876,13 +891,15 @@ local function read_imgui_pairs_table(tbl, key, is_array)
 									goto continue
 								end
 							elseif imgui.tree_node_str_id(elem_key, name) then --tables/dicts/vectors
-								read_imgui_pairs_table(element, key .. elem_key, elem_is_array)
+								read_imgui_pairs_table(element, key .. elem_key, elem_is_array, editable)
 								if G_ordered[key .. elem_key] then 
 									G_ordered[key .. elem_key].parent = tbl_obj
 									G_ordered[key .. elem_key].index = i
 								end
 								imgui.tree_pop()
 							end
+						elseif editable then 
+							editable_table_field(elem_key, element, tbl)
 						else
 							imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
 						end
@@ -904,7 +921,10 @@ local function read_imgui_pairs_table(tbl, key, is_array)
 end
 
 --Read any one thing in imgui, loads tables or objects:
-read_imgui_element = function(elem, index, key, is_vec, is_obj)
+read_imgui_element = function(elem, index, editable, key, is_vec, is_obj)
+	
+	editable = editable or SettingsCache.show_editable_tables
+	
 	if elem == nil then return end
 	local is_vec = is_vec or tostring(elem):find(":vector")
 	is_obj = is_obj or (not is_vec and can_index(elem) and type(elem.call) == "function")
@@ -921,7 +941,9 @@ read_imgui_element = function(elem, index, key, is_vec, is_obj)
 			imgui.tree_pop()
 		end
 	elseif ((type(elem) == "table" and next(elem) ~= nil) or (is_vec and elem[1])) and pcall(pairs, elem)  then
-		read_imgui_pairs_table(elem, key, (is_vec and elem[1]) or isArray(elem))
+		read_imgui_pairs_table(elem, key, (is_vec and elem[1]) or isArray(elem), editable and true)
+	elseif editable and key and type(editable)=="table" then 
+		editable_table_field(key, elem, editable)
 	else
 		imgui.text(logv(elem, nil, 2, 0))
 	end
@@ -2603,7 +2625,7 @@ deferred_call = function(managed_object, args, index, on_frame)
 				freeze = args.vardata.freezetable[args.args[1] + 1]
 			end
 			
-			if freeze and old_deferred_calls[name] then 
+			if freeze and old_deferred_calls[name] and freeze ~= 1 then 
 				args = old_deferred_calls[name] --keep re-using the same deferred_call from old_deferred_calls if frozen
 			end
 			old_deferred_calls[name] = args
@@ -3383,7 +3405,7 @@ local VarData = {
 		
 		local try, out, example
 		o.mysize = (o.get and (o.get:get_num_params() == 1)) and (((o.count and o.count:call(obj)) or (o_tbl.counts and o_tbl.counts.method and o_tbl.counts.method:call(obj))) or 0) or nil
-		o.mysize = (type(o.mysize)=="number") and o.mysize
+		o.mysize = (type(o.mysize)=="number") and o.mysize or nil
 		--[[local cnt_mthod = (o.get and (o.get:get_num_params() == 1)) and o.count or (o_tbl.counts and o_tbl.counts.method)
 		o.mysize = cnt_mthod and ({pcall(cnt_mthod.call, cnt_mthod, obj)})
 		o.mysize = (o.mysize and o.mysize[1] and o.mysize[2]) or (cnt_mthod and 0) or nil]]
@@ -3865,14 +3887,16 @@ end
 
 --Function to make an REMgdObj object
 create_REMgdObj = function(managed_object, keep_alive, do_minimal)
-	--[[if REMgdObj_objects then
+	if REMgdObj_objects then
 		for name, object in pairs(REMgdObj_objects) do
 			if not pcall(function()
-			if object.__type then
-				REMgdObj.__types[object.__type.name] = true
+				add_to_REMgdObj(object)
+				if object.__type then
+					REMgdObj.__types[object.__type.name] = true
+				end
+			end) then
+				log.info(tostring(object) .. " add_to_REMgdObj type error")
 			end
-			add_to_REMgdObj(object)
-			end) then testes = object end
 		end
 		REMgdObj_objects = nil
 		if not mathex then 
@@ -3880,7 +3904,7 @@ create_REMgdObj = function(managed_object, keep_alive, do_minimal)
 			mathex = mathex and mathex:add_ref()
 			if mathex then create_REMgdObj(mathex, true) end
 		end
-	end]]
+	end
 	--if type(managed_object.call)=="function" then
 		if not REMgdObj.__types[managed_object.__type.name] then
 			REMgdObj.__types[managed_object.__type.name] = true
@@ -4234,10 +4258,10 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	if element ~= nil then 
 		value = element
 	elseif field then 
-		--value = parent_managed_object[name:match("%<(.+)%>") or field:get_name()]
-		--if value == nil then 
+		value = parent_managed_object[name:match("%<(.+)%>") or name]
+		if value == nil then 
 			value = field:get_data(parent_managed_object)
-		--end
+		end
 	elseif prop.get then --and value == nil then 
 		if not prop.set then 
 			display_name = display_name .. "*"
@@ -4251,9 +4275,20 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	local tostring_value = tostring(value)
 	local values_type = type(value)
 	local var_metadata = prop or o_tbl --(field and o_tbl.field_data and o_tbl.field_data[name]) --this is a clusterfuck, with tables being passed as parent_managed_object
+	
 	if var_metadata.can_index == nil then
 		var_metadata.can_index = can_index(value)
 	end
+	
+	local show_var_data
+	if (value ~= nil) then 
+		imgui.begin_rect()
+		show_var_data = imgui.tree_node_str_id(key_name .. name .. "VD", "") and not imgui.tree_pop()
+		imgui.end_rect(0)
+		imgui.same_line()
+	end
+	
+	--local show_var_data = (value ~= nil) and not imgui.begin_rect() and (imgui.tree_node_str_id(key_name .. name .. "VD", "") and not imgui.end_rect(2) or imgui.end_rect(2)) and not imgui.tree_pop()
 	
 	if return_type:is_a("System.Enum") then
 		local enum, value_to_list_order, enum_names = get_enum(return_type)
@@ -4454,6 +4489,16 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		imgui.same_line()
 		imgui.text(" UPDATING ") 
 		prop.updated_this_frame = nil 
+	end
+	
+	if var_metadata and show_var_data then
+		imgui.text("		")
+		imgui.same_line()
+		imgui.begin_rect()
+			for key, value in orderedPairs(var_metadata) do 
+				editable_table_field(key, value, var_metadata)
+			end
+		imgui.end_rect(2)
 	end
 	
 	return changed, value
@@ -4699,7 +4744,7 @@ local function show_imgui_uservariables(m_obj, name)
 	for u=1, uvar_count do
 		local uvar = m_obj:call("getUserVariables", u-1)
 		local var_count = uvar and uvar:call("getVariableCount")
-		if var_count and imgui.tree_node_str_id(uvar:get_address()+u, "User Variables: " .. (name or o_tbl.Name) .. " (" .. var_count .. ")") then
+		if var_count and imgui.tree_node_str_id(uvar:get_address()+u, "User Variables: \"" .. (name or o_tbl.Name) .. "\" (" .. var_count .. ")") then
 			for i=1, var_count do 
 				local var = uvar:call("getVariable", i-1)
 				local var_name = var:call("get_Name") .. (var:call("get_ReadOnly") and "*" or "")
@@ -6518,6 +6563,8 @@ GameObject = {
 		end
 	end,
 }
+new_GrabObject = GameObject.new --overwritten by Gravity Gun
+new_AnimObject = GameObject.new --overwritten by Enhanced Model Viewer
 
 --Load cache, and create list of names of them for imgui in RN[] -------------------------------------------------------------------------------
 local function init_resources()
@@ -6819,11 +6866,11 @@ end)
 --On Draw UI (Show Settings) ---------------------------------------------------------------------------------------------------------------------------------------
 re.on_draw_ui(function()
 	
-	--[[for tbl_addr, metadata in pairs(temptxt) do
-		if metadata.__tics + 500 < tics then
+	for tbl_addr, metadata in pairs(temptxt) do
+		if metadata.__tics + 240 < tics then
 			temptxt[tbl_addr] = nil
 		end
-	end]]
+	end
 	--[[if counter > 0 then
 		imgui.text("Call Count: " .. tostring(counter))
 	end]]
@@ -6876,6 +6923,7 @@ re.on_draw_ui(function()
 		if not _G.search and imgui.tree_node("Table Settings") then 
 			changed, SettingsCache.max_element_size = imgui.drag_int("Elements Per Grouping", SettingsCache.max_element_size, 1, 10, 1000); csetting_was_changed = csetting_was_changed or changed
 			changed, SettingsCache.always_update_lists = imgui.checkbox("Always Update Lists", SettingsCache.always_update_lists); csetting_was_changed = csetting_was_changed or changed 
+			changed, SettingsCache.show_editable_tables = imgui.checkbox("Editable Tables", SettingsCache.show_editable_tables); csetting_was_changed = csetting_was_changed or changed 
 			
 			imgui.same_line() 
 			if imgui.button("Reset Settings") then 

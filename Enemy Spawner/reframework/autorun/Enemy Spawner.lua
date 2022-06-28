@@ -8,7 +8,8 @@ local EMV = require("EMV Engine")
 SettingsCache.loiter_by_default = false
 local spawned_prefabs = {}
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
-local spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (isRE2 and scene:call("findFolder", "CutSceneDevOnly")) or (isRE3 and scene:call("findFolder", "RopewayGrandSceneDevelop")) --Ukewatashi
+spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (isRE2 and scene:call("findFolder", "CutSceneDevOnly")) or (isRE3 and scene:call("findFolder", "RopewayGrandSceneDevelop")) --Ukewatashi
+if not spawned_prefabs_folder then return end
 local ray_method = sdk.find_type_definition( "via.collision" ):get_method("find(via.Ray, via.Plane, via.vec3, System.Single, via.vec3)")
 local last_camera_matrix = Matrix4x4f.new()
 local prefabs = {}

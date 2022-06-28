@@ -1669,12 +1669,12 @@ re.on_draw_ui(function()
 												if type(value) == "table" then 
 													if imgui.tree_node(key) then
 														for k, v in orderedPairs(value) do
-															editable_table_field(funcs_to_force_by_component[component_name][i][key], k, v)
+															editable_table_field(k, v, funcs_to_force_by_component[component_name][i][key])
 														end
 														imgui.tree_pop()
 													end
 												else
-													editable_table_field(funcs_to_force_by_component[component_name][i], key, value)
+													editable_table_field(key, value, funcs_to_force_by_component[component_name][i])
 												end
 											imgui.end_rect()
 											--[[if type(value) == "boolean" then
@@ -1956,7 +1956,7 @@ re.on_frame(function()
 			if not next(results) then 
 				player.behaviortrees[1]:set_node("STEP.STEP_UP")
 			end
-			test = results
+			--test = results
 		end
 	end
 	

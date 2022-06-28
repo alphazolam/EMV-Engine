@@ -289,9 +289,11 @@ local function show_history(do_minimal, new_first_history_idx)
 			force_command = true
 		end
 		imgui.same_line()
-		if not imgui.push_id(1235) and imgui.button(" ") then 
+		--imgui.push_id(1235)
+		if imgui.button(" ") then 
 			force_autocomplete = true
-		end imgui.pop_id()
+		end 
+		--imgui.pop_id()
 		imgui.same_line()
 		changed, command = imgui.input_text(" ", command)
 		if not SettingsCache.use_child_windows then 
@@ -602,6 +604,7 @@ local function show_console_settings()
 		changed, SettingsCache.use_child_windows = imgui.checkbox("Use Child Window", SettingsCache.use_child_windows); was_changed = was_changed or changed
 		changed, SettingsCache.transparent_bg = imgui.checkbox("Transparent background", SettingsCache.transparent_bg); was_changed = was_changed or changed
 		changed, SettingsCache.always_update_lists = imgui.checkbox("Always Update Lists", SettingsCache.always_update_lists); was_changed = was_changed or changed 
+		changed, SettingsCache.show_editable_tables = imgui.checkbox("Editable Tables", SettingsCache.show_editable_tables); was_changed = was_changed or changed 
 		--changed, SettingsCache.deferred_console = imgui.checkbox("Deferred Console", SettingsCache.deferred_console); was_changed = was_changed or changed 
 		if imgui.button("Clear History") then 
 			history, history_idx, history_metadata, first_history_idx = {}, {}, {}, 1
