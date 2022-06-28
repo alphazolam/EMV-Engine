@@ -706,7 +706,8 @@ local function editable_table_field(key, value, owner_tbl)
 		local converted_value = value
 		if type(value)=="userdata" then 
 			converted_tbl = jsonify_table({value})
-			converted_value = converted_tbl[1] or converted_value
+			converted_value = converted_tbl[1]
+			if converted_value == nil then return end
 		end
 		local owner_key = owner_tbl or key
 		owner_tbl = owner_tbl or _G
@@ -2031,7 +2032,7 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 											if to_set.__typedef == "via.Transform" then
 												to_set = scene:call("findGameObject(System.String)", tbl.__gameobj_name)
 												to_set = to_set and to_set:call("get_Transform")
-												if to_set then table.insert(deferred_calls[obj], { method=method, args=to_set } ) end
+												if to_set then table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set } ) end
 											else
 												for i, item in ipairs(tbl[method_name]) do --list objects, like TreeLayers
 													
@@ -2051,19 +2052,19 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 																local sub_mth = sub_pd.setters[fname]
 																if sub_mth then
 																	log.info("Sub table set " .. sub_mth:get_name() .. " " .. logv(val, nil, 0) .. " for " .. logv(sub_obj, nil, 0) )
-																	table.insert(deferred_calls[sub_obj], { method=sub_mth, args=val } )
+																	table.insert(deferred_calls[sub_obj], { func=sub_mth:get_name(), args=val } )
 																end
 															end
 														end
 													else --if (type(to_set[i])~="string") or not to_set[i]:find("%.%.%.") then
 														log.info("Multi-param set " .. method_name .. " " .. logv(to_set[i], nil, 0) .. " at idx " .. (i-1) .. " for " .. logv(obj, nil, 0) )
-														table.insert(deferred_calls[obj], { method=method, args= (not method:get_param_types()[2]:is_primitive()) and {i-1, to_set[i]} or {to_set[i], i-1} } )
+														table.insert(deferred_calls[obj], { func=method:get_name(), args= (not method:get_param_types()[2]:is_primitive()) and {i-1, to_set[i]} or {to_set[i], i-1} } )
 													end
 												end
 											end
 										elseif (to_set ~= nil) and (to_set ~= "") then
 											log.info("Setting " .. method_name .. " " .. logv(to_set, nil, 0) .. " for " .. logv(obj, nil, 0) )
-											table.insert(deferred_calls[obj], { method=method, args=to_set } )
+											table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set } )
 										end
 									end
 								end
@@ -2684,6 +2685,13 @@ deferred_call = function(managed_object, args, index, on_frame)
 		if managed_object and managed_object.get_type_definition then
 			
 			--local name = managed_object:get_type_definition():get_full_name() .. (args.vardata and args.vardata.name or "") .. (index or "")
+			
+			local try, out
+			local vardata = args.vardata
+			--[[if not vardata and args.obj and args.obj._ then 
+				vardata = (args.field and args.obj._.field_data[args.field]) or  args.obj[args.func:sub(1,4)]
+				args.vardata = vardata
+			end]]
 			local name = logv(managed_object, nil, 0) .. " " .. (args.vardata and args.vardata.name or "") .. (index or "")
 			
 			if old_deferred_calls[name] and old_deferred_calls[name].Error then
@@ -2691,15 +2699,16 @@ deferred_call = function(managed_object, args, index, on_frame)
 				return
 			end
 			
-			local try, out
 			local freeze = args.vardata and args.vardata.freeze
 			if args.vardata and args.vardata.freezetable then 
 				freeze = args.vardata.freezetable[args.args[1] + 1]
 			end
 			
+			
 			if freeze and old_deferred_calls[name] and freeze ~= 1 then 
 				args = old_deferred_calls[name] --keep re-using the same deferred_call from old_deferred_calls if frozen
 			end
+			
 			old_deferred_calls[name] = args
 			if not freeze and not index then 
 				deferred_calls[managed_object] = nil
@@ -2760,13 +2769,13 @@ deferred_call = function(managed_object, args, index, on_frame)
 			else
 				try, out = pcall(managed_object.call, managed_object, args.func) --methods with no args
 			end
-		
+			
 			if not try then 
 				old_deferred_calls[name].Error = tostring(out)
 				old_deferred_calls[name].obj = managed_object
 				log.info("Failed, Deferred Call Error:\n" .. logv(args)) 
 			else--if not args.field and out==nil then
-				old_deferred_calls[name].output = out
+				old_deferred_calls[name].output = logv(out)
 				old_deferred_calls[name].obj = managed_object
 				if args.delayed_global_key ~= nil and _G[args.delayed_global_key] ~= nil  then 
 					_G[args.delayed_global_key] = out
@@ -4323,8 +4332,9 @@ end
 local function read_field(parent_managed_object, field, prop, name, return_type, key_name, element, element_idx)
 	
 	local value, is_obj, skip, changed, was_changed
-	local display_name = name
 	local o_tbl = parent_managed_object._
+	local var_metadata = prop or (field and o_tbl.field_data[name:match("%<(.+)%>") or name]) or o_tbl --(field and o_tbl.field_data and o_tbl.field_data[name]) --this is a clusterfuck, with tables being passed as parent_managed_object
+	local display_name = var_metadata.display_name or name
 	local found_array = return_type:get_full_name():find("<") or o_tbl.mysize or o_tbl.element_names
 	
 	if element ~= nil then 
@@ -4346,7 +4356,6 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	
 	local tostring_value = tostring(value)
 	local values_type = type(value)
-	local var_metadata = prop or o_tbl --(field and o_tbl.field_data and o_tbl.field_data[name]) --this is a clusterfuck, with tables being passed as parent_managed_object
 	
 	if var_metadata.can_index == nil then
 		var_metadata.can_index = can_index(value)
@@ -5266,8 +5275,55 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 								end
 							end
 						end
+						
 						imgui.tree_pop()
 					end
+					
+					if (not anim_object.same_joints_constraint or not anim_object.parent) and anim_object.joints and imgui.tree_node("Poser") then
+						if imgui.button("Save Pose") then 
+							local poses = {}
+							for i, joint in ipairs(anim_object.joints or {}) do
+								if joint._LocalEulerAngle.freeze then 
+									poses[joint._.Name] = obj_to_json(joint, true, {_LocalEulerAngle=jsonify_table({joint:call("get_LocalEulerAngle")})[1]})
+								end
+							end
+							json.dump_file("EMV_Engine\\Poses\\" .. anim_object.name .. ".json", poses)
+						end
+						imgui.same_line()
+						if imgui.same_line and imgui.button("Load Pose") then 
+							old_deferred_calls = {}
+							local poses = json.load_file("EMV_Engine\\Poses\\" .. anim_object.name .. ".json")
+							for j_name, saved_joint in pairs(poses or {}) do 
+								local real_joint = anim_object.xform:call("getJointByName", j_name)
+								if real_joint then 
+									jsonify_table(saved_joint, true, {set_props=true, obj_to_load_to=real_joint})
+									real_joint._ = real_joint._ or create_REMgdObj(joint)
+									real_joint._LocalEulerAngle.freeze = 1
+									deferred_calls[real_joint] = deferred_calls[real_joint][#deferred_calls[real_joint]]
+									deferred_calls[real_joint].vardata = real_joint._LocalEulerAngle
+								end
+							end
+						end
+						imgui.same_line()
+						if imgui.same_line and imgui.button("Clear Pose") then 
+							for i, joint in ipairs(anim_object.joints or {}) do 
+								joint._LocalEulerAngle.freeze = nil
+							end
+						end
+						for i, joint in ipairs(anim_object.joints or {}) do 
+							j_o_tbl = joint._ or create_REMgdObj(joint)
+							j_o_tbl.last_opened = uptime
+							joint._LocalEulerAngle.display_name = j_o_tbl.Name
+							imgui.push_id(joint)
+								if show_prop(joint, joint._LocalEulerAngle, key_name .. "p" .. i) and (joint._LocalEulerAngle.freeze == false) then 
+									joint._LocalEulerAngle.freeze = 1
+								end
+							imgui.pop_id()
+							joint._LocalEulerAngle.display_name = nil
+						end
+						imgui.tree_pop()
+					end
+					
 				end
 			elseif o_tbl.name == "Mesh" then
 				if o_tbl.go and o_tbl.go.materials and imgui.tree_node_ptr_id(o_tbl.go.mesh:get_address() - 1234, "Materials") then
@@ -6985,6 +7041,7 @@ re.on_draw_ui(function()
 			if next(old_deferred_calls) and imgui.tree_node("Old Deferred Calls") then
 				if imgui.button("Clear") then 
 					old_deferred_calls = {}
+					deferred_calls = {}
 				end
 				read_imgui_element(old_deferred_calls)
 				imgui.tree_pop()
