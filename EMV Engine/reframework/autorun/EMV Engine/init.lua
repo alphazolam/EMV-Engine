@@ -4491,7 +4491,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		prop.updated_this_frame = nil 
 	end
 	
-	if var_metadata and show_var_data then
+	--[[if var_metadata and show_var_data then
 		imgui.text("		")
 		imgui.same_line()
 		imgui.begin_rect()
@@ -4499,7 +4499,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				editable_table_field(key, value, var_metadata)
 			end
 		imgui.end_rect(2)
-	end
+	end]]
 	
 	return changed, value
 end
