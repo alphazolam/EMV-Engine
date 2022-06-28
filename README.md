@@ -36,7 +36,7 @@ This makes the console useful for debugging scripts, since you can just make you
 * Type'/' followed by some text to search the game world for objects with that text in their names
 * Type 'transforms' to get a list of all objects in the game world, ordered by creation
 * Execute multiple lines of code within the console by using semicolons to separate statements
-* Use '=' to make assignments within for loops inside your Console commands, or ' = ' to make a one-line expression and view the result
+* Use '=' to make assignments within for loops inside your Console commands, or ' = ' to make a one-line assignment and view the result
 
 ### Thanks to praydog for making REFramework and for all the guidance
 * These scripts are each a work-in-progress and may have bugs across the various game and engine versions

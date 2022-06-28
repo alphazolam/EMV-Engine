@@ -2075,6 +2075,9 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 									on_frame_calls[anim_object.gameobj] = {lua_object=anim_object, method=anim_object.set_materials, args={false, {mesh=obj, saved_variables=converted_tbl.__materials}}}
 								end
 							end
+							if deferred_calls[obj] and deferred_calls[obj][1] and not deferred_calls[obj][2] then
+								deferred_calls[obj] = deferred_calls[obj][1]
+							end
 						end
 						
 						return obj, tbl.__copy_json and tbl
@@ -5280,6 +5283,30 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					end
 					
 					if (not anim_object.same_joints_constraint or not anim_object.parent) and anim_object.joints and imgui.tree_node("Poser") then
+						local poser = anim_object.poser or {
+							name=anim_object.key_name:gsub("/", "."),
+							slots={},
+							current_slot_idx=1, 
+							current_object_idx=1
+						}
+						if not poser.names then
+							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.name .. ".json") or {}
+							for i = 1, 8 do 
+								poser.slots[i] = tostring(i) .. (current_file["num:" .. i] and "*" or "")
+							end
+							poser.paths=fs.glob([[EMV_Engine\\Poses\\.*.json]])
+							poser.current_slot_idx = table.binsert(poser.paths, "EMV_Engine\\Poses\\" .. poser.name)
+							poser.names = {}
+							for i, filepath in ipairs(poser.paths) do 
+								table.insert(poser.names, filepath:match("^.+\\(.+)%."))
+							end
+						end
+						anim_object.poser = poser
+						
+						changed, poser.current_object_idx = imgui.combo("Object", poser.current_object_idx, poser.names)
+						
+						changed, poser.current_slot_idx = imgui.combo("Slot", poser.current_slot_idx, poser.slots)
+						
 						if imgui.button("Save Pose") then 
 							local poses = {}
 							for i, joint in ipairs(anim_object.joints or {}) do
@@ -5287,27 +5314,35 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 									poses[joint._.Name] = obj_to_json(joint, true, {_LocalEulerAngle=jsonify_table({joint:call("get_LocalEulerAngle")})[1]})
 								end
 							end
-							json.dump_file("EMV_Engine\\Poses\\" .. anim_object.name .. ".json", poses)
+							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.name .. ".json") or {}
+							current_file["num:" .. poser.current_slot_idx] = poses
+							json.dump_file("EMV_Engine\\Poses\\" .. poser.name .. ".json", current_file)
+							anim_object.poser.names = nil
 						end
+						
 						imgui.same_line()
 						if imgui.same_line and imgui.button("Load Pose") then 
 							old_deferred_calls = {}
-							local poses = json.load_file("EMV_Engine\\Poses\\" .. anim_object.name .. ".json")
-							for j_name, saved_joint in pairs(poses or {}) do 
-								local real_joint = anim_object.xform:call("getJointByName", j_name)
-								if real_joint then 
-									jsonify_table(saved_joint, true, {set_props=true, obj_to_load_to=real_joint})
-									real_joint._ = real_joint._ or create_REMgdObj(joint)
-									real_joint._LocalEulerAngle.freeze = 1
-									deferred_calls[real_joint] = deferred_calls[real_joint][#deferred_calls[real_joint]]
-									deferred_calls[real_joint].vardata = real_joint._LocalEulerAngle
+							local poses = json.load_file("EMV_Engine\\Poses\\" .. poser.name .. ".json")
+							poses = poses and poses["num:" .. poser.current_slot_idx]
+							if poses then
+								for i, joint in pairs(anim_object.joints) do 
+									local saved_joint = poses[joint._.Name]
+									if saved_joint then 
+										old_deferred_calls[logv(joint) .. " _LocalEulerAngle"] = nil
+										jsonify_table(saved_joint, true, {set_props=true, obj_to_load_to=joint})
+										joint._ = joint._ or create_REMgdObj(joint)
+										joint._LocalEulerAngle.freeze = 1
+										deferred_calls[joint].vardata = joint._LocalEulerAngle
+									end
 								end
 							end
 						end
 						imgui.same_line()
-						if imgui.same_line and imgui.button("Clear Pose") then 
+						if imgui.same_line and imgui.button("Unfreeze All Joints") then 
 							for i, joint in ipairs(anim_object.joints or {}) do 
 								joint._LocalEulerAngle.freeze = nil
+								old_deferred_calls[logv(joint) .. " _LocalEulerAngle"] = nil
 							end
 						end
 						for i, joint in ipairs(anim_object.joints or {}) do 
