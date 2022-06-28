@@ -4280,13 +4280,13 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		var_metadata.can_index = can_index(value)
 	end
 	
-	local show_var_data
+	--[[local show_var_data
 	if (value ~= nil) then 
 		imgui.begin_rect()
 		show_var_data = imgui.tree_node_str_id(key_name .. name .. "VD", "") and not imgui.tree_pop()
 		imgui.end_rect(0)
 		imgui.same_line()
-	end
+	end]]
 	
 	--local show_var_data = (value ~= nil) and not imgui.begin_rect() and (imgui.tree_node_str_id(key_name .. name .. "VD", "") and not imgui.end_rect(2) or imgui.end_rect(2)) and not imgui.tree_pop()
 	
