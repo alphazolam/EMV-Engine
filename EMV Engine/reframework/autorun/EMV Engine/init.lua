@@ -639,10 +639,60 @@ local function is_obj_or_vt(obj)
 	return obj and ((tostring(obj):find("::ValueType") and 1) or is_valid_obj(obj, true))
 end
 
+--Console / load() Functions -----------------------------------------------------------------------------------------------------------
+--Parses a string into a single executable expression usable by load():
+local function parse_command(command)
+	local load_string = command
+	local hex_idx = load_string:find("0x[%x]") 
+	local safety = 0
+	while hex_idx and safety < 4 do
+		local num_end = load_string:find("[^%x]", hex_idx+2) or (#load_string - 1) + 2
+		if num_end - hex_idx > 5 then 
+			local address = load_string:sub(hex_idx, num_end)
+			if sdk.is_managed_object(tonumber(address)) then 
+				load_string = load_string:sub(1, hex_idx - 1) .. "to_obj(" .. address .. ")" .. load_string:sub(num_end, -1)	
+			end
+		end
+		hex_idx = load_string:find("0x[%x]", num_end)
+		safety = safety + 1
+	end
+	if string.find(command, " = ") then 
+		local left_side = load_string:sub(1, command:find(" =") - 1)
+		local right_side =  load_string:sub(command:find("= ") + 2, -1)
+		load_string = left_side .. " = " .. right_side .. "\nreturn ({" .. left_side .. "})" 
+	elseif not string.find(command, "^for ") and not string.find(command, "^while ") then
+		load_string = "return ({" .. load_string .. "})" --parens and braces allow returning multiple results as a table
+	end
+	return load_string
+end
+
+--Exectutes a string command input with load(), dividing it up into separate sub-commands:
+local function run_command(input)
+	local outputs = {}
+	local is_multi_command = input:find(";")
+	for part in input:gsub("\n%s?", " "):gsub("%s?;%s?", ";"):gmatch("[^%;]+") do
+		local command = parse_command(part)
+		try, out = pcall(load(command))
+		if try then 
+			if out == nil then 
+				out = "nil"
+			elseif out[2] == nil then --if it's a table with one result that result becomes the whole output
+				out = out[1]
+			end
+		else
+			out = "ERROR: " .. tostring(out)
+		end
+		table.insert(outputs, (is_multi_command and {name=part, output=out}) or out)
+	end
+	return outputs[2] and outputs or outputs[1]
+end
+
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
 local temptxt = {}
 local function editable_table_field(key, value, owner_tbl)
+	
 	if type(value)=="table" then 
+		
 		if( next(value) ~= nil) and imgui.tree_node(key) then 
 			for k, v in pairs(value) do 
 				editable_table_field(k, v, value)
@@ -650,22 +700,43 @@ local function editable_table_field(key, value, owner_tbl)
 			imgui.tree_pop()
 		end
 		return true
-	elseif type(value) ~= "function" and type(value) ~= "userdata" then
+		
+	elseif type(value) ~= "function" then
+		
+		local converted_value = value
+		if type(value)=="userdata" then 
+			converted_tbl = jsonify_table({value})
+			converted_value = converted_tbl[1] or converted_value
+		end
 		local owner_key = owner_tbl or key
+		owner_tbl = owner_tbl or _G
+		
 		local m_tbl =  temptxt[owner_key]
-		if m_tbl and m_tbl[key] ~= nil and m_tbl[key] ~= tostring(value) then 
+		if m_tbl and m_tbl[key] ~= nil and m_tbl[key] ~= tostring(converted_value) then 
 			imgui.push_id(key)
 				if imgui.button("Set") then
-					local try, out = pcall(load("return " .. ((type(value) == "string") and ("'" .. m_tbl[key] .. "'") or (m_tbl[key]))))
+					_G.to_load = m_tbl[key]
+					if to_load:find(";") then
+						to_load = run_command(to_load).output
+					elseif type(value)=="userdata" then
+						to_load = jsonify_table({to_load}, true)[1]
+					end
+					local try, out = pcall(load("return " .. ((type(value)=="string") and ("'" .. to_load .. "'") or ("to_load"))))
 					if try and (out ~= nil) then 
 						owner_tbl[key] = out
 					end
+					m_tbl[key] = nil
+					_G.to_load = nil
+				end
+				imgui.same_line()
+				if imgui.button("X") then
 					m_tbl[key] = nil
 				end
 			imgui.pop_id()
 			imgui.same_line() 
 		end
-		local changed, new_value = imgui.input_text(key, (m_tbl and m_tbl[key]) or tostring(value))
+		
+		local changed, new_value = imgui.input_text(key, (m_tbl and m_tbl[key]) or tostring(converted_value))
 		if changed then
 			temptxt[owner_key] = temptxt[owner_key] or {}
 			temptxt[owner_key][key] = new_value
@@ -2612,7 +2683,8 @@ deferred_call = function(managed_object, args, index, on_frame)
 		
 		if managed_object and managed_object.get_type_definition then
 			
-			local name = managed_object:get_type_definition():get_full_name() .. (args.vardata and args.vardata.name or "") .. (index or "")
+			--local name = managed_object:get_type_definition():get_full_name() .. (args.vardata and args.vardata.name or "") .. (index or "")
+			local name = logv(managed_object, nil, 0) .. " " .. (args.vardata and args.vardata.name or "") .. (index or "")
 			
 			if old_deferred_calls[name] and old_deferred_calls[name].Error then
 				log.info("Skipping broken deferred call")
@@ -6989,6 +7061,7 @@ local EMV = {
 	is_valid_obj = is_valid_obj,
 	orderedNext = orderedNext,
 	orderedPairs = orderedPairs,
+	run_command = run_command,
 	merge_indexed_tables = merge_indexed_tables,
 	merge_tables = merge_tables,
 	deep_copy = deep_copy,

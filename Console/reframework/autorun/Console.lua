@@ -80,38 +80,8 @@ for command, packed_cheats in pairs(cheats) do
 	end
 end
 
-local function nums_to_objects(str)
-	local hex_idx = str:find("0x[%x]") 
-	local safety = 0
-	while hex_idx and safety < 4 do
-		local num_end = str:find("[^%x]", hex_idx+2) or (#str - 1) + 2
-		if num_end - hex_idx > 5 then 
-			local address = str:sub(hex_idx, num_end)
-			if sdk.is_managed_object(tonumber(address)) then 
-				str = str:sub(1, hex_idx - 1) .. "to_obj(" .. address .. ")" .. str:sub(num_end, -1)	
-			end
-		end
-		hex_idx = str:find("0x[%x]", num_end)
-		safety = safety + 1
-	end
-	return str
-end
-
---Parses a single string into a command usable by load()
-local function parse_command(command)
-	local load_string = nums_to_objects(command)
-	if string.find(command, " = ") then 
-		local left_side = load_string:sub(1, command:find(" =") - 1)
-		local right_side =  load_string:sub(command:find("= ") + 2, -1)
-		load_string = left_side .. " = " .. right_side .. "\nreturn ({" .. left_side .. "})" 
-	elseif not string.find(command, "^for ") and not string.find(command, "^while ") then
-		load_string = "return ({" .. load_string .. "})" --parens and braces allow returning multiple results as a table
-	end
-	return load_string
-end
-
 --Exectutes a string command input, dividing it up into separate sub-commands:
-local function run_command(input)
+local run_command = function(input)
 	if cheats[input] then 
 		local active
 		for i, cheat in ipairs(cheats[input]) do
@@ -129,7 +99,7 @@ local function run_command(input)
 		return active ~= nil and tostring(active)
 	elseif input == "clear" then 
 		if History.first_history_idx == #History.history_idx + 1 then 
-			re.msg("cleared")
+			re.msg("Cleared")
 			History.history, History.history_idx, History.history_metadata, History.first_history_idx = {}, {}, {}, 1
 		else
 			History.first_history_idx = #History.history_idx + 1
@@ -144,24 +114,8 @@ local function run_command(input)
 	elseif input == "go" and go and is_valid_obj(go.xform) then
 		go = GameObject.new_GrabObject and GameObject:new_GrabObject{xform=go.xform} or GameObject:new{xform=go.xform}
 	end
-	local outputs = {}
-	local is_multi_command = input:find(";")
-	for part in input:gsub("\n%s?", " "):gsub("%s?;%s?", ";"):gmatch("[^%;]+") do
-		local command = parse_command(part)
-		try, out = pcall(load(command))
-		if try then 
-			if out == nil then 
-				out = "nil"
-			elseif out[2] == nil then --if it's a table with one result that result becomes the whole output
-				out = out[1]
-			end
-		else
-			out = "ERROR: " .. tostring(out)
-		end
-		table.insert(outputs, (is_multi_command and {name=part, output=out}) or out)
-	end
-	return outputs[2] and outputs or outputs[1]
-end
+	return EMV.run_command(input)
+end 
 
 --Displays the History.history of past console commands and their results as a table:
 local function show_history(do_minimal, new_first_history_idx)
@@ -252,7 +206,7 @@ local function show_history(do_minimal, new_first_history_idx)
 					
 					is_calling_hooked_function = false
 				end
-				read_imgui_element(result, nil, cmd)
+				read_imgui_element(result, nil, nil, cmd)
 				imgui.tree_pop()
 			end
 		end 
