@@ -1,14 +1,13 @@
 --RE2 and RE3 Enemy Spawner by alphazomega
 --June 26, 2022
 --if true then return end
-_G["is" .. reframework.get_game_name():sub(1, 4):upper()] = true
-if not (isRE2 or isRE3) then return end
+if not (isRE2 or isRE3 or isDMC5) then return end
 local EMV = require("EMV Engine")
 
 SettingsCache.loiter_by_default = false
 local spawned_prefabs = {}
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
-spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (isRE2 and scene:call("findFolder", "CutSceneDevOnly")) or (isRE3 and scene:call("findFolder", "RopewayGrandSceneDevelop")) --Ukewatashi
+spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", (isRE2 and "GUI_Rogue") or (isRE3 and "RopewayGrandSceneDevelop") or (isDMC5 and "Develop")))
 if not spawned_prefabs_folder then return end
 local ray_method = sdk.find_type_definition( "via.collision" ):get_method("find(via.Ray, via.Plane, via.vec3, System.Single, via.vec3)")
 local last_camera_matrix = Matrix4x4f.new()
@@ -50,53 +49,74 @@ local function get_enumerator(managed_object)
 	return output
 end
 
-local function get_prefabs()
-	local prefabs = { players={}, player_names={}, enemies={}, enemy_names={} }
-	local dlc_folder = scene:call("findFolder", "RopewayContents_Rogue")
-	if dlc_folder and dlc_folder:call("get_Active") == false then 
-		dlc_folder:call("activate")
-		return
-	end
-	local survivor_catalog = scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("SurvivorRegister")))
-	if survivor_catalog and survivor_catalog.get_elements then 
-		for i, catalog in ipairs(reverse_table(survivor_catalog:get_elements()) or {}) do
-			local userdata = catalog:get_field("UserData")
-			local survivors = get_enumerator(userdata:get_field("SurvivorParamList"))
-			for j, survivorparam in ipairs(survivors) do
-				local survivor_prefabs = survivorparam:get_field("Prefabs")
-				local pfbs = survivor_prefabs and {player=survivor_prefabs:get_field("Player"), npc=survivor_prefabs:get_field("Npc"), actor=survivor_prefabs:get_field("Actor")}
-				for key, pfb in pairs(pfbs) do 
-					local path = pfb:call("get_Path")
-					if path and path ~= "" then 
-						local name = path:match("^.+/(.+)%.pfb") .. "_" .. key
-						prefabs.players[name:lower()] = { prefab=pfb, name=name, body_part_idx=1 }
+function get_prefabs()
+	local prefabs = { players={}, player_names={}, enemies={}, enemy_names={} }	
+	if isDMC5 then 
+		local enemy_manager = sdk.get_managed_singleton(sdk.game_namespace("EnemyManager"))
+		local enemy_prefab_manager = enemy_manager and enemy_manager:get_field("PrefabManager")
+		local prefabs_dotnet_list = enemy_prefab_manager and enemy_prefab_manager:get_field("EnemyPrefabInfoList")
+		local items = prefabs_dotnet_list and prefabs_dotnet_list:get_field("mItems")
+		local prefabs_list = items and items:get_elements()
+		for i, prefab_info in ipairs(prefabs_list or {}) do
+			local current_load_prefab = prefab_info:get_field("CurrentLoadPrefab")
+			--if current_load_prefab == nil then
+				local pfb = prefab_info:get_field("EnemyPrefab")
+				local name=pfb:call("get_Path"):match("^.+/(.+)%.pfb") 
+				if not string.find(name, "vergil") and not string.find(name, "dante") and not string.find(name, "gilgamesh") then
+					prefab_info:call("requestLoad", false)
+					prefab_info:call("update")
+					prefabs.enemies[name:lower()] = { prefab=pfb, name=name }
+				end
+			--end
+		end
+	else
+		local dlc_folder = scene:call("findFolder", "RopewayContents_Rogue")
+		if dlc_folder and dlc_folder:call("get_Active") == false then 
+			dlc_folder:call("activate")
+			return
+		end
+		local survivor_catalog = scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("SurvivorRegister")))
+		if survivor_catalog and survivor_catalog.get_elements then 
+			for i, catalog in ipairs(reverse_table(survivor_catalog:get_elements()) or {}) do
+				local userdata = catalog:get_field("UserData")
+				local survivors = get_enumerator(userdata:get_field("SurvivorParamList"))
+				for j, survivorparam in ipairs(survivors) do
+					local survivor_prefabs = survivorparam:get_field("Prefabs")
+					local pfbs = survivor_prefabs and {player=survivor_prefabs:get_field("Player"), npc=survivor_prefabs:get_field("Npc"), actor=survivor_prefabs:get_field("Actor")}
+					for key, pfb in pairs(pfbs) do 
+						local path = pfb:call("get_Path")
+						if path and path ~= "" then 
+							local name = path:match("^.+/(.+)%.pfb") .. "_" .. key
+							prefabs.players[name:lower()] = { prefab=pfb, name=name, body_part_idx=1 }
+						end
 					end
 				end
 			end
 		end
-	end
-	local costume_catalog = scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("CostumeRegister")))
-	if costume_catalog and costume_catalog.get_elements and isRE2 then 
-		for i, catalog in ipairs(reverse_table(costume_catalog:get_elements())) do
-			local userdata = catalog:get_field("UserData")
-			local costumes = userdata:get_field("UserDataList"):get_elements()
-			for j, costumeparam in ipairs(costumes) do
-				local survivor_type = costumeparam:get_field("SurvivorType")
-				local costume_params = costumeparam:get_field("CostumeParams")
-				if costume_params then 
-					for k, element in ipairs(costume_params:get_elements()) do
-						local pfbs = { body=element:get_field("_Body"), face=element:get_field("_Face"), hair=element:get_field("_Hair"), other=element:get_field("_Other") } 
-						for key, pfb in pairs(pfbs) do 
-							local path = pfb:call("get_Path")
-							if path and path ~= "" then 
-								local name = path:match("^.+/(.+)%.pfb")
-								local strings = table.pack("_player", "_npc", "_actor")
-								for m=1, 3 do 
-									local str = name:lower():sub(1,6) .. strings[m]
-									if prefabs.players[str] then 
-										prefabs.players[str].child_prefabs = prefabs.players[str].child_prefabs or {}
-										prefabs.players[str].child_prefabs[key] = prefabs.players[str].child_prefabs[key] or {}
-										prefabs.players[str].child_prefabs[key][name] = { prefab=pfb, name=name }
+		local costume_catalog = scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("CostumeRegister")))
+		
+		if costume_catalog and costume_catalog.get_elements and isRE2 then 
+			for i, catalog in ipairs(reverse_table(costume_catalog:get_elements())) do
+				local userdata = catalog:get_field("UserData")
+				local costumes = userdata:get_field("UserDataList"):get_elements()
+				for j, costumeparam in ipairs(costumes) do
+					local survivor_type = costumeparam:get_field("SurvivorType")
+					local costume_params = costumeparam:get_field("CostumeParams")
+					if costume_params then 
+						for k, element in ipairs(costume_params:get_elements()) do
+							local pfbs = { body=element:get_field("_Body"), face=element:get_field("_Face"), hair=element:get_field("_Hair"), other=element:get_field("_Other") } 
+							for key, pfb in pairs(pfbs) do 
+								local path = pfb:call("get_Path")
+								if path and path ~= "" then 
+									local name = path:match("^.+/(.+)%.pfb")
+									local strings = table.pack("_player", "_npc", "_actor")
+									for m=1, 3 do 
+										local str = name:lower():sub(1,6) .. strings[m]
+										if prefabs.players[str] then 
+											prefabs.players[str].child_prefabs = prefabs.players[str].child_prefabs or {}
+											prefabs.players[str].child_prefabs[key] = prefabs.players[str].child_prefabs[key] or {}
+											prefabs.players[str].child_prefabs[key][name] = { prefab=pfb, name=name }
+										end
 									end
 								end
 							end
@@ -104,47 +124,47 @@ local function get_prefabs()
 					end
 				end
 			end
-		end
-		for key, prefab in pairs(prefabs.players) do --make alphabetical names lists for comboboxes
-			local new_tbl = {}
-			prefab.body_part_names = {}
-			for body_part, child_prefabs_list in orderedPairs(prefab.child_prefabs) do 
-				if not body_part:find("_names") then
-					table.insert(prefab.body_part_names, body_part)
-					local tbl = {}
-					for name, packed_pfb in orderedPairs(child_prefabs_list) do
-						table.insert(tbl, name)
+			
+			for key, prefab in pairs(prefabs.players) do --make alphabetical names lists for comboboxes
+				local new_tbl = {}
+				prefab.body_part_names = {}
+				for body_part, child_prefabs_list in orderedPairs(prefab.child_prefabs) do 
+					if not body_part:find("_names") then
+						table.insert(prefab.body_part_names, body_part)
+						local tbl = {}
+						for name, packed_pfb in orderedPairs(child_prefabs_list) do
+							table.insert(tbl, name)
+						end
+						new_tbl[body_part .. "_names"] = tbl
+						child_prefabs_list.idx = 1
 					end
-					new_tbl[body_part .. "_names"] = tbl
-					child_prefabs_list.idx = 1
+				end
+				for body_part_names, names_list in pairs(new_tbl) do --merge
+					prefabs.players[key].child_prefabs[body_part_names] = names_list
 				end
 			end
-			for body_part_names, names_list in pairs(new_tbl) do --merge
-				prefabs.players[key].child_prefabs[body_part_names] = names_list
+			for pfb_name, pfb_packed in orderedPairs(prefabs.players) do
+				table.insert(prefabs.player_names, pfb_name)
 			end
 		end
-		for pfb_name, pfb_packed in orderedPairs(prefabs.players) do
-			table.insert(prefabs.player_names, pfb_name)
-		end
-	end
-	
-	local registers = scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("EnemyDataManager")))
-	registers = registers and registers.get_elements and registers:get_elements() or {}
-	if not registers then return end
-	
-	for i, registry in ipairs(registers) do 
-		local pfb_dict = get_enumerator(registry:call("get_EnemyDataTable"))
-		for type_id, pfb_register in pairs(pfb_dict) do 
-			local prefab_ref = pfb_register:get_field("Prefab")
-			prefab_ref:call("set_DefaultStandby", true)
-			local via_prefab = prefab_ref:get_field("PrefabField")
-			local name = via_prefab:call("get_Path"):match("^.+/(.+)%.pfb")
-			if not name:find("em0[678]00") then --no low-LOD zombies
-				prefabs.enemies[name:lower()] = { prefab=via_prefab, name=name, type_id=type_id, ref=prefab_ref }
+		
+		local registers = scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("EnemyDataManager")))
+		registers = registers and registers.get_elements and registers:get_elements() or {}
+		if not registers then return end
+		
+		for i, registry in ipairs(registers) do 
+			local pfb_dict = get_enumerator(registry:call("get_EnemyDataTable"))
+			for type_id, pfb_register in pairs(pfb_dict) do 
+				local prefab_ref = pfb_register:get_field("Prefab")
+				prefab_ref:call("set_DefaultStandby", true)
+				local via_prefab = prefab_ref:get_field("PrefabField")
+				local name = via_prefab:call("get_Path"):match("^.+/(.+)%.pfb")
+				if not name:find("em0[678]00") then --no low-LOD zombies
+					prefabs.enemies[name:lower()] = { prefab=via_prefab, name=name, type_id=type_id, ref=prefab_ref }
+				end
 			end
 		end
 	end
-
 	for pfb_name, pfb_packed in orderedPairs(prefabs.enemies) do
 		table.insert(prefabs.enemy_names, pfb_name)
 	end
@@ -168,14 +188,19 @@ GameObject.clear_Spawn = function(self, xform, is_player)
 	end
 end
 
-local function spawn_zombie(pfb_name)
-	local pfb = (prefabs.players and prefabs.players[pfb_name] and prefabs.players[pfb_name].prefab) or (prefabs.enemies and prefabs.enemies[pfb_name] and prefabs.enemies[pfb_name].prefab) 
+local function spawn_zombie(pfb_name, pfb, folder)
+	
+	folder = folder or spawned_prefabs_folder 
+	local pfb = pfb or (prefabs.players and prefabs.players[pfb_name] and prefabs.players[pfb_name].prefab) or (prefabs.enemies and prefabs.enemies[pfb_name] and prefabs.enemies[pfb_name].prefab) 
+	if not pfb then return end
 	pfb:call("set_Standby", true)
 	local random_dir = Vector4f.new(math.random(-100,100)*0.01,  0.0, math.random(-100,100)*0.01, math.random(-100,100)*0.01):normalized():to_quat()
-	local folder = spawned_prefabs_folder 
-	deferred_prefab_calls[pfb] = { func_name="instantiate(via.vec3, via.Quaternion, via.Folder)", args=table.pack(last_impact_pos or last_camera_pos, random_dir, folder), counter=0, packed_pfb=prefabs.players[pfb_name] or prefabs.enemies[pfb_name] }
-	if pfb_name:find("arasite") then 
-		deferred_prefab_calls[pfb].zombie = { func_name="instantiate(via.vec3, via.Quaternion, via.Folder)", args=table.pack(last_impact_pos or last_camera_pos, random_dir, folder), counter=0, packed_pfb=prefabs.enemies["em0000"] }
+	local spawn_pos = last_impact_pos
+	--if spawn_pos then spawn_pos.y = spawn_pos.y + 1 end
+	local packed_pfb = (pfb and { prefab=pfb, name=pfb:call("get_Path"):match("^.+/(.+)%.pfb")}) or prefabs.players[pfb_name] or prefabs.enemies[pfb_name]
+	deferred_prefab_calls[pfb] = { func_name="instantiate(via.vec3, via.Quaternion, via.Folder)", args=table.pack(spawn_pos or last_camera_pos, random_dir, folder), counter=0, packed_pfb=packed_pfb }
+	if pfb_name and pfb_name:find("arasite") then 
+		deferred_prefab_calls[pfb].zombie = { func_name="instantiate(via.vec3, via.Quaternion, via.Folder)", args=table.pack(spawn_pos or last_camera_pos, random_dir, folder), counter=0, packed_pfb=prefabs.enemies["em0000"] }
 	end
 	return deferred_prefab_calls[pfb]
 end
@@ -191,10 +216,10 @@ local function spawn_deferred_prefab(packed_func_call)
 	if not packed_func_call.already_exists then
 		pfb:call("set_Standby", true)
 		pfb:call(packed_func_call.func_name, table.unpack(packed_func_call.args)) --spawn
-		
-		emmgr:call("requestInstantiate", ValueType.new(sdk.find_type_definition("System.Guid")), packed_func_call.packed_pfb.type_id, packed_func_call.packed_pfb.name, emmgr:get_field("<LastPlayerStaySceneID>k__BackingField"), packed_func_call.args[1], packed_func_call.args[2], true, nil, nil)
-		emmgr:call("execInstantiateRequests")
-		--re.msg_safe("spawned parasite", 124142)
+		if isRE2 or isRE3 then
+			emmgr:call("requestInstantiate", ValueType.new(sdk.find_type_definition("System.Guid")), packed_func_call.packed_pfb.type_id, packed_func_call.packed_pfb.name, emmgr:get_field("<LastPlayerStaySceneID>k__BackingField"), packed_func_call.args[1], packed_func_call.args[2], true, nil, nil)
+			emmgr:call("execInstantiateRequests")
+		end
 	end
 	
 	local gameobj = scene:call("findGameObject(System.String)", packed_func_call.packed_pfb.name) --NOT lowercase
@@ -202,28 +227,30 @@ local function spawn_deferred_prefab(packed_func_call)
 	
 	if xform then 
 		local new_spawn = spawned_prefabs[xform] or GameObject:new_GrabObject{xform=xform}
-		new_spawn.is_loitering=SettingsCache.loiter_by_default
-		
-		for i, component in ipairs(new_spawn.components) do 
-			local name = component:call("ToString()"):lower()
-			if name:find("em%d%d") or name:find("enemy") and not name:find("hink") then
-				if not pcall(sdk.call_object_func, component, "awake") then 
-					log.info(name)
+		if not isDMC5 then
+			new_spawn.is_loitering=SettingsCache.loiter_by_default
+			for i, component in ipairs(new_spawn.components) do 
+				local name = component:call("ToString()"):lower()
+				if name:find("em%d%d") or name:find("enemy") and not name:find("hink") then
+					if not pcall(sdk.call_object_func, component, "awake") then 
+						log.info(name)
+					end
 				end
-			end
-			if name:find("character") then 
-				pcall(sdk.call_object_func, component, "warp")
-			end
-			if name:find("em%d%d%d%dparam") then
-				pcall(sdk.call_object_func, component, "set_LoiteringEnable", true)
-				new_spawn.emparam = component
-			elseif name:find("loitering") then 
-				if SettingsCache.loiter_by_default then 
-					pcall(sdk.call_object_func, component, "requestLoitering")
+				if name:find("character") then 
+					pcall(sdk.call_object_func, component, "warp")
 				end
-				new_spawn.loitering = component
+				if name:find("em%d%d%d%dparam") then
+					pcall(sdk.call_object_func, component, "set_LoiteringEnable", true)
+					new_spawn.emparam = component
+				elseif name:find("loitering") then 
+					if SettingsCache.loiter_by_default then 
+						pcall(sdk.call_object_func, component, "requestLoitering")
+					end
+					new_spawn.loitering = component
+				end
 			end
 		end
+		
 		packed_func_call.already_exists = true
 		packed_func_call.counter = packed_func_call.counter + 1
 		packed_func_call.xform = xform
@@ -232,11 +259,24 @@ local function spawn_deferred_prefab(packed_func_call)
 			deferred_prefab_calls[pfb] = nil
 			--new_spawn.packed_xform = table.pack(packed_func_call.args[1], new_spawn.rot, new_spawn.scale)
 		end
-		
 		--old_calls[pfb] = packed_func_call
 		spawned_prefabs[xform] = new_spawn
-		
 		return new_spawn
+	elseif isDMC5 then 
+		deferred_prefab_calls[pfb] = nil --dmc5 always works
+	end
+end
+--F:\modmanager\REtool\DMC_chunk_000\natives\x64\prefab\leveldesign\orb\goldorb.pfb.16
+function spawn_pfb(pfb) 
+	if not pfb then return end
+	local prefab = pfb 
+	if (type(pfb)=="string") then 
+		local clean_path = (pfb:match("natives\\%w%w%w\\(.+%.pfb)") or pfb):gsub("\\", "/")
+		prefab = sdk.create_instance("via.Prefab", true)
+		prefab:call("set_Path", clean_path)
+	end
+	if prefab and prefab:add_ref() then
+		spawn_zombie(nil, prefab)
 	end
 end
 
@@ -318,8 +358,8 @@ end
 --ray_impact_pos = Vector3f.new(0,2,0)
 
 local function show_enemy_spawner()
-	if (isRE2 or isRE3) and imgui.tree_node("Enemy Spawner") then
-		
+	
+	if imgui.tree_node("Enemy Spawner") then
 		--[[local ray = sdk.create_instance("via.Ray", true):add_ref()
 		ray:call(".ctor")
 		ray:set_field("from", Vector3f.new(last_camera_matrix[3].x,last_camera_matrix[3].y,last_camera_matrix[3].z) )
@@ -334,6 +374,7 @@ local function show_enemy_spawner()
 		if not _G.grab then 
 			last_impact_pos = last_camera_matrix[3] - (last_camera_matrix[2] * 5.0)
 		end
+		
 		if last_impact_pos then
 			draw.world_text("X", last_impact_pos, 0xFF0000FF) --from gravity gun
 		end
@@ -341,6 +382,7 @@ local function show_enemy_spawner()
 		if not prefabs or not prefabs.enemies or not next(prefabs.enemies) then 
 			prefabs = get_prefabs()
 		end
+		
 		if prefabs then 
 			--if random(32) then
 				local spawns = get_folders(spawned_prefabs_folder:call("get_Children"))
@@ -383,8 +425,7 @@ local function show_enemy_spawner()
 				if imgui.button("Spawn Enemy") then 
 					spawn_zombie(prefabs.enemy_names[enemy_pfb_idx])
 				end
-				imgui.same_line()
-				if imgui.button("Spawn Random Zombie") then
+				if (isRE2 or isRE3) and not imgui.same_line() and imgui.button("Spawn Random Zombie") then
 					local random_table = {}
 					for i, name in ipairs(prefabs.enemy_names) do
 						if name:find("em0") or name:find("em8") or name:find("arasite") then 
@@ -396,8 +437,10 @@ local function show_enemy_spawner()
 				imgui.same_line()
 				if imgui.button("Spawn Random Enemy") then
 					local name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
-					while name:find("em9000") or name:find("em7400") do
-						name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
+					if isRE2 or isRE3 then
+						while name:find("em9000") or name:find("em7400") do
+							name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
+						end
 					end
 					spawn_zombie(name)
 				end
@@ -411,13 +454,17 @@ local function show_enemy_spawner()
 					end
 					spawned_prefabs_folder:call("deactivate")
 					spawned_prefabs_folder:call("activate")
-					if emmgr then emmgr:call("get_ActiveEnemyList"):call("TrimExcess") end
+					if (isRE2 or isRE3) and emmgr then 
+						emmgr:call("get_ActiveEnemyList"):call("TrimExcess") 
+					end
 				end 
-				imgui.same_line()
-				changed, GGSettings.loiter_by_default = imgui.checkbox("Loiter", GGSettings.loiter_by_default); setting_was_changed = setting_was_changed or changed
-				if changed then 
-					for xform, object in pairs(spawned_prefabs) do 
-						object.is_loitering = GGSettings.loiter_by_default
+				if isRE2 or isRE3 then 
+					imgui.same_line()
+					changed, GGSettings.loiter_by_default = imgui.checkbox("Loiter", GGSettings.loiter_by_default); setting_was_changed = setting_was_changed or changed
+					if changed then 
+						for xform, object in pairs(spawned_prefabs) do 
+							object.is_loitering = GGSettings.loiter_by_default
+						end
 					end
 				end
 				if next(spawned_prefabs) and imgui.tree_node("Spawned Enemies") then 
@@ -444,38 +491,36 @@ re.on_application_entry("UpdateMotion", function()
 	if not last_camera_matrix then return end
 	last_camera_matrix = last_camera_matrix:call("get_WorldMatrix")
 	
-	if isRE2 or isRE3 then
-		if next(deferred_prefab_calls) then
-			emmgr = emmgr or sdk.get_managed_singleton(sdk.game_namespace("EnemyManager"))
-			for pfb, packed_func_call in orderedPairs(deferred_prefab_calls) do --enemy spawner, code to actually spawn it
-				local spawn = (not packed_func_call.zombie or packed_func_call.zombie.xform) and spawn_deferred_prefab(packed_func_call)
-				local zombie = packed_func_call.zombie and spawn_deferred_prefab(packed_func_call.zombie)
-				if spawn and packed_func_call.zombie and packed_func_call.zombie.xform then 
-					spawn.xform:call("set_Parent", packed_func_call.zombie.xform)
-				end
-				if spawn then 
-					deferred_prefab_calls[pfb] = nil
-				end
+	if next(deferred_prefab_calls) then
+		emmgr = emmgr or sdk.get_managed_singleton(sdk.game_namespace("EnemyManager"))
+		for pfb, packed_func_call in orderedPairs(deferred_prefab_calls) do --enemy spawner, code to actually spawn it
+			local spawn = (not packed_func_call.zombie or packed_func_call.zombie.xform) and spawn_deferred_prefab(packed_func_call)
+			local zombie = packed_func_call.zombie and spawn_deferred_prefab(packed_func_call.zombie)
+			if spawn and packed_func_call.zombie and packed_func_call.zombie.xform then 
+				spawn.xform:call("set_Parent", packed_func_call.zombie.xform)
+			end
+			if spawn then 
+				deferred_prefab_calls[pfb] = nil
 			end
 		end
-		if next(spawned_prefabs) then
-			--[[if rem_count > 5 then --if more than 5 were removed from touched_gameobjects in one frame, then it's probably been cleared and the game is reloading 
-				is_calling_hooked_function = true
-				for xform, object in pairs(spawned_prefabs) do
-					object.gameobj:call("destroy")
-					clear_object(xform)
-				end
-				is_calling_hooked_function = false
-				spawned_prefabs = {}
-				spawned_prefabs_folder:call("deactivate")
-				spawned_prefabs_folder:call("activate")
-			else]]
-			if toks % 240 == 0 then
-				for xform, obj in pairs(spawned_prefabs) do 
-					if obj.is_loitering and random(3) then 
-						if obj.emparam then  pcall(sdk.call_object_func, obj.emparam, "set_LoiteringEnable", true) end
-						if obj.loitering then  pcall(sdk.call_object_func, obj.loitering, "requestLoitering") end 
-					end
+	end
+	if next(spawned_prefabs) then
+		--[[if rem_count > 5 then --if more than 5 were removed from touched_gameobjects in one frame, then it's probably been cleared and the game is reloading 
+			is_calling_hooked_function = true
+			for xform, object in pairs(spawned_prefabs) do
+				object.gameobj:call("destroy")
+				clear_object(xform)
+			end
+			is_calling_hooked_function = false
+			spawned_prefabs = {}
+			spawned_prefabs_folder:call("deactivate")
+			spawned_prefabs_folder:call("activate")
+		else]]
+		if (isRE2 or isRE3) and (toks % 240 == 0) then
+			for xform, obj in pairs(spawned_prefabs) do 
+				if obj.is_loitering and random(3) then 
+					if obj.emparam then  pcall(sdk.call_object_func, obj.emparam, "set_LoiteringEnable", true) end
+					if obj.loitering then  pcall(sdk.call_object_func, obj.loitering, "requestLoitering") end 
 				end
 			end
 		end

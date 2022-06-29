@@ -123,8 +123,8 @@ local spawned_lights = {}
 local collected_objects = {}
 local shown_transforms = {}
 local active_objects = {}
-local width = 1920
-local height = 1080
+local width = EMV.statics.width
+local height = EMV.statics.height
 
 
 --table.insert(GGSettings.ray_layers_tables.re3, )
@@ -135,17 +135,8 @@ GGSettings.ray_layers_tables = {
 	["re7"] =		{0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["mhrise"] =	{0, 1, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 17, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["re8"] =		{1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
-	["dmc5"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32}
+	["dmc5"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32}
 }
-
-if scene_manager ~= nil then
-	local main_view = sdk.call_native_func(scene_manager, sdk.find_type_definition("via.SceneManager"), "get_MainView")
-	if main_view ~= nil then 
-		local size = sdk.call_native_func(main_view, sdk.find_type_definition("via.SceneView"), "get_Size")
-		width = size:get_field("w")
-		height = size:get_field("h")
-	end
-end
 
 ----------------------------------------------------------------------------------------------------------[[REMgdObj Functions]]
 
@@ -523,7 +514,9 @@ GameObject.new_GrabObject = function(self, args, o)
 	if isRE7 and (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
 		self.invalid = true
 	end
-	
+	if isDMC5 and self.ray_layer == 18 then 
+		self.invalid = true
+	end
 	if self.invalid == nil and (string.find(self.name, "errain")  or self.name == "StayRequester" or string.match(self.name, "^st[0-9].") or string.match(self.name, "^x[0-9].z[0-9].") or string.match(self.name, "^m[0-9].*Zone")) then
 	--or (isRE7 and not self.gameobj:call("getComponent(System.Type)", sdk.typeof("via.motion.Motion"))) then 
 		self.invalid = true
@@ -1626,9 +1619,11 @@ re.on_draw_ui(function()
 		
 		if imgui.tree_node("Ray Layers") then
 			local layer_name, changed = "Auto (" .. tostring(current_layer) .. ")"
-			if GGSettings.wanted_layer ~= -1 and _G[sdk.game_namespace(""):sub(1, -2)] and _G[sdk.game_namespace(""):sub(1, -2)].Collision.CollisionSystem.ray_layer[GGSettings.wanted_layer] then 
-				layer_name = _G[sdk.game_namespace(""):sub(1, -2)].Collision.CollisionSystem.ray_layer[GGSettings.wanted_layer] 
-			end
+			pcall(function()
+				if GGSettings.wanted_layer ~= -1 and _G[sdk.game_namespace(""):sub(1, -2)] and _G[sdk.game_namespace(""):sub(1, -2)].Collision.CollisionSystem.ray_layer[GGSettings.wanted_layer] then 
+					layer_name = _G[sdk.game_namespace(""):sub(1, -2)].Collision.CollisionSystem.ray_layer[GGSettings.wanted_layer] 
+				end
+			end)
 			changed, GGSettings.wanted_layer = imgui.drag_int("Wanted layer: " .. layer_name, GGSettings.wanted_layer, 1, -1, 2048); --setting_was_changed = setting_was_changed or changed
 			changed, GGSettings.wanted_mask_bits = imgui.drag_int("Wanted mask bits", GGSettings.wanted_mask_bits, 1, 0, 100000000); --setting_was_changed = setting_was_changed or changed
 			imgui.text("Auto Mode Layers:")

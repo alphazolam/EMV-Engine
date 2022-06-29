@@ -218,7 +218,7 @@ function clear_figures()
 					light.gameobj:add_ref()
 					light.xform:call("set_Parent", light.parent_org or 0)
 				elseif light.parent == camera.xform then 
-					deferred_calls[light.gameobj] = { func="destroy", value={light.gameobj} } --leftovers from "Unlock All Lights"
+					deferred_calls[light.gameobj] = { func="destroy", args={light.gameobj} } --leftovers from "Unlock All Lights"
 				end
 			end
 		end
@@ -369,16 +369,16 @@ local function imgui_anim_object_figure_viewer(anim_object, obj_name, index)
 						if anim_object.greenscreen_on then 
 							anim_object.materials[1].variables[1] = Vector4f.new(0,1,0,1)
 							deferred_calls[anim_object.materials[1].mesh] = { 
-								{func="setMaterialTexture", value={0, 0, RSCache.tex_resources["systems/rendering/NullWhite.tex"] or create_resource("systems/rendering/NullWhite.tex", "via.render.TextureResource") } },
-								{func="setMaterialTexture", value={0, 1, RSCache.tex_resources["systems/rendering/NullNormalRoughness.tex"] or create_resource("systems/rendering/NullNormalRoughness.tex", "via.render.TextureResource") } },
-								{func="setMaterialTexture", value={0, 2, RSCache.tex_resources["systems/rendering/NullATOS.tex"] or create_resource("systems/rendering/NullATOS.tex", "via.render.TextureResource") } },
+								{func="setMaterialTexture", args={0, 0, RSCache.tex_resources["systems/rendering/NullWhite.tex"] or create_resource("systems/rendering/NullWhite.tex", "via.render.TextureResource") } },
+								{func="setMaterialTexture", args={0, 1, RSCache.tex_resources["systems/rendering/NullNormalRoughness.tex"] or create_resource("systems/rendering/NullNormalRoughness.tex", "via.render.TextureResource") } },
+								{func="setMaterialTexture", args={0, 2, RSCache.tex_resources["systems/rendering/NullATOS.tex"] or create_resource("systems/rendering/NullATOS.tex", "via.render.TextureResource") } },
 							}
 						else
 							anim_object.materials[1].variables[1] = Vector4f.new(anim_object.materials[1].orig_vars[1].x, anim_object.materials[1].orig_vars[1].y, anim_object.materials[1].orig_vars[1].z, anim_object.materials[1].orig_vars[1].w)
 							deferred_calls[anim_object.materials[1].mesh] = { 
-								{func="setMaterialTexture", value={0, 0, anim_object.original_textures[1] } },
-								{func="setMaterialTexture", value={0, 1, anim_object.original_textures[2] } },
-								{func="setMaterialTexture", value={0, 2, anim_object.original_textures[3] } },
+								{func="setMaterialTexture", args={0, 0, anim_object.original_textures[1] } },
+								{func="setMaterialTexture", args={0, 1, anim_object.original_textures[2] } },
+								{func="setMaterialTexture", args={0, 2, anim_object.original_textures[3] } },
 							}
 						end
 						anim_object.materials[1].textures = {}
@@ -1012,10 +1012,14 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 					self:center_object()
 				end
 				
-				if self.show_joints and self.joints and self.force_center then
-					self.joint_positions = self.joint_positions or {}
+				if self.joints and (self.show_joints or (self.poser and self.poser.is_open)) then
+					self.joint_positions = {}
 					for i, joint in pairs(self.joints) do 
-						self.joint_positions[joint] = sdk.is_managed_object(joint) and joint:call("get_Position")
+						if sdk.is_managed_object(joint) then 
+							self.joint_positions[joint] = { joint:call("get_LocalMatrix"), joint:call("get_WorldMatrix") }
+						else
+							self.joint_positions, self.show_joints, self.poser = nil
+						end
 					end
 				end
 				
@@ -1853,7 +1857,7 @@ re.on_application_entry("UpdateHID", function()
 	--if forced_mode and selected == player then
 	--	inputsystem:set_field("<IgnoreMouseMove>k__BackingField", true)
 	--end
-	
+	--F:/modmanager/REtool/DMC_chunk_000/natives/x64/prefab/character/enemy/em6030_vergil.pfb.16
 	if EMVSettings.hotkeys and (figure_mode or forced_mode or cutscene_mode) then 
 		local control_action_args
 		
@@ -2669,7 +2673,7 @@ local function show_emv_settings()
 			changed, EMVSettings.hotkeys = imgui.checkbox("Enable Hotkeys", EMVSettings.hotkeys); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			if (figure_mode or forced_mode or cutscene_mode) and EMVSettings.hotkeys then
 				imgui.text((cutscene_mode and "	[F] - Enable/Disable Free Cam\n" or "")  
-				.. "	[T] - Pause/Unpause\n	[2] - Step Left ('Shift' faster)\n	[4] - Step Right ('Shift' faster)\n	[5] - Set A-B Loop\n	[U] - Shuffle\n	[6] - Seek All On/Off" 
+				.. "	[T] - Pause/Unpause\n	[2] - Step Left ('Shift' faster, 'Alt' slower)\n	[4] - Step Right ('Shift' faster, 'Alt' slower)\n	[5] - Set A-B Loop\n	[U] - Shuffle\n	[6] - Seek All On/Off" 
 				.. (figure_mode and "\n	[H] - Toggle Centering" or "")
 				.. (cutscene_mode and "\n	[-] - Zoom In\n	[+] - Zoom Out" or "")
 				.. ((not figure_mode and grab) and "\n	[G] - Grab/Ungrab" or ""))
@@ -3518,7 +3522,7 @@ re.on_frame(function()
 									light_obj.xform:call("lookAt(via.vec3, via.vec3)", pos, Vector3f.new(0,1,0))
 								else
 									deferred_calls[light_obj.xform] = deferred_calls[light_obj.xform] or {}
-									table.insert(deferred_calls[light_obj.xform], { func="lookAt(via.vec3, via.vec3)", value={pos, Vector3f.new(0,1,0)} } )
+									table.insert(deferred_calls[light_obj.xform], { func="lookAt(via.vec3, via.vec3)", args={pos, Vector3f.new(0,1,0)} } )
 								end
 							end	
 							
@@ -3533,6 +3537,7 @@ re.on_frame(function()
 						local others = {}
 						for i, non_light in ipairs(non_lights) do others[non_light.name_w_parent] = non_light end
 						for i, non_light in orderedPairs(non_lights) do 
+							non_light.name_w_parent = non_light.name_w_parent or non_light.name
 							local indent = {""}
 							for part in non_light.name_w_parent:gmatch("[^ %-> ]+") do
 								table.insert(indent, "	")

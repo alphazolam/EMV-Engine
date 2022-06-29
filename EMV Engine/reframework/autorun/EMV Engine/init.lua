@@ -71,7 +71,9 @@ local tds = {
 }
 
 local static_objs = {
+	cam = sdk.get_primary_camera(),
 	playermanager = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager")) or sdk.get_managed_singleton("snow.player.PlayerManager"),
+	main_view = sdk.call_native_func(scene_manager, sdk.find_type_definition("via.SceneManager"), "get_MainView"),
 	via_hid_mouse = sdk.get_native_singleton("via.hid.Mouse"),
 	via_hid_keyboard = sdk.get_native_singleton("via.hid.Keyboard"),
 	setn = ValueType.new(sdk.find_type_definition("via.behaviortree.SetNodeInfo")),
@@ -80,13 +82,25 @@ static_objs.setn:call(".ctor")
 static_objs.setn:call("set_Fullname", true)
 
 local static_funcs = {
-	distance_method = sdk.find_type_definition((isRE2 and "app.MathEx") or sdk.game_namespace("MathEx")):get_method("distance(via.GameObject, via.GameObject)"),
+	distance_gameobjs = sdk.find_type_definition((isRE2 and "app.MathEx") or sdk.game_namespace("MathEx")):get_method("distance(via.GameObject, via.GameObject)"),
+	distance_vectors = sdk.find_type_definition((isRE2 and "app.MathEx") or sdk.game_namespace("MathEx")):get_method("distance(via.vec3, via.vec3)"),
 	get_chain_method = sdk.find_type_definition("via.Component"):get_method("get_Chain"),
 	guid_method = sdk.find_type_definition("via.gui.message"):get_method("get"),
 	mk_gameobj = sdk.find_type_definition("via.GameObject"):get_method("create(System.String)"),
 	mk_gameobj_w_fld = sdk.find_type_definition("via.GameObject"):get_method("create(System.String, via.Folder)"),
 	string_hashing_method = sdk.find_type_definition("via.murmur_hash"):get_method("calc32"),
 }
+
+local statics = {
+	width=1920,
+	height=1080,
+}
+
+if static_objs.main_view ~= nil then 
+	local size = sdk.call_native_func(static_objs.main_view, sdk.find_type_definition("via.SceneView"), "get_Size")
+	statics.width = size:get_field("w")
+	statics.height = size:get_field("h")
+end
 
 local cog_names = { 
 	["re2"] = "COG", 
@@ -507,10 +521,6 @@ local function findc(typedef_name)
 	return find(typedef_name, true)
 end
 
---Add BehaviorTrees to REMgdObj:
---REMgdObj_objects.BHVT = findc("via.motion.MotionFsm2")[1]
---REMgdObj_objects.BHVT = REMgdObj_objects.BHVT and REMgdObj_objects.BHVT:call("getLayer", 0)
-
 --Wrapper for converting an address to an object
 local function to_obj(object, is_known_obj)
 	if is_known_obj or sdk.is_managed_object(object) then 
@@ -538,10 +548,10 @@ end
 local function sort_components(tbl)
 	tbl = ((not tbl or (type(tbl) == "string")) and search(tbl)) or tbl
 	local ordered_indexes, output = {}, {}
-	local cam_gameobj = sdk.get_primary_camera():call("get_GameObject")
+	local cam_gameobj = static_objs.cam:call("get_GameObject")
 	for i=1, #tbl do ordered_indexes[i]=i end
 	table.sort (ordered_indexes, function(idx1, idx2)
-		return static_funcs.distance_method:call(nil, tbl[idx1]:call("get_GameObject"), cam_gameobj) < static_funcs.distance_method:call(nil, tbl[idx2]:call("get_GameObject"), cam_gameobj)
+		return static_funcs.distance_gameobjs:call(nil, tbl[idx1]:call("get_GameObject"), cam_gameobj) < static_funcs.distance_gameobjs:call(nil, tbl[idx2]:call("get_GameObject"), cam_gameobj)
 	end)
 	for i=1, #ordered_indexes do output[#output+1] = tbl[ ordered_indexes[i] ] end
 	return output
@@ -550,7 +560,7 @@ end
 --Sort a list transforms by distance to a position:
 local function sort(tbl, position, optional_max_dist, only_important)
 	
-	position = position or sdk.get_primary_camera():call("get_WorldMatrix")[3]
+	position = position or static_objs.cam:call("get_WorldMatrix")[3]
 	if not tbl or type(tbl) == "string" then 
 		tbl = search(tbl)
 	end
@@ -819,7 +829,7 @@ local ImguiTable = {
 			--local camera = 
 			--local player_obj = camera.gameobj
 			--[[table.sort (self.ordered_idxes, function(idx1, idx2)
-				return static_funcs.distance_method:call(nil, self.tbl[idx1]:call("get_GameObject"), player_obj) < static_funcs.distance_method:call(nil, self.tbl[idx2]:call("get_GameObject"), player_obj)
+				return static_funcs.distance_gameobjs:call(nil, self.tbl[idx1]:call("get_GameObject"), player_obj) < static_funcs.distance_gameobjs:call(nil, self.tbl[idx2]:call("get_GameObject"), player_obj)
 			end)]]
 			local max_idx = self.sort_closest_optional_limit or 10
 			if max_idx > #self.ordered_idxes then 
@@ -2393,7 +2403,7 @@ end
 --Make a transform or joint look at a position:
 local function look_at(self, xform_or_joint, matrix)
 	xform_or_joint = (self.joints and self.joints[self.lookat_joint_index]) or xform_or_joint
-	matrix = matrix or (sdk.get_primary_camera():call("get_WorldMatrix"))
+	matrix = matrix or (static_objs.cam:call("get_WorldMatrix"))
 	if xform_or_joint and matrix then 
 		xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, 0, -matrix[3].z), Vector3f.new(0, 1, 0)) 
 		--xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, -matrix[3].y, -matrix[3].z), Vector3f.new(0, 1, 0)) 
@@ -2707,12 +2717,17 @@ deferred_call = function(managed_object, args, index, on_frame)
 				freeze = args.vardata.freezetable[args.args[1] + 1]
 			end
 			
-			
 			if freeze and old_deferred_calls[name] and freeze ~= 1 then 
-				args = old_deferred_calls[name] --keep re-using the same deferred_call from old_deferred_calls if frozen
+				args = (index and old_deferred_calls[name][index]) or old_deferred_calls[name] --keep re-using the same deferred_call from old_deferred_calls if frozen
 			end
 			
-			old_deferred_calls[name] = args
+			if index then 
+				old_deferred_calls[name] = old_deferred_calls[name] or {}
+				old_deferred_calls[name][index] = args
+			else
+				old_deferred_calls[name] = args
+			end
+			
 			if not freeze and not index then 
 				deferred_calls[managed_object] = nil
 			elseif managed_object._ then 
@@ -2856,6 +2871,7 @@ end
 
 --Format a matrix4 as text
 local function mat4_to_string(mat, padding) 
+	padding = padding or ""
 	if mat then 
 		local transform_string = 	   "\n" .. padding ..  "[" .. mat[0].x .. ", " .. mat[0].y .. ", " .. mat[0].z .. ", " .. mat[0].w .. "]\n"
 		transform_string = transform_string .. padding ..  "[" .. mat[1].x .. ", " .. mat[1].y .. ", " .. mat[1].z .. ", " .. mat[0].w .. "]\n"
@@ -3971,24 +3987,6 @@ end
 
 --Function to make an REMgdObj object
 create_REMgdObj = function(managed_object, keep_alive, do_minimal)
-	if REMgdObj_objects then
-		for name, object in pairs(REMgdObj_objects) do
-			if not pcall(function()
-				add_to_REMgdObj(object)
-				if object.__type then
-					REMgdObj.__types[object.__type.name] = true
-				end
-			end) then
-				log.info(tostring(object) .. " add_to_REMgdObj type error")
-			end
-		end
-		REMgdObj_objects = nil
-		if not mathex then 
-			_G.mathex = sdk.create_instance(sdk.game_namespace("MathEx")) or sdk.create_instance("app.MathEx")
-			mathex = mathex and mathex:add_ref()
-			if mathex then create_REMgdObj(mathex, true) end
-		end
-	end
 	--if type(managed_object.call)=="function" then
 		if not REMgdObj.__types[managed_object.__type.name] then
 			REMgdObj.__types[managed_object.__type.name] = true
@@ -4001,6 +3999,32 @@ create_REMgdObj = function(managed_object, keep_alive, do_minimal)
 			return managed_object._
 		end
 	--end
+end
+
+--Add BehaviorTrees to REMgdObj:
+pcall(function()
+	REMgdObj_objects.BHVT = findc("via.motion.MotionFsm2")[1]
+	REMgdObj_objects.BHVT = REMgdObj_objects.BHVT and REMgdObj_objects.BHVT:call("getLayer", 0)
+end)
+
+--Create initial REMgdObj:
+if REMgdObj_objects then
+	for name, object in pairs(REMgdObj_objects) do
+		if not pcall(function()
+			add_to_REMgdObj(object)
+			if object.__type then
+				REMgdObj.__types[object.__type.name] = true
+			end
+		end) then
+			log.info(tostring(object) .. " add_to_REMgdObj type error")
+		end
+	end
+	REMgdObj_objects = nil
+	mathex = (sdk.create_instance(sdk.game_namespace("MathEx"), true) or sdk.create_instance("app.MathEx", true)):add_ref()
+	mathex = mathex and mathex:add_ref()
+	if mathex then 
+		create_REMgdObj(mathex, true) 
+	end
 end
 
 --Functions to display managed objects in imgui --------------------------------------------------------------------------------------------------------------------------------------------------
@@ -4102,6 +4126,7 @@ local function show_imgui_resource(value, name, key_name, data_holder)
 				imgui.same_line()
 			elseif data_holder.cached_text ~= "" and data_holder.cached_text ~= data_holder.path and data_holder.cached_text:find("%." .. data_holder.ext) then
 				if imgui.button("OK") then
+					data_holder.cached_text = (data_holder.cached_text:match("natives\\%w%w%w\\(.+%." .. ext ..")") or data_holder.cached_text):gsub("\\", "/")
 					local new_resource = create_resource(data_holder.cached_text, value:get_type_definition())
 					if new_resource then
 						data_holder.index, data_holder.path = add_resource_to_cache(new_resource)
@@ -4239,9 +4264,9 @@ local function show_imgui_vec4(value, name, is_int)
 				changed, value = imgui.color_edit4(name, value, 17301504)
 			else
 				changed, value = imgui.drag_float4(name, value, 0.1, -10000.0, 10000.0)
-				if changed and (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
-					value:normalize() 
-				end
+				--if changed and (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
+					--value:normalize() 
+				--end
 			end
 		elseif value.z then
 			if is_int then
@@ -5188,9 +5213,10 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 								local output_str = "\n"
 								for i, joint in ipairs(anim_object.joints) do 
 									output_str = output_str .. joint:call("get_Name") .. " = " .. joint:call("get_NameHash") .. ",\n"
-									local joint_pos = anim_object.joint_positions[joint]
+									tst = {anim_object.joint_positions, joint, anim_object.joint_positions[joint]}
+									local joint_pos = anim_object.joint_positions[joint][2][3]
 									local parent = joint:call("get_Parent")
-									local parent_pos = parent and anim_object.joint_positions[parent]
+									local parent_pos = parent and anim_object.joint_positions[parent][2][3]
 									local this_vec2 = draw.world_to_screen(joint_pos)
 									if anim_object.show_joint_names or (parent and (parent_pos-joint_pos):length() > 1) then 
 										draw.world_text(joint:call("get_Name"), joint_pos, 0xFFFFFFFF) 
@@ -5283,35 +5309,54 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					end
 					
 					if (not anim_object.same_joints_constraint or not anim_object.parent) and anim_object.joints and imgui.tree_node("Poser") then
+						
 						local poser = anim_object.poser or {
 							name=anim_object.key_name:gsub("/", "."),
 							slots={},
 							current_slot_idx=1, 
-							current_object_idx=1
+							current_object_idx=1,
+							current_prop_name_idx=1,
+							prop_names={"_LocalEulerAngle", "_EulerAngle",},
+							undo={},
+							use_gizmos=true,
 						}
+						
 						if not poser.names then
 							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.name .. ".json") or {}
 							for i = 1, 8 do 
 								poser.slots[i] = tostring(i) .. (current_file["num:" .. i] and "*" or "")
 							end
 							poser.paths=fs.glob([[EMV_Engine\\Poses\\.*.json]])
-							poser.current_slot_idx = table.binsert(poser.paths, "EMV_Engine\\Poses\\" .. poser.name)
 							poser.names = {}
 							for i, filepath in ipairs(poser.paths) do 
 								table.insert(poser.names, filepath:match("^.+\\(.+)%."))
 							end
+							poser.current_object_idx = find_index(poser.names, poser.name) or table.binsert(poser.names, poser.name)
 						end
+						
+						poser.is_open = uptime
 						anim_object.poser = poser
+						poser.is_local = (poser.current_prop_name_idx==1) or nil
+						
+						if imgui.tree_node("[Lua]") then
+							read_imgui_element(poser)
+							imgui.tree_pop()
+						end
 						
 						changed, poser.current_object_idx = imgui.combo("Object", poser.current_object_idx, poser.names)
 						
 						changed, poser.current_slot_idx = imgui.combo("Slot", poser.current_slot_idx, poser.slots)
 						
+						changed, poser.current_prop_name_idx = imgui.combo("Rotation Type", poser.current_prop_name_idx, poser.prop_names)
+						poser.prop_name = poser.prop_names[poser.current_prop_name_idx]
+						
+						changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
+						
 						if imgui.button("Save Pose") then 
 							local poses = {}
 							for i, joint in ipairs(anim_object.joints or {}) do
-								if joint._LocalEulerAngle.freeze then 
-									poses[joint._.Name] = obj_to_json(joint, true, {_LocalEulerAngle=jsonify_table({joint:call("get_LocalEulerAngle")})[1]})
+								if joint[poser.prop_name].freeze then 
+									poses[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
 								end
 							end
 							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.name .. ".json") or {}
@@ -5329,37 +5374,117 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 								for i, joint in pairs(anim_object.joints) do 
 									local saved_joint = poses[joint._.Name]
 									if saved_joint then 
-										old_deferred_calls[logv(joint) .. " _LocalEulerAngle"] = nil
+										old_deferred_calls[logv(joint) .. " " .. poser.prop_name]  = nil
 										jsonify_table(saved_joint, true, {set_props=true, obj_to_load_to=joint})
 										joint._ = joint._ or create_REMgdObj(joint)
-										joint._LocalEulerAngle.freeze = 1
-										deferred_calls[joint].vardata = joint._LocalEulerAngle
+										joint[poser.prop_name].freeze = 1
+										deferred_calls[joint].vardata = joint[poser.prop_name]
 									end
 								end
 							end
+							anim_object.poser.names = nil
 						end
+						
 						imgui.same_line()
 						if imgui.same_line and imgui.button("Unfreeze All Joints") then 
 							for i, joint in ipairs(anim_object.joints or {}) do 
-								joint._LocalEulerAngle.freeze = nil
-								old_deferred_calls[logv(joint) .. " _LocalEulerAngle"] = nil
+								joint[poser.prop_name].freeze = nil
+								old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
 							end
 						end
+						
+						local text_pos = {statics.width/4*3, statics.height/4*3}
+						local closest_to_mouse = {}
+						
 						for i, joint in ipairs(anim_object.joints or {}) do 
 							j_o_tbl = joint._ or create_REMgdObj(joint)
 							j_o_tbl.last_opened = uptime
-							joint._LocalEulerAngle.display_name = j_o_tbl.Name
+							joint[poser.prop_name].display_name = j_o_tbl.Name
 							imgui.push_id(joint)
-								if show_prop(joint, joint._LocalEulerAngle, key_name .. "p" .. i) and (joint._LocalEulerAngle.freeze == false) then 
-									joint._LocalEulerAngle.freeze = 1
+								
+								changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
+								if changed then 
+									poser.undo.last = joint
+									--j_o_tbl.selected = true
 								end
+								
+								imgui.same_line()
+								local prop_changed
+								if show_prop(joint, joint[poser.prop_name], key_name .. "p" .. i) and (joint[poser.prop_name].freeze == false) then 
+									poser.undo.last = joint
+									joint[poser.prop_name].freeze = 1
+									--prop_changed = true
+								end
+								
+								if anim_object.joint_positions then 
+									local mat_screen, mat_screen_top
+									local mat = (poser.is_local and anim_object.joint_positions[joint][1]) or anim_object.joint_positions[joint][2]
+									local pos = anim_object.joint_positions[joint][2][3] --world pos
+									mat[3] = pos
+									if joint[poser.prop_name].freeze ~= nil or j_o_tbl.selected then
+										local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
+										mat_screen = draw.world_to_screen(pos)
+										mat_screen_top = draw.world_to_screen(pos + Vector3f.new(0, 0.08 * cam_dist, 0))
+									end
+									if mat_screen and mat_screen_top then --if frozen or selected
+										local delta = (mat_screen - mat_screen_top):length()
+										local mouse_delta = (mat_screen - imgui.get_mouse()):length()
+										if j_o_tbl.selected then
+											poser.selected = {joint, mat_screen, mat, mouse_delta}
+										end
+										if (mouse_delta <= delta) or j_o_tbl.selected then
+											if not closest_to_mouse[1] or (mouse_delta < closest_to_mouse[4]) then
+												closest_to_mouse = {joint, mat_screen, mat, mouse_delta}
+											end
+										--elseif poser.undo[joint] and not prop_changed then
+										--	poser.undo[joint].start = uptime
+										end
+									end
+								end
+								
 							imgui.pop_id()
-							joint._LocalEulerAngle.display_name = nil
+							joint[poser.prop_name].display_name = nil
 						end
+						
+						if not closest_to_mouse[1] and poser.selected then 
+							closest_to_mouse = poser.selected
+						end
+						
+						if poser.use_gizmos and (closest_to_mouse[1]) then 
+							local joint = closest_to_mouse[1]
+							local mat = closest_to_mouse[3]
+							changed, mat = draw.gizmo(joint:get_address(), mat, imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
+							if changed then 
+								deferred_calls[joint] = {func="set" .. poser.prop_name, args=mat:to_quat():to_euler(), vardata=joint[poser.prop_name]}
+								joint[poser.prop_name].freeze = 1
+								prop_changed = true
+							end
+							draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
+							draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
+							
+							if prop_changed then
+								poser.undo.last = joint
+								if not poser.undo[joint] or (uptime - poser.undo[joint].start) > 1.2 then --or not mouse_state.down[via.hid.MouseButton.L] then 
+									poser.undo[joint] = {start=uptime, prev_rot=joint[poser.prop_name].cvalue}
+								end
+								poser.undo[joint].start = uptime
+							end
+							--if poser.undo[joint] then 
+							--	poser.undo[joint].start = uptime
+							--end
+						end
+						
+						if poser.undo.last and poser.undo[poser.undo.last] and check_key_released(via.hid.KeyboardKey.Z) then
+							local joint = poser.undo.last
+							joint[poser.prop_name].freeze = 1
+							deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot, vardata=joint[poser.prop_name]}
+						end
+						
 						imgui.tree_pop()
 					end
-					
 				end
+				
+				
 			elseif o_tbl.name == "Mesh" then
 				if o_tbl.go and o_tbl.go.materials and imgui.tree_node_ptr_id(o_tbl.go.mesh:get_address() - 1234, "Materials") then
 					show_imgui_mat(o_tbl.go) 
@@ -5386,7 +5511,6 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 			elseif o_tbl.type:is_a("via.behaviortree.BehaviorTree") then 
 				o_tbl.gameobj = o_tbl.gameobj or m_obj:call("get_GameObject")
 				o_tbl.go = o_tbl.go or (o_tbl.gameobj and held_transforms[o_tbl.xform or o_tbl.gameobj:call("get_Transform")] or GameObject:new{gameobj=o_tbl.gameobj})
-				--if o_tbl.go.behaviortrees and o_tbl.go.behaviortrees.total_actions and (o_tbl.go.behaviortrees.total_actions > 0) and imgui.tree_node_str_id(o_tbl.go.name .. "Trees", "Action Monitor") then 
 				if o_tbl.go.behaviortrees and imgui.tree_node_str_id(o_tbl.go.name .. "Trees", "Action Monitor") then 
 					for i, bhvt_obj in ipairs(o_tbl.go.behaviortrees) do
 						bhvt_obj:imgui_behaviortree()
@@ -5396,7 +5520,9 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 			elseif o_tbl.name == "UserVariablesHub" then
 				show_imgui_uservariables(m_obj)
 			end
-			
+
+
+
 			if ((o_tbl.components or o_tbl.is_component) or next(o_tbl.propdata.simple_methods)) and imgui.tree_node_str_id(key_name .. "Methods", "Simple Methods") then 
 				if o_tbl.is_component and imgui.button("destroy " .. o_tbl.name) then 
 					delete_component(o_tbl.gameobj, m_obj) --via.Components
@@ -5839,13 +5965,13 @@ show_imgui_mat = function(anim_object)
 					mat.tex_idxes = mat.tex_idxes or {}
 					for t, texture in ipairs(mat.textures) do 
 						local tex_name = texture:call("ToString()"):match("^.+%[@?(.+)%]")
-						--local mat_name = mat.mesh:call("getMaterialTextureName", i-1, t-1) or t
-						local mat_name = ({pcall(mat.mesh.call, mat.mesh, "getMaterialTextureName", i-1, t-1)})
-						mat_name = mat_name[1] and mat_name[2] or t
+						local mat_name = mat.mesh:call("getMaterialTextureName", i-1, t-1) or t
+						--local mat_name = ({pcall(mat.mesh.call, mat.mesh, "getMaterialTextureName", i-1, t-1)})
+						--mat_name = mat_name[1] and mat_name[2] or t
 						mat.tex_idxes[t] = add_resource_to_cache(texture)
-						changed, mat.tex_idxes[t] = imgui.combo((mat_name or t), find_index(RN.tex_resource_names, tex_name) or 1, RN.tex_resource_names) --mat.tex_idxes[t] or find_index(RN.tex_resource_names, tex_name) or 1
+						changed, mat.tex_idxes[t] = imgui.combo((mat_name or t), mat.tex_idxes[t], RN.tex_resource_names) --mat.tex_idxes[t] or find_index(RN.tex_resource_names, tex_name) or 1
 						if changed then 
-							local mat_var_idx = mat.mesh:call("getMaterialVariableIndex", i-1, hashing_method and hashing_method(mat_name) or t-1) 
+							local mat_var_idx = mat.mesh:call("getMaterialVariableIndex", i-1, hashing_method(mat_name)) 
 							deferred_calls[mat.mesh] = { func="setMaterialTexture", args={i-1, (mat_var_idx ~= 255) and mat_var_idx or t-1, RSCache.tex_resources[ RN.tex_resource_names[ mat.tex_idxes[t] ] ] } }
 							mat.textures[t] = RSCache.tex_resources[ RN.tex_resource_names[ mat.tex_idxes[t] ] ]
 						end
@@ -6069,7 +6195,7 @@ local BHVTCoreHandle = {
 	new = function(self, args, o)
 		o = o or {}
 		o.obj = args.obj or o.obj
-		o.tree = args.tree or (o.obj and o.obj:get_tree_object()) or o.tree
+		o.tree = args.tree or (o.obj and o.obj.get_tree_object and o.obj:get_tree_object()) or o.tree
 		o.index = args.index or o.index
 		if not o.tree or not o.obj then return end
 		o.name = get_mgd_obj_name(o.obj)
@@ -6114,7 +6240,7 @@ local BHVT = {
 		o.tree_count = o.obj:call("getTreeCount")
 		
 		if o.tree_count > 0 then
-			local core_handles = lua_get_system_array(o.obj:call("get_Layer()")) or o.obj:get_trees()
+			local core_handles = lua_get_system_array(o.obj:call("get_Layer()")) or (o.obj.get_trees and o.obj:get_trees())
 			if core_handles then 
 				o.variables = o.variables or {}
 				o.core_handles = o.core_handles or {}
@@ -6698,10 +6824,14 @@ GameObject = {
 				end
 			end
 			
-			if self.show_joints and self.joints and not self.force_center then
-				self.joint_positions = self.joint_positions or {}
+			if not GameObject.center_object and (self.joints and (self.show_joints or (self.poser and self.poser.is_open))) then
+				self.joint_positions = {}
 				for i, joint in pairs(self.joints) do 
-					self.joint_positions[joint] = sdk.is_managed_object(joint) and joint:call("get_Position")
+					if sdk.is_managed_object(joint) then 
+						self.joint_positions[joint] = { joint:call("get_LocalMatrix"), joint:call("get_WorldMatrix") }
+					else
+						self.joint_positions, self.show_joints, self.poser = nil
+					end
 				end
 			end
 			
@@ -6815,7 +6945,7 @@ re.on_script_reset(function()
 end)
 
 --On UpdateMotion -------------------------------------------------------------------------------------------------------------------------------------------
-re.on_pre_application_entry("LockScene", function() 
+re.on_application_entry("UpdateMotion", function() 
 	
 	if not EMVSettings then --Enhanced Model Viewer will update it
 		for xorm, obj in pairs(held_transforms) do 
@@ -6826,6 +6956,7 @@ re.on_pre_application_entry("LockScene", function()
 	for managed_object, args in pairs(deferred_calls) do 
 		deferred_call(managed_object, args)
 	end
+	
 	--deferred_calls = {}
 	for instance, data in pairs(metadata) do
 		local o_tbl = instance._
@@ -6892,12 +7023,13 @@ re.on_frame(function()
 		imgui.text("B")
 	end]]
 	
+	static_objs.cam = sdk.get_primary_camera()
+	
 	tics = tics + 1
 	uptime = os.clock()
 	history_input_this_frame = nil
 	
 	if tics == 1 then
-		
 		init_settings()
 		init_resources()
 	end
@@ -7142,6 +7274,7 @@ local EMV = {
 	default_SettingsCache = default_SettingsCache,
 	static_objs = static_objs,
 	static_funcs = static_funcs,
+	statics = statics,
 	cog_names = cog_names,
 	bool_to_number = bool_to_number,
 	number_to_bool = number_to_bool,
