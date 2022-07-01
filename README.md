@@ -11,8 +11,14 @@ Alternatively, they can be installed or run manually by placing them in your gam
 
 ## EMV Engine
 EMV Engine is a lua script containing many useful utility functions and features that all my other scripts rely on.
-It contains a powerful Managed Object Control Panel for viewing the various classes that constitute the RE Engine game world.
-### You must install this script first to use any of my other scripts, which require "EMV Engine\init.lua" to be available
+Features
+* Imgui Managed Object Control Panel: Views game objects as control panels of their fields and properties, embedding other tools inside
+* Material Manager: Edit all MDF Material settings and textures live and in-engine
+* Poser: Rotates and freezes joints to pose models for screenshots
+* Action Monitor: Controls FSM actions and behaviors. Includes a WIP Sequencer
+* Chain Controller: Visualizes chains and view "CustomSettings" Chain physics settings
+* Hotkey Manager: Allows you to set an entity action as a hotkey
+### You must install EMV Engine first to use any of my other scripts, which require "EMV Engine\init.lua" to be available
 
 ## Enhanced Model Viewer
 Enhanced Model Viewer is an animation and cutscene viewer that allows you to control animations and sequences in real time. 

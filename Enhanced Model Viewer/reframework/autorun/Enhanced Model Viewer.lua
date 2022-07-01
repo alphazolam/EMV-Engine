@@ -97,7 +97,7 @@ local figure_behavior
 local current_fig_name = nil
 local fig_mgr_name
 local cutscene_cam
-local re2_figure_container_obj = nil
+re2_figure_container_obj = nil
 local total_objects_names = {}
 local sorted_held_transforms = {}
 local cached_text_boxes = {}
@@ -675,15 +675,16 @@ GameObject.new_AnimObject = function(self, args, o)
 	local forced_mode = args.forced_mode or forced_mode
 	
 	--Check for parent container object:
-	if (isRE2 or isRE3) and self.children and (self.components_named.DummySkeleton or (self.mesh and self.components_named.FigureObjectBehavior)) then
+	if self.children and (self.components_named.DummySkeleton or self.components_named.CharacterController or (self.mesh and self.components_named.FigureObjectBehavior)) then --(isRE2 or isRE3) and 
 		
 		local candidate
 		for i, child in ipairs(self.children) do  
-			local other = held_transforms[child] or GameObject:new_AnimObject{xform=child} 
-			held_transforms[child] = other
-			log.info("checking " .. self.name .. " vs " .. other.name)
+			
+			held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{xform=child} 
+			local other = held_transforms[child] 
+			--log.info("checking " .. self.name .. " vs " .. other.name)
 			--if other and ((other.layer and other.body_part == "Body") or (other.display and other.children and ((isRE2 or isRE3) and ((other.name:find("igure")) or (other.mesh and not other.mesh:call("getMesh")))))) then 
-			if other and ((other.body_part == "Body") and (other.layer or (other.mpaths and not self.mpaths))) and other.gameobj then
+			if other and ( (other.layer or (other.mpaths and not self.mpaths))) and other.gameobj then --(other.body_part == "Body")
 				candidate = other 
 				if candidate.body_part == "Body" and candidate.gameobj:call("get_Draw") then 
 					break 
@@ -988,7 +989,7 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 				end
 				
 				
-				if self.mlist_idx then --confirm mlist and mot names in their comboboxes
+				if self.mlist_idx and self.motlist_names then --confirm mlist and mot names in their comboboxes
 					local mbank = self.active_mbanks and (self.active_mbanks[ self.motlist_names[self.mlist_idx] ] or self.active_mbanks[ tostring(self.mlist_idx-1) ])
 					mbank = mbank and self.motion:call("getActiveMotionBank", mbank)
 					if mbank then 
@@ -1021,7 +1022,7 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 					self:center_object()
 				end
 				
-				if self.joints and (self.show_joints or (self.poser and self.poser.is_open)) then
+				--[[if self.joints and (self.show_joints or (self.poser and self.poser.is_open)) then
 					self.joint_positions = {}
 					for i, joint in pairs(self.joints) do 
 						if sdk.is_managed_object(joint) then 
@@ -1030,7 +1031,7 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 							self.joint_positions, self.show_joints, self.poser = nil
 						end
 					end
-				end
+				end]]
 				
 				if self.savedata then --and self.start_time and (uptime - self.start_time) < 0.01 then
 					self.savedata.mbank_idx = self.mbank_idx
@@ -1596,7 +1597,7 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 				setup_mbank_method:call(self.motion)
 			end
 			
-			if forced_mode and player and (self == player) then 
+			if forced_mode and player and (self.xform == player.xform) and self.mfsm2 then 
 				self.mfsm2:call("set_PuppetMode", true)
 			end
 			
@@ -2371,7 +2372,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 	imgui.pop_id()
 	
 	--not_started = false 
-	if not_started then imgui.text("NOT STARTED") end
+	--if not_started then imgui.text("NOT STARTED") end
 	if not was_changed and not is_main and anim_object.layer and anim_object.display then -- and not anim_object.synced --(EMVSettings.seek_all or (selected == anim_object))
 		if anim_object.do_next or anim_object.do_prev or ((anim_object.anim_finished and not anim_object.looping) and (not anim_object.synced or (anim_object == selected))) then
 			anim_object:change_motion(anim_object:next_motion())
@@ -2388,7 +2389,7 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 	local is_main = (idx == 0)
 	if cutscene_mode then return end
 		
-	if game_object and game_object.motion and (not figure_mode or (game_object.layer and game_object.end_frame)) then
+	if game_object and game_object.motion and ((game_object.layer and game_object.end_frame)) then --not figure_mode or 
 		
 		imgui.begin_rect()
 		imgui.push_id(game_object.xform)
@@ -2674,7 +2675,7 @@ local function show_emv_settings()
 				EMVSetting_was_changed = true
 			end
 			
-			if (figure_mode or forced_mode or cutscene_mode) and not imgui.same_line() and imgui.button("Restart EMV") then 
+			if (figure_mode or forced_mode or cutscene_mode or total_objects) and not imgui.same_line() and imgui.button("Restart EMV") then 
 				clear_figures()
 			end 
 			--[[
@@ -2713,7 +2714,7 @@ local function show_emv_settings()
 					recordmanager:set_field("<Naomi>k__BackingField", true)
 				end
 			end
-			if (figure_mode or forced_mode) and (isRE2 or isRE3 or isDMC or isRE8) and imgui.button("Re-Cache Animations") then 
+			if imgui.button("Re-Cache Animations") then  --(figure_mode or forced_mode) and
 				EMVCache.global_cached_banks, global_cached_banks, pre_cached_banks = {}, {}, {}
 				RN.loaded_resources = false
 				if forced_mode then
@@ -2784,7 +2785,7 @@ re.on_frame(function()
 		scene = sdk.call_native_func(static_objs.scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
 	end
 	
-	if not (isRE8 or isRE2 or isRE3 or isDMC) then return end
+	--if not (isRE8 or isRE2 or isRE3 or isDMC or isMHR) then return end
 	
 	if reframework:is_drawing_ui() then
 		

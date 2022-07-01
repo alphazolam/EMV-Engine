@@ -1956,9 +1956,12 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 					else
 						if only_convert_addresses then
 							new_tbl[key] = "obj:" .. value:get_address()
+						elseif not loops[value] then
+							loops[value] = true
+							loops[value] = recurse(obj_to_json(value), nil, level + 1)
+							new_tbl[key] = loops[value] 
 						else
-							new_tbl[key] = loops[value] or recurse(obj_to_json(value), nil, level + 1)
-							loops[value] = new_tbl[key]
+							new_tbl[key] = loops[value] 
 						end
 					end
 				elseif can_index(value) then 
@@ -2125,18 +2128,30 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 							new_tbl[key] = value
 						elseif value.update then --lua classes
 							if convert_lua_objs then
-								new_tbl[key] = obj_to_json(value.xform, true, {__is_lua=true})
+								if not loops[value] then
+									loops[value] = true
+									loops[value] = obj_to_json(value.xform, true, {__is_lua=true})
+									new_tbl[key] = loops[value]
+								else
+									new_tbl[key] = loops[value]
+								end
 							elseif level == 0 then
-								new_tbl[key] = loops[value] or recurse(value, key, level + 1)
+								if not loops[value] then
+									loops[value] = true
+									loops[value] = recurse(value, key, level + 1)
+									new_tbl[key] = loops[value]
+								else
+									new_tbl[key] = loops[value]
+								end
 							end
-							loops[value] = new_tbl[key]
 						elseif (mt == nil or mt.update == nil) and not tostring_val:find("sol%.")  then --regular tables; avoid sol objects and dont follow nested tables
-							if loops[value] then 
+							if not loops[value] then
+								loops[value] = true
+								loops[value], new_tbl[key or "" .. "_json"] = recurse(value, key, level + 1)
 								new_tbl[key] = loops[value]
 							else
-								new_tbl[key], new_tbl[key or "" .. "_json"] = recurse(value, key, level + 1)
+								new_tbl[key] = loops[value]
 							end
-							loops[value] = new_tbl[key]
 						end
 					end
 				elseif val_type ~= "function" then 
@@ -5279,7 +5294,6 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 								local output_str = "\n"
 								for i, joint in ipairs(anim_object.joints) do 
 									output_str = output_str .. joint:call("get_Name") .. " = " .. joint:call("get_NameHash") .. ",\n"
-									tst = {anim_object.joint_positions, joint, anim_object.joint_positions[joint]}
 									local joint_pos = anim_object.joint_positions[joint][2][3]
 									local parent = joint:call("get_Parent")
 									local parent_pos = parent and anim_object.joint_positions[parent][2][3]
@@ -6201,6 +6215,10 @@ local function show_collection()
 	if imgui.button("Clear Collected Objects") then 
 		Collection = {}
 	end
+	imgui.same_line()
+	if imgui.button("Scan for Objects") then 
+		Collection = jsonify_table(json.load_file("EMV_Engine\\Collection.json") or {}, true)
+	end
 	for xform, obj in pairs(Collection) do 
 		if xform:read_qword(0x10) ~= 0 then
 			if imgui.tree_node_ptr_id(xform, obj.name) then 
@@ -6214,6 +6232,7 @@ local function show_collection()
 			end
 		else
 			clear_object(xform)
+			Collection[xform] = {name=obj.name .. " [Deleted]"}
 		end
 	end
 end
@@ -6912,7 +6931,7 @@ GameObject = {
 				end
 			end
 			
-			if not (figure_mode or forced_mode) and (self.joints and (self.show_joints or (self.poser and self.poser.is_open))) then
+			--[[if not (figure_mode or forced_mode) and (self.joints and (self.show_joints or (self.poser and self.poser.is_open))) then
 				self.joint_positions = self.joint_positions or {}
 				for i, joint in pairs(self.joints) do 
 					if sdk.is_managed_object(joint) then 
@@ -6921,7 +6940,7 @@ GameObject = {
 						self.joint_positions, self.show_joints, self.poser = nil
 					end
 				end
-			end
+			end]]
 			
 			if self.display_transform then 
 				shown_transforms[self.xform] = self
@@ -6939,7 +6958,7 @@ GameObject = {
 	
 	update_all_joint_positions = function()
 		for xform, obj in pairs(held_transforms) do 
-			if not (figure_mode or forced_mode) and (obj.joints and (obj.show_joints or (obj.poser and obj.poser.is_open))) and is_valid_obj(xform) then
+			if obj.joints and (obj.show_joints or (obj.poser and obj.poser.is_open)) and is_valid_obj(xform) then
 				obj.joint_positions = obj.joint_positions or {}
 				for i, joint in pairs(obj.joints) do 
 					--if sdk.is_managed_object(joint) then 
@@ -7141,7 +7160,6 @@ re.on_frame(function()
 	end
 	
 	if random(60) then
-		log.info("ord size: " .. get_table_size(G_ordered))
 		for key, tbl in pairs(G_ordered) do
 			if not tbl.open or (uptime > tbl.open + 30) then
 				G_ordered[key] = nil --periodically purge old table metadatas
@@ -7355,7 +7373,7 @@ re.on_draw_ui(function()
 		imgui.tree_pop()
 	end
 	
-	if  next(Collection) and imgui.tree_node("Collection") then 
+	if next(Collection) and imgui.tree_node("Collection") then 
 		changed, SettingsCache.detach_collection = imgui.checkbox("Detach", SettingsCache.detach_collection)
 		imgui.same_line()
 		show_collection()
