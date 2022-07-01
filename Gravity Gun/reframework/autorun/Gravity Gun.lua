@@ -267,13 +267,18 @@ local function write_transform(gameobject, translation, rotation, scale)
 	is_calling_transform_funcs = false
 end
 
+--i'd be more willing to if I weren't so lazy if I played Rise
+
 --Commands and cheats:
 local get_player = function()
 	local player = EMV.get_player()
 	if player then 
-		local xform = player:call("get_Transform")
-		touched_gameobjects[xform] = touched_gameobjects[xform] or GameObject:new_GrabObject { xform=xform }
-		return touched_gameobjects[xform]
+		local gameobj = isMHR and player:call("get_GameObject")
+		local xform = (gameobj and gameobj:call("get_Transform")) or player:call("get_Transform")
+		if xform then 
+			touched_gameobjects[xform] = touched_gameobjects[xform] or GameObject:new_GrabObject { gameobj=gameobj, xform=xform  }
+			return touched_gameobjects[xform]
+		end
 	end
 end
 
@@ -514,7 +519,7 @@ GameObject.new_GrabObject = function(self, args, o)
 	if isRE7 and (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
 		self.invalid = true
 	end
-	if isDMC5 and self.ray_layer == 18 then 
+	if isDMC and self.ray_layer == 18 then 
 		self.invalid = true
 	end
 	if self.invalid == nil and (string.find(self.name, "errain")  or self.name == "StayRequester" or string.match(self.name, "^st[0-9].") or string.match(self.name, "^x[0-9].z[0-9].") or string.match(self.name, "^m[0-9].*Zone")) then
@@ -1705,11 +1710,12 @@ re.on_draw_ui(function()
 			if imgui.button("Save Transforms") then 
 				saved_xforms = {}
 				for xform, object in pairs(touched_gameobjects) do 
-					if object.components_named.Mesh and object.init_worldmat ~= new_mat4 and not object.xform:call("getJointByName", "COG") and not object.xform:call("getJointByName", "Hip") then 
-						local getmesh = object.components_named.Mesh:call("getMesh")
-						if getmesh then 
-							local key = jsonify_table({object.init_worldmat})[1]
-							saved_xforms[key] = { mesh=getmesh:call("ToString()"), matrix=object.xform:call("get_WorldMatrix") }
+					if object.components_named.Mesh and (object.init_worldmat ~= new_mat4) and not object.xform:call("getJointByName", "COG") and not object.xform:call("getJointByName", "Hip") then 
+						--local getmesh = object.components_named.Mesh:call("getMesh")
+						--if getmesh then 
+						if object.key_hash then
+							--local key = jsonify_table({object.init_worldmat})[1]
+							saved_xforms[object.key_hash] = { matrix=object.xform:call("get_WorldMatrix") } --mesh=getmesh:call("ToString()"),
 						end
 					end
 				end
@@ -1720,15 +1726,18 @@ re.on_draw_ui(function()
 			if imgui.button("Load Transforms") then 
 				local meshes = find("via.render.Mesh")
 				saved_xforms = jsonify_table(json.load_file("GravityGunAndConsole\\GGCSavedXforms.json") or {}, true)
-				for init_worldmat, sub_tbl in pairs(saved_xforms) do 
-					local mat_key = jsonify_table({init_worldmat}, true)[1]
-					for i, mesh in ipairs(meshes) do 
-						local this_mesh_xform = (touched_gameobjects[mesh] and touched_gameobjects[mesh].init_worldmat) or mesh:call("get_WorldMatrix")
-						if this_mesh_xform == mat_key then
-							touched_gameobjects[mesh] = touched_gameobjects[mesh] or GameObject:new_GrabObject{xform=mesh}
-							local object = touched_gameobjects[mesh]
-							object.packed_xform =  table.pack(mat4_to_trs(sub_tbl.matrix))
-							write_transform(object, table.unpack(object.packed_xform))
+				for key_hash, sub_tbl in pairs(saved_xforms) do 
+					--local mat_key = jsonify_table({init_worldmat}, true)[1]
+					for i, mesh_xform in ipairs(meshes) do 
+						--local this_mesh_xform = (touched_gameobjects[mesh] and touched_gameobjects[mesh].init_worldmat) or mesh:call("get_WorldMatrix")
+						--if this_mesh_xform == mat_key then
+						local obj = touched_gameobjects[mesh_xform] --and touched_gameobjects[mesh_xform].init_worldmat
+						local obj_key_hash = (obj and obj.key_hash) or hashing_method(EMV.get_gameobj_path(mesh_xform:call("get_GameObject")))
+						if obj_key_hash == key_hash then
+							touched_gameobjects[mesh_xform] = touched_gameobjects[mesh_xform] or GameObject:new_GrabObject{xform=mesh_xform}
+							obj = touched_gameobjects[mesh_xform]
+							obj.packed_xform =  table.pack(mat4_to_trs(sub_tbl.matrix))
+							write_transform(obj, table.unpack(obj.packed_xform))
 							break
 						end
 					end

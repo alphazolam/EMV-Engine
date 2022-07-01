@@ -218,6 +218,7 @@ re.on_application_entry("BeginRendering", function()
 			table.insert(all_motbanks, "menu/mission/animation/pl0000_nero/pl0000_ev01.motbank")
 			table.insert(all_motbanks, "menu/mission/animation/pl0000_nero/pl0000_11_ev01.motbank")
 			table.insert(all_motbanks, "menu/mission/animation/menuenv_tariler.motbank")
+			table.insert(all_motbanks, "menu/mission/animation/pl0400_nico/nico_face_cutscenes.motbank")
 		end
 		
 		for i, bank_string in ipairs(all_motbanks) do 

@@ -26,6 +26,7 @@ EMVSettings.hotkeys = true
 EMVSettings.special_mode = isRE2 and 1
 EMVSettings.frozen_fov = 68.0
 EMVSettings.use_savedata = false
+EMVSettings.alt_sound_seek = not isDMC and true
 
 EMVCache = {}
 EMVCache.global_cached_banks = {}
@@ -243,9 +244,12 @@ end
 local function get_player()
 	local player = EMV.get_player()
 	if player then 
-		local xform = player:call("get_Transform")
-		held_transforms[xform] = held_transforms[xform] or New_AnimObject({ xform=xform })
-		return held_transforms[xform]
+		local gameobj = isMHR and player:call("get_GameObject")
+		local xform = (gameobj and gameobj:call("get_Transform")) or player:call("get_Transform")
+		if xform then 
+			touched_gameobjects[xform] = touched_gameobjects[xform] or GameObject:new_GrabObject { gameobj=gameobj, xform=xform  }
+			return touched_gameobjects[xform]
+		end
 	end
 end
 
@@ -348,7 +352,7 @@ local function imgui_anim_object_figure_viewer(anim_object, obj_name, index)
 	imgui.begin_rect()
 		imgui.push_id(anim_object.gameobj:get_address()+ 3 + (index or 0))
 			changed, anim_object.display = imgui.checkbox("",  anim_object.display)
-			if changed then 
+			if changed and not anim_object.name:find("amera") then 
 				anim_object:toggle_display()
 			end
 			imgui.same_line()
@@ -433,6 +437,7 @@ re.on_application_entry("UpdateMotion", function()
 		total_objects_names = {}
 		local total_object_ctr = 0
 		total_objects = arrayRemove(total_objects, function(total_object)
+			if not total_object then return end
 			if total_object.xform:read_qword(0x10) == 0 then
 				held_transforms[total_object.xform] = nil
 				--[[if forced_mode and total_object.components_named.PlayerLookAt then 
@@ -453,17 +458,17 @@ re.on_application_entry("UpdateMotion", function()
 			log.info("selected is broken")
 		end]]
 		
-		for i, anim_object in pairs(held_transforms) do 
+		--[[for i, anim_object in pairs(held_transforms) do 
 			if not performance_mode or anim_object.layer or random(3) then --performance mode gives each static object a 1/3 chance of being updated each frame
 				anim_object:update_AnimObject()
 			end
-		end
+		end]]
 		
 		for i, anim_object in ipairs(total_objects) do 
 			total_objects[i] = held_transforms[anim_object.xform] or anim_object --updating to match held_transforms
 		end
 		
-		for i, obj in ipairs(imgui_anims) do 
+		for i, obj in ipairs(imgui_anims or {}) do 
 			local checked_object = obj or (EMVSettings.seek_all and selected) or obj 
 			if checked_object and checked_object.mlist_idx and checked_object.loop_b then --looping check
 				local current_frame
@@ -489,7 +494,7 @@ re.on_application_entry("UpdateMotion", function()
 					obj:control_action( { do_seek=true, current_frame=current_frame } )
 				end
 			end
---[[
+		--[[
 		if selected and selected.loop_b then --looping check
 			local current_frame
 			if selected.loop_b then 
@@ -520,7 +525,7 @@ re.on_application_entry("UpdateMotion", function()
 				end
 			end
 		end
-]]
+		]]
 		end
 		
 		if cutscene_cam and EMVSettings.frozen_fov then 
@@ -532,14 +537,14 @@ end)
 local function is_matchable_motlist(motlist_name)
 	if isRE8 then 
 		return not (motlist_name:find("adddamage"))
-	elseif isRE2 or isRE3 or isDMC5 then 
+	elseif isRE2 or isRE3 or isDMC then 
 		return not (motlist_name:find("tree"))
 	end
 	return true --motlist_name ~= ""
 end
 
 local function is_matchable_mot(mot_name)
-	if isRE2 or isRE3 or isDMC5 then 
+	if isRE2 or isRE3 or isDMC then 
 		return not (mot_name:find("_ff"))
 	end
 	return true
@@ -549,11 +554,11 @@ end
 local function get_body_part(str)
 	local body_part_name = str
 	local lower_name = str:lower()
-	if lower_name:find("face") or lower_name:find("head") or lower_name:find("face") or (isRE8 and lower_name:find("20_")) or (isDMC5 and lower_name:find("%d%d%d%d_[01]1")) or (isRE3 and lower_name:find("[ep][ml]%d%d%d1")) then
+	if lower_name:find("face") or lower_name:find("head") or lower_name:find("face") or (isRE8 and lower_name:find("20_")) or (isDMC and lower_name:find("%d%d%d%d_[01]1")) or (isRE3 and lower_name:find("[ep][ml]%d%d%d1")) then
 		body_part_name = "Face"
 	elseif (lower_name:find("hair") and not lower_name:find("chair")) or lower_name:find("entacle") then --no chairs pls
 		body_part_name = "Hair"
-	elseif not lower_name:find("wp_") and (isDMC5 or not lower_name:find("%d%d%d%d_%d%d")) and (lower_name:find("body") or lower_name:find("ch%d%d_") or lower_name:find("em%d%d") or lower_name:find("pl%d%d")) then
+	elseif not lower_name:find("wp_") and (isDMC or not lower_name:find("%d%d%d%d_%d%d")) and (lower_name:find("body") or lower_name:find("ch%d%d_") or lower_name:find("em%d%d") or lower_name:find("pl%d%d")) then
 		body_part_name = "Body"
 	else
 		body_part_name = "Item"
@@ -659,6 +664,7 @@ GameObject.new_AnimObject = function(self, args, o)
 					table.insert(self.bind_gameobjects, held_transforms[ xform[2] ] or GameObject:new_AnimObject{gameobj=gameobj, xform=xform[2]})
 				end
 			end
+			
 			if self.bind_gameobjects[1] and (not ev_object or (#self.bind_gameobjects > #ev_object.bind_gameobjects)) then
 				ev_object = self
 				pre_cached_banks = ev_object and nil 
@@ -670,6 +676,7 @@ GameObject.new_AnimObject = function(self, args, o)
 	
 	--Check for parent container object:
 	if (isRE2 or isRE3) and self.children and (self.components_named.DummySkeleton or (self.mesh and self.components_named.FigureObjectBehavior)) then
+		
 		local candidate
 		for i, child in ipairs(self.children) do  
 			local other = held_transforms[child] or GameObject:new_AnimObject{xform=child} 
@@ -758,6 +765,20 @@ GameObject.new_AnimObject = function(self, args, o)
 			self.alt_names[self.figure_name:lower():gsub("_normal", ""):gsub("figure_", "")] = true
 		end
 		
+		if isDMC then 
+			local char_name_split = split(self.key_name, "/")
+			for i, part in ipairs(char_name_split or {}) do 
+				local sub_tbl = split(part, "_")
+				for j, sub_part in ipairs(sub_tbl or {}) do
+					if j==1 and sub_part:find("[ep][ml]%d%d")==1 then
+						self.char_name = sub_tbl[#sub_tbl]
+						goto exit
+					end
+				end
+			end
+			::exit::
+		end
+		
 		if not isRE8 then
 			if self.em_name and self.em_name:find("[ep][ml]%d%d") then 
 				self.alt_names[self.em_name:sub(1,(self.em_name:find("[ep][ml]%d%d") or 1)+3)] = true 
@@ -784,7 +805,7 @@ GameObject.new_AnimObject = function(self, args, o)
 				end
 			else
 				self.alt_names[self.mesh_name_short] = true
-				if isDMC5 and self.mesh_name_short:find("_11") then
+				if isDMC and self.mesh_name_short:find("_11") then
 					local name = self.mesh_name_short:gsub("_11", "_01")
 					self.alt_names[name] = true
 				end
@@ -851,7 +872,7 @@ GameObject.new_AnimObject = function(self, args, o)
 		self:update_banks()
 	end
 	
-	if isDMC5 and self.name:find("03_Transparent") then --this thing keeps acting weird and glowing
+	if isDMC and self.name:find("03_Transparent") then --this thing keeps acting weird and glowing
 		--deferred_calls[self.gameobj] = { func="destroy", args=self.gameobj }
 		self.display = false
 		self:toggle_display()
@@ -893,20 +914,7 @@ end
 GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 	
 	if self:update(is_known_valid) then		
-		
 		local forced_mode = fake_forced_mode or forced_mode --lets this object be updated as though it were in forced mode
-		
-		--[[if figure_mode and EMVCache.savedata[self.key_hash] and self.display ~= EMVCache.savedata[self.key_hash] then
-			self.display = EMVCache.savedata[self.key_hash].Display
-			log.info("setting display " .. self.name .. " " .. tostring(self.display) .. " " .. tostring(EMVCache.savedata[self.key_hash].Display) )
-			changed = true
-			--self:pre_fix_displays()
-			self:toggle_display()
-			self.gameobj:call("set_DrawSelf", self.display)
-			changed = false
-			--deferred_calls[self.gameobj] = {lua_object=self, method=GameObject.toggle_display}
-		end]]
-		
 		if figure_mode or forced_mode then --or cutscene_mode then 
 			
 			self.selected = (selected == self) or nil
@@ -948,6 +956,7 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 				end
 				self.do_prev, self.do_next, self.do_shuffle, self.do_restart = nil
 				self.running = not self.layer:call("get_TreeEmpty") or nil
+				self.play_speed = self.layer:call("get_Speed")
 				self.frame = self.layer:call("get_Frame")
 				self.end_frame = math.floor(self.layer:call("get_EndFrame"))
 				self.puppetmode = forced_mode and self.mfsm2 and self.mfsm2:call("get_PuppetMode")
@@ -1196,7 +1205,7 @@ GameObject.center_object = function(self)
 				do_reset_pos = do_reset_pos and ((player ~= self) or self.puppetmode)
 				if not self.init_cog_offset or (do_reset_pos and (not (self.loop_a or self.loop_b) or (isRE3 and selected.delayed_seek)))  then
 					local init_cog_offset = self.center - org_cog_pos
-					--[[if not (isDMC5) then
+					--[[if not (isDMC) then
 						local parent = self.xform
 						while parent do 
 							init_cog_offset = (init_cog_offset - parent:call("get_LocalPosition"))
@@ -1342,13 +1351,13 @@ GameObject.check_bank_name = function(self, name, object_name, quick_check)
 	
 	local lower_name = name:lower()
 	local found_item = lower_name:find("[wis][ptm]%d%d") or lower_name:find("weap")
-	local found_facial = lower_name:find("fac") or name:find("FCE") or (isDMC5 and lower_name:find("_[01]1")) or (isRE2 and lower_name:find("[pe][lm]%d%d5%d")) or (isRE3 and lower_name:find("[pe][lm]%d%d%d1"))
+	local found_facial = lower_name:find("fac") or name:find("FCE") or (isDMC and lower_name:find("_[01]1")) or (isRE2 and lower_name:find("[pe][lm]%d%d5%d")) or (isRE3 and lower_name:find("[pe][lm]%d%d%d1"))
 	local found_body =  lower_name:find("body") or ((isRE8 and lower_name:find("ch%d%d_")) or (isRE8 and not found_facial)) or ((isRE2 or isRE3) and lower_name:find("[pe][lm]%d%d%d0"))
 	--(isRE8 and (lower_name:find("pl%d%d00") or lower_name:find("em%d%d00") or lower_name:find("barehand"))
 	
 	--if self.name == "pl2000_face_00" then log.info("Checking " .. lower_name .. " vs " .. object_name .. ",  found facial: " .. tostring(found_facial) .. ", found_body: " .. tostring(found_body)) end
 	if self.body_part ~= "Item" and found_item then return false end
-	if self.body_part == "Body" and found_facial  then return false end --or (isDMC5 and lower_name:find("%d%d%d%d_%d%d") and not lower_name:find("_10"))
+	if self.body_part == "Body" and found_facial  then return false end --or (isDMC and lower_name:find("%d%d%d%d_%d%d") and not lower_name:find("_10"))
 	if (isRE2 or isRE3) and object_name:find("em%d%d%d") and lower_name:find("_[pe][ls]") then return false end
 	if quick_check and self.face_mode and not found_facial and found_body then return false end
 	if quick_check or lower_name:find(object_name) then return true end
@@ -1979,7 +1988,7 @@ local function wwise_seek_all(ev_object, seek_frame, pause)
 				
 				if seek_frame and not pause then
 					local msec = math.floor((seek_frame / 60) * 1000) --milliseconds
-					if not isDMC5 then
+					if ev_object.alt_sound_seek then
 						local req = sdk.create_instance("via.wwise.RequestInfo", true):add_ref()
 							req:call(".ctor")
 							req:call("set_TriggerId", sub_tbl.id)
@@ -2046,7 +2055,7 @@ event_control_action = function(ev_object, current_frame, ev_paused, ev_play_spe
 			deferred_calls[ev_object.timeline] = {func="set_PlayState", args=3}
 		end
 	else
-		wwise_seek_all(ev_object, current_frame or ev_object.frame) --only resume wwise if playspeed is 100%
+		wwise_seek_all(ev_object, current_frame or ev_object.frame, (ev_object.play_speed ~= 1.0)) --only resume wwise if playspeed is 100%
 		ev_object.timeline:call("set_PlayState", playstate or 1)
 	end
 	
@@ -2085,10 +2094,13 @@ end
 ]]
 
 local function cs_viewer()
+	
 	if not ev_object or not is_valid_obj(ev_object.xform) then 
-		ev_object = nil 
+		ev_object, cutscene_mode = nil 
+		collectgarbage()
 		return
 	end
+	
 	imgui.begin_rect()
 		
 		if ev_object.timeline then  
@@ -2139,6 +2151,7 @@ local function cs_viewer()
 						end
 					end
 				end
+				ev_object.alt_sound_seek = EMVSettings.alt_sound_seek 
 			end
 			
 			current_figure_name = ev_object.cutscene_name or current_figure_name
@@ -2196,6 +2209,8 @@ local function cs_viewer()
 					--imgui.same_line()
 					--changed, EMVSettings.seek_short = imgui.checkbox("Seek Type 2", EMVSettings.seek_short)
 				--imgui.end_rect(2) 
+				imgui.same_line()
+				changed, EMVSettings.alt_sound_seek = imgui.checkbox("Alt Sound Seek", EMVSettings.alt_sound_seek); EMVSetting_was_changed = changed or EMVSetting_was_changed
 			end
 			
 			if ev_object.cam_layer then--and not and imgui.button((ev_object.no_zoom and "Cinematic Cam") or "Free Cam") then 
@@ -2264,14 +2279,16 @@ local show_animation_controls
 local function show_imgui_animation(anim_object, idx, embedded_mode)
 	
 	local not_started = not forced_mode and ((not anim_object.running) and (tics - figure_start_time) < 10) and (anim_object.frame == 0) and not (isRE8 and anim_object.matched_banks_count == 0) --anim_object.mbank_idx == 1 or 
-	local subtitle_string = anim_object.name .. (isDMC5 and (" (" .. anim_object.body_part .. ") ") or "") .. (anim_object.synced  and (" [Synced]") or "") .. " [" .. (anim_object.mbank_idx or 1) .. "," .. (anim_object.mlist_idx or 1) .. "," .. (anim_object.mot_idx or 1) .. "]"
+	local subtitle_string = anim_object.name .. (isDMC and (" (" .. (anim_object.char_name and (anim_object.char_name .. ", ") or "") .. anim_object.body_part .. ") ") or "") .. (anim_object.synced  and (" [Synced]") or "") .. " [" .. (anim_object.mbank_idx or 1) .. "," .. (anim_object.mlist_idx or 1) .. "," .. (anim_object.mot_idx or 1) .. "]"
 	local is_main = (idx == 0)
 	
 	imgui.push_id(anim_object.gameobj:get_address()+1+(bool_to_number[is_main]))
 		
 		local was_changed
 		if not embedded_mode then
-			imgui.text((anim_object == selected) and ("SELECTED" or "") .. (is_main and ("\n" .. subtitle_string) or ""))
+			if anim_object.motbank_names then
+				imgui.text((anim_object == selected) and ("SELECTED" or "") .. (is_main and ("\n" .. subtitle_string) or ""))
+			end
 			
 			if cutscene_mode and anim_object.packed_xform and not anim_object.active and not imgui.same_line() and imgui.button("Remove Offset") then
 				anim_object.last_cog_offset = nil
@@ -2280,7 +2297,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 			
 			changed, anim_object.display = imgui.checkbox(is_main and "Display" or "",  anim_object.display)
 			if changed then
-				if is_main or not anim_object.layer or (selected == anim_object) then  
+				if is_main or not anim_object.motbank_names or (selected == anim_object) then  
 					anim_object:toggle_display()
 				else
 					selected = anim_object
@@ -2292,7 +2309,6 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 		if cutscene_mode then
 			imgui.same_line()
 			imgui_anim_object_viewer(anim_object, anim_object.name)
-			
 		elseif (is_main or embedded_mode) or not imgui.same_line() and imgui.tree_node_str_id(anim_object.name, subtitle_string) then
 			
 			if anim_object.motbank_names then 
@@ -2336,9 +2352,10 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 					anim_object:change_motion(nil, anim_object.mot_idx)
 				end
 			end
+			
 			if embedded_mode or (not is_main and anim_object.motbank_names and imgui.tree_node_str_id(anim_object.name .. "Ctrl", "Controls")) then
 				show_animation_controls(anim_object, idx, embedded_mode)
-				if not embedded_mode then
+				if not embedded_mode 	then
 					imgui.tree_pop()
 				end
 			end
@@ -2372,6 +2389,7 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 	if cutscene_mode then return end
 		
 	if game_object and game_object.motion and (not figure_mode or (game_object.layer and game_object.end_frame)) then
+		
 		imgui.begin_rect()
 		imgui.push_id(game_object.xform)
 			
@@ -2525,40 +2543,41 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 			end
 			
 			imgui.same_line()
-			if not game_object.same_joints_constraint then
-				was_changed, game_object.force_center = imgui.checkbox("Center" .. (game_object.aggressively_force_center and "*" or ""), game_object.force_center)
+			if not game_object.same_joints_constraint or game_object.center_obj then
+				local center_obj = game_object.center_obj or game_object
+				was_changed, center_obj.force_center = imgui.checkbox("Center" .. (center_obj.aggressively_force_center and "*" or ""), center_obj.force_center)
 				if was_changed then
-					if game_object.force_center and not game_object.aggressively_force_center then
-						game_object.aggressively_force_center = true
-						game_object.packed_init_transform = (game_object.parent_obj and game_object.parent_obj.xform:call("get_Position")) or Vector3f.new(0,0,0)
-						--log_value(game_object.packed_init_transform)
-						game_object:set_parent(game_object.parent or 0)
-						--deferred_calls[game_object.xform] = {
-						--	{lua_object=game_object, method=GameObject.set_parent, args={game_object.parent or 0}},
-							--{lua_object=game_object, method=GameObject.set_transform, args={game_object.packed_init_transform}},
-							--(game_object.packed_init_transform and {func="set_Position", args=game_object.packed_init_transform}) or {},
+					if center_obj.force_center and not center_obj.aggressively_force_center then
+						center_obj.aggressively_force_center = true
+						center_obj.packed_init_transform = (center_obj.parent_obj and center_obj.parent_obj.xform:call("get_Position")) or Vector3f.new(0,0,0)
+						--log_value(center_obj.packed_init_transform)
+						center_obj:set_parent(center_obj.parent or 0)
+						--deferred_calls[center_obj.xform] = {
+						--	{lua_object=center_obj, method=GameObject.set_parent, args={center_obj.parent or 0}},
+							--{lua_object=center_obj, method=GameObject.set_transform, args={center_obj.packed_init_transform}},
+							--(center_obj.packed_init_transform and {func="set_Position", args=center_obj.packed_init_transform}) or {},
 						--}
-					elseif not game_object.force_center and game_object.aggressively_force_center then--if game_object.force_center then 
-						game_object.aggressively_force_center = nil
-						game_object.force_center = true
+					elseif not center_obj.force_center and center_obj.aggressively_force_center then--if center_obj.force_center then 
+						center_obj.aggressively_force_center = nil
+						center_obj.force_center = true
 					--else
-					--	game_object.force_center, game_object.aggressively_force_center = nil
-						--game_object.force_center = false
+					--	center_obj.force_center, center_obj.aggressively_force_center = nil
+						--center_obj.force_center = false
 					--else
-					--	game_object.aggressively_force_center = nil
-					--	game_object.force_center = not game_object.force_center
+					--	center_obj.aggressively_force_center = nil
+					--	center_obj.force_center = not center_obj.force_center
 					end
 						
 						
-						--if isRE3 and current_figure then deferred_calls[game_object.xform] = {func="set_Position", current_figure.xform:call("get_Position")} end
-					if game_object.savedata then
-						game_object.savedata.force_center = game_object.force_center
-						game_object.savedata.aggressively_force_center = game_object.aggressively_force_center
+						--if isRE3 and current_figure then deferred_calls[center_obj.xform] = {func="set_Position", current_figure.xform:call("get_Position")} end
+					if center_obj.savedata then
+						center_obj.savedata.force_center = center_obj.force_center
+						center_obj.savedata.aggressively_force_center = center_obj.aggressively_force_center
 					end
-					if forced_mode and game_object.force_center then
-						game_object.init_transform = game_object.xform:call("get_WorldMatrix") 
+					if forced_mode and center_obj.force_center then
+						center_obj.init_transform = center_obj.xform:call("get_WorldMatrix") 
 					end
-					game_object.init_cog_offset = nil
+					center_obj.init_cog_offset = nil
 				end
 				imgui.same_line()
 				was_changed, game_object.mirrored = imgui.checkbox("Mirror", game_object.layer:call("get_MirrorSymmetry"))
@@ -2628,7 +2647,7 @@ end
 
 local function find_selected(imgui_anims, case)
 	if not selected then
-		case = case or ((isRE2 or isRE3 or isDMC5) and 0) or 1
+		case = case or ((isRE2 or isRE3 or isDMC) and 0) or 1
 		for i=case, 2 do 
 			for i, anim_object in ipairs(reverse_table(imgui_anims)) do
 				if i == 0 then 
@@ -2694,7 +2713,7 @@ local function show_emv_settings()
 					recordmanager:set_field("<Naomi>k__BackingField", true)
 				end
 			end
-			if (figure_mode or forced_mode) and (isRE2 or isRE3 or isDMC5 or isRE8) and imgui.button("Re-Cache Animations") then 
+			if (figure_mode or forced_mode) and (isRE2 or isRE3 or isDMC or isRE8) and imgui.button("Re-Cache Animations") then 
 				EMVCache.global_cached_banks, global_cached_banks, pre_cached_banks = {}, {}, {}
 				RN.loaded_resources = false
 				if forced_mode then
@@ -2733,7 +2752,7 @@ end)
 re.on_frame(function()
 	
 	if (not RN.loaded_resources) and res and res.finished() then --FIRST FRAME STEPS
-		if (isRE2 or isRE3 or isDMC5 or isRE8) and not next(EMVCache.global_cached_banks) then
+		if (isRE2 or isRE3 or isDMC or isRE8) and not next(EMVCache.global_cached_banks) then
 			pre_cached_banks = {}
 		end
 		EMVCache = jsonify_table(EMVCache, true)
@@ -2765,11 +2784,11 @@ re.on_frame(function()
 		scene = sdk.call_native_func(static_objs.scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
 	end
 	
-	if not (isRE8 or isRE2 or isRE3 or isDMC5) then return end
+	if not (isRE8 or isRE2 or isRE3 or isDMC) then return end
 	
 	if reframework:is_drawing_ui() then
 		
-		figure_mgr = scene and (isRE8 and scene:call("findGameObject(System.String)", "GUIFigureList")) or (isDMC5 and scene:call("findGameObject(System.String)", "ModelViewerCamera")) or scene:call("findGameObject(System.String)", "FigureManager")	
+		figure_mgr = scene and (isRE8 and scene:call("findGameObject(System.String)", "GUIFigureList")) or (isDMC and scene:call("findGameObject(System.String)", "ModelViewerCamera")) or scene:call("findGameObject(System.String)", "FigureManager")	
 		figure_mode = not not figure_mgr
 		
 		if EMVSettings.cutscene_viewer and not cutscene_mode then --and (uptime - start_time) > 15 
@@ -2778,7 +2797,7 @@ re.on_frame(function()
 				local schedule = scene:call("findGameObject(System.String)", "Schedule")
 				schedule_obj = schedule and New_AnimObject({gameobj=schedule})
 			end
-			if (isDMC5 or (schedule_obj and not schedule_obj.bind_gameobjects)) and ((tics < 50) or random(50)) then
+			if (isDMC or (schedule_obj and not schedule_obj.bind_gameobjects)) and ((tics < 50) or random(50)) then
 				--log.info("DMC5 scan")
 				--[[local ev_objects = {}
 				local results = scene:call("findComponents(System.Type)", sdk.typeof("app.CutScenePlaySetting"))
@@ -2791,7 +2810,7 @@ re.on_frame(function()
 				end]]
 				--table.sort (ev_objects, function (obj1, obj2) return #obj1.bind_gameobjects > #obj2.bind_gameobjects end)
 				local results = {}
-				for i, result in ipairs(findc((isDMC5 and "app.CutScenePlaySetting") or sdk.game_namespace("timeline.CutSceneMediator"))) do 
+				for i, result in ipairs(findc((isDMC and "app.CutScenePlaySetting") or sdk.game_namespace("timeline.CutSceneMediator"))) do 
 					if is_valid_obj(result) then
 						local gameobj = result:call("get_GameObject")
 						local timeline = gameobj and lua_find_component(gameobj, "via.timeline.Timeline")
@@ -2867,7 +2886,7 @@ re.on_frame(function()
 		if cutscene_mode then
 			if isRE2 or isRE3 then
 				cutscene_cam = get_anim_object(scene:call("findGameObject(System.String)", "EventCameraController"))
-			elseif isDMC5 then
+			elseif isDMC then
 				cutscene_cam = ev_object.components_named.CutScenePlaySetting:get_field("<camera>k__BackingField")
 				cutscene_cam = cutscene_cam and get_anim_object(cutscene_cam:call("get_GameObject"))
 			end
@@ -2892,7 +2911,7 @@ re.on_frame(function()
 			elseif isRE2 then 
 				fig_mgr_name = "IlluminationList" --"LocalCubemap"
 				current_fig_name = "^Figure_%a%a%d"
-			elseif isDMC5 then 
+			elseif isDMC then 
 				fig_mgr_name = "GUIMesh"
 				current_fig_name = "ui5005GUI"
 			elseif isRE3 then 
@@ -2924,7 +2943,7 @@ re.on_frame(function()
 								log.info("BREAK at finding " .. name .. ", number " .. i)
 								break  
 							elseif name:find(current_fig_name) then 
-								current_figure_name = (isDMC5 and total_args[#total_args]  and total_args[#total_args].name) or name
+								current_figure_name = (isDMC and total_args[#total_args]  and total_args[#total_args].name) or name
 								table.insert(total_args, 1, new_args) -- Should be FIRST
 							elseif name:find("[ep][ml]%d%d%d%d") then 
 								local idx = name:find("em") or name:find("pl")
@@ -3179,7 +3198,7 @@ re.on_frame(function()
 							if not imgui_anims[1] then return end
 							
 							--[[if tics - figure_start_time == 10 then
-								if (isRE2 or isRE3 or isDMC5) then 
+								if (isRE2 or isRE3 or isDMC) then 
 									if anim_object.display and anim_object.name:find("figure_base") then selected = anim_object end
 								--elseif i == 1 and anim_object.display and anim_object.running and anim_object.body_part == "Body" then 
 								--	selected = anim_object
@@ -3209,9 +3228,9 @@ re.on_frame(function()
 					imgui.end_rect(5)
 				end
 				
-				if isRE2 or isRE3 or isDMC5 then 
+				if isRE2 or isRE3 or isDMC then 
 					imgui.text("\nCAMERA")
-					if figure_mode and not figure_settings and not isDMC5 then
+					if figure_mode and not figure_settings and not isDMC then
 						figure_behavior = scene and (scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("FigureObjectBehavior"))))
 						figure_behavior = figure_behavior and figure_behavior.get_elements and figure_behavior:add_ref():get_elements()
 						for i, elem in ipairs(figure_behavior or {}) do 
@@ -3280,7 +3299,7 @@ re.on_frame(function()
 							changed, follow_figure = imgui.checkbox("Follow Figure", follow_figure); EMVSetting_was_changed = EMVSetting_was_changed or changed
 						end
 						
-						local unlocked_parent = (isRE8 and current_figure) or (isRE2 and base_mesh) or ((isRE3 or isDMC5) and camera) or base_mesh or selected--or camera --(isRE3 and imgui_anims[#imgui_anims]) or camera
+						local unlocked_parent = (isRE8 and current_figure) or (isRE2 and base_mesh) or ((isRE3 or isDMC) and camera) or base_mesh or selected--or camera --(isRE3 and imgui_anims[#imgui_anims]) or camera
 						
 						if imgui.tree_node("Light Sets") then 
 							
@@ -3403,9 +3422,9 @@ re.on_frame(function()
 							
 							local parent_xform = (isRE8 and base_mesh) or current_figure -- or ((isRE8) and current_light_set)
 							local pos_xform = parent_xform
-							fixed_figure = (isDMC5 and base_mesh) or selected or base_mesh --re2_figure_container_obj or base_mesh
+							fixed_figure = (isDMC and base_mesh) or selected or base_mesh --re2_figure_container_obj or base_mesh
 							
-							if not isDMC5 then
+							if not isDMC then
 								if fixed_figure.parent then 
 									held_transforms[fixed_figure.parent] = held_transforms[fixed_figure.parent] or New_AnimObject({ xform=fixed_figure.parent })
 								end
@@ -3420,7 +3439,7 @@ re.on_frame(function()
 							if do_move_light_set then --rotate all
 								local position = pos_xform.xform:call("get_LocalPosition")
 								--local last_pos = selected.xform:call("get_Position")
-								--fixed_figure.xform:call("set_Parent", 0)--(isDMC5 and camera.xform) or 0)
+								--fixed_figure.xform:call("set_Parent", 0)--(isDMC and camera.xform) or 0)
 								fixed_figure:set_parent(0)
 								if not isRE8 then 
 									for i, light_obj in ipairs(lights) do 
@@ -3432,7 +3451,7 @@ re.on_frame(function()
 										end
 									end
 								end
-								if isDMC5 then 
+								if isDMC then 
 									deferred_calls[selected.xform] = {func="set_Position", args=selected.xform:call("get_Position")} 
 								end
 								deferred_calls[pos_xform.xform] = {func="set_LocalPosition", args=position}
@@ -3445,7 +3464,7 @@ re.on_frame(function()
 											--light_obj.xform:call("set_Parent", (isRE3 and unlocked_parent.xform) or light_obj.parent_org or 0)
 										end
 									end
-									if (isRE2 or isDMC5 or isRE3) and parent_xform then  --correct for new rotatation
+									if (isRE2 or isDMC or isRE3) and parent_xform then  --correct for new rotatation
 										parent_xform.xform:call("set_Rotation", fixed_figure.xform:call("get_Rotation"))
 										local y_difference = parent_xform.packed_init_transform[3].y - fixed_figure.packed_init_transform[3].y
 										local new_pos = parent_xform.packed_init_transform[3]; new_pos.y = new_pos.y - y_difference

@@ -167,7 +167,7 @@ local function show_history(do_minimal, new_first_history_idx)
 						elseif no_spc_cmd == "folders" then
 							out = get_all_folders()
 						end]]
-						History.history[cmd] = table.pack(out, tostring(out):find("::vector") and vector_to_table(out))
+						History.history[cmd] = table.pack(out or tostring(out), tostring(out):find("::vector") and vector_to_table(out))
 					end
 					
 					update_lists_once = do_run_again and cmd or nil 
@@ -487,7 +487,7 @@ local function show_console_window()
 		autocomplete()
 		show_history()
 		
-		if check_key_released(via.hid.KeyboardKey.Return) or force_command then
+		if (check_key_released(via.hid.KeyboardKey.Return) or force_command) and command ~= "" then
 			cached_command_text = {}
 			local out
 			--[[if SettingsCache.deferred_console then

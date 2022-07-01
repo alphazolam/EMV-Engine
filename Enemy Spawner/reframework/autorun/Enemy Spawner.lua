@@ -1,14 +1,15 @@
 --RE2 and RE3 Enemy Spawner by alphazomega
 --June 26, 2022
 --if true then return end
-if not (isRE2 or isRE3 or isDMC5) then return end
+if not (isRE2 or isRE3 or isDMC) then return end
 local EMV = require("EMV Engine")
 
-SettingsCache.loiter_by_default = false
+SettingsCache.loiter_by_default = true
 local spawned_prefabs = {}
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
-spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", (isRE2 and "GUI_Rogue") or (isRE3 and "RopewayGrandSceneDevelop") or (isDMC5 and "Develop")))
+spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", (isRE2 and "GUI_Rogue") or (isRE3 and "RopewayGrandSceneDevelop") or (isDMC and "Develop")))
 if not spawned_prefabs_folder then return end
+local spawned_enemies_count = 0
 local ray_method = sdk.find_type_definition( "via.collision" ):get_method("find(via.Ray, via.Plane, via.vec3, System.Single, via.vec3)")
 local last_camera_matrix = Matrix4x4f.new()
 local prefabs = {}
@@ -51,7 +52,7 @@ end
 
 function get_prefabs()
 	local prefabs = { players={}, player_names={}, enemies={}, enemy_names={} }	
-	if isDMC5 then 
+	if isDMC then 
 		local enemy_manager = sdk.get_managed_singleton(sdk.game_namespace("EnemyManager"))
 		local enemy_prefab_manager = enemy_manager and enemy_manager:get_field("PrefabManager")
 		local prefabs_dotnet_list = enemy_prefab_manager and enemy_prefab_manager:get_field("EnemyPrefabInfoList")
@@ -227,7 +228,7 @@ local function spawn_deferred_prefab(packed_func_call)
 	
 	if xform then 
 		local new_spawn = spawned_prefabs[xform] or GameObject:new_GrabObject{xform=xform}
-		if not isDMC5 then
+		if not isDMC then
 			new_spawn.is_loitering=SettingsCache.loiter_by_default
 			for i, component in ipairs(new_spawn.components) do 
 				local name = component:call("ToString()"):lower()
@@ -262,7 +263,7 @@ local function spawn_deferred_prefab(packed_func_call)
 		--old_calls[pfb] = packed_func_call
 		spawned_prefabs[xform] = new_spawn
 		return new_spawn
-	elseif isDMC5 then 
+	elseif isDMC then 
 		deferred_prefab_calls[pfb] = nil --dmc5 always works
 	end
 end
@@ -389,7 +390,8 @@ local function show_enemy_spawner()
 				--imgui.text(logv(spawns))
 				for key, xform in pairs(spawns or {}) do
 					if is_valid_obj(xform) then
-						spawned_prefabs[xform] = spawned_prefabs[xform] or GameObject:new_GrabObject{xform=xform}
+						local obj = spawned_prefabs[xform] or GameObject:new_GrabObject{xform=xform}
+						spawned_prefabs[xform] = obj and obj.mfsm2 and obj
 					else
 						if player and xform == player.xform then
 							spawned_prefabs = {}
@@ -421,10 +423,12 @@ local function show_enemy_spawner()
 						end
 					end
 				end
+				
 				changed, enemy_pfb_idx = imgui.combo("Enemy", enemy_pfb_idx, prefabs.enemy_names)
 				if imgui.button("Spawn Enemy") then 
 					spawn_zombie(prefabs.enemy_names[enemy_pfb_idx])
 				end
+				
 				if (isRE2 or isRE3) and not imgui.same_line() and imgui.button("Spawn Random Zombie") then
 					local random_table = {}
 					for i, name in ipairs(prefabs.enemy_names) do
@@ -434,6 +438,7 @@ local function show_enemy_spawner()
 					end
 					spawn_zombie(prefabs.enemy_names[random_table[random_range(1, #random_table)]])
 				end
+				
 				imgui.same_line()
 				if imgui.button("Spawn Random Enemy") then
 					local name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
@@ -444,8 +449,10 @@ local function show_enemy_spawner()
 					end
 					spawn_zombie(name)
 				end
+				
 				imgui.text("*Enemy will spawn at the 'X'")
 				imgui.same_line()
+				
 				if imgui.button("Clear Spawned Enemies") then -- (Fix Infinite Loading)
 					prefabs = {}
 					for xform, object in pairs(spawned_prefabs) do
@@ -458,16 +465,18 @@ local function show_enemy_spawner()
 						emmgr:call("get_ActiveEnemyList"):call("TrimExcess") 
 					end
 				end 
+				
 				if isRE2 or isRE3 then 
 					imgui.same_line()
-					changed, GGSettings.loiter_by_default = imgui.checkbox("Loiter", GGSettings.loiter_by_default); setting_was_changed = setting_was_changed or changed
+					changed, SettingsCache.loiter_by_default = imgui.checkbox("Loiter", SettingsCache.loiter_by_default); setting_was_changed = setting_was_changed or changed
 					if changed then 
 						for xform, object in pairs(spawned_prefabs) do 
-							object.is_loitering = GGSettings.loiter_by_default
+							object.is_loitering = SettingsCache.loiter_by_default
 						end
 					end
 				end
-				if next(spawned_prefabs) and imgui.tree_node("Spawned Enemies") then 
+				
+				if next(spawned_prefabs) and imgui.tree_node("Spawned Enemies (" .. get_table_size(spawned_prefabs) .. ")") then 
 					for xform, obj in pairs(spawned_prefabs) do 
 						if is_valid_obj(xform) and imgui.tree_node_ptr_id(xform, obj.name .. " @ " .. xform:get_address()) then
 							changed, obj.is_loitering = imgui.checkbox("Loiter", obj.is_loitering)
@@ -529,7 +538,7 @@ end)
 
 re.on_draw_ui(function()
 	show_enemy_spawner()
-	show_light_spawner()
+	--show_light_spawner()
 end)
 
 return {
