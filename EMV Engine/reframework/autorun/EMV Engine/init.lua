@@ -736,6 +736,7 @@ local function editable_table_field(key, value, owner_tbl)
 						to_load = run_command(to_load).output
 					elseif type(value)=="userdata" then
 						to_load = jsonify_table({to_load}, true)[1]
+						to_load = type(to_load)~="table" and to_load
 					end
 					local try, out = pcall(load("return " .. ((type(value)=="string") and ("'" .. to_load .. "'") or ("to_load"))))
 					if try and (out ~= nil) then 
@@ -1433,15 +1434,17 @@ function imgui.button_w_hotkey(button_txt, imgui_keyname, deferred_call, dfc_arg
 		is_pressed = true
 		if deferred_call.obj and deferred_call.obj.CurrentNodeID then --BehaviorTrees sequencer special clause
 			local seq = deferred_call.obj.sequencer or MoveSequencer:new{tree=deferred_call.obj}
-			if deferred_call.args == nil then
-				deferred_call = merge_tables({args=((type(dfc_args)~="table") and {dfc_args} or dfc_args)}, deferred_call, true) --make a unique copy of the deferred call with the given args
+			if seq then 
+				if deferred_call.args == nil then
+					deferred_call = merge_tables({args=((type(dfc_args)~="table") and {dfc_args} or dfc_args)}, deferred_call, true) --make a unique copy of the deferred call with the given args
+				end
+				seq.Hotkeys[imgui_keyname] = Hotkey:new({button_txt=button_txt, imgui_keyname=imgui_keyname, dfcall=deferred_call, obj=deferred_call.obj, dfcall_json=dfcall_json}, seq.Hotkeys[imgui_keyname])
+				seq.movedata[imgui_keyname] = seq.movedata[imgui_keyname] or {}
+				seq.movedata[imgui_keyname].pressed = tics
+				seq:update()
+				seq.idle_mot_name = (seq.mot_name and seq.mot_name:find("Idle") and seq.mot_name) or seq.idle_mot_name 
+				deferred_call.obj.sequencer = seq
 			end
-			seq.Hotkeys[imgui_keyname] = Hotkey:new({button_txt=button_txt, imgui_keyname=imgui_keyname, dfcall=deferred_call, obj=deferred_call.obj, dfcall_json=dfcall_json}, seq.Hotkeys[imgui_keyname])
-			seq.movedata[imgui_keyname] = seq.movedata[imgui_keyname] or {}
-			seq.movedata[imgui_keyname].pressed = tics
-			seq:update()
-			seq.idle_mot_name = (seq.mot_name and seq.mot_name:find("Idle") and seq.mot_name) or seq.idle_mot_name 
-			deferred_call.obj.sequencer = seq
 		end
 	end
 	if hk_tbl then imgui.end_rect(3) end
@@ -1512,7 +1515,7 @@ Hotkey = {
 		
 		if self.obj and not self.pressed_down and (force or (self.key_id and check_key_released(self.key_id, not force and self.down_timer ))) then
 			
-			if self.dfcall.obj_json and ((type(self.obj)=="table") or (self.obj.get_type_definition and not self.obj:get_type_definition():is_a("via.Component"))) or not is_obj_or_vt(self.obj) then
+			if self.dfcall.obj_json and ((not self.obj or type(self.obj)=="table") or (self.obj.get_type_definition and not self.obj:get_type_definition():is_a("via.Component")) or not is_obj_or_vt(self.obj)) then
 				self.obj = jsonify_table(self.dfcall.obj_json, true) --there is no way to know when a non-component is an orphan, so it must be searched for and found in the scene every single keypress
 			end
 			
@@ -5496,6 +5499,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 								changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
 								if changed then 
 									poser.undo.last = joint
+									joint[poser.prop_name].freeze = true
 									j_o_tbl.selected = true
 								end
 								
@@ -5573,6 +5577,19 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						end
 						imgui.tree_pop()
 					end
+					
+					if anim_object and anim_object.materials and imgui.tree_node_ptr_id(anim_object.mesh:get_address() - 1235, "Materials") then
+						show_imgui_mat(anim_object) 
+						imgui.tree_pop()
+					end
+					
+					if anim_object.behaviortrees and imgui.tree_node_str_id(anim_object.name .. "Trees", "Action Monitor") then 
+						for i, bhvt_obj in ipairs(anim_object.behaviortrees) do
+							bhvt_obj:imgui_behaviortree()
+						end
+						imgui.tree_pop()
+					end
+					
 				end
 				
 				
@@ -6345,11 +6362,13 @@ BHVT = {
 			local core_handles = lua_get_system_array(o.obj:call("get_Layer()")) or (not BHVT.nodes_failed and o.obj.get_trees and o.obj:get_trees())
 			if core_handles then 
 				o.variables = o.variables or {}
-				o.core_handles = o.core_handles or {}
-				for i, core_handle in ipairs(core_handles) do 
-					o.core_handles[i] = BHVTCoreHandle:new{obj=core_handle, index=i-1}
-					local variable = core_handle:call("get_UserVariable")
-					o.variables[core_handle.name or i] = (variable and (variable:call("get_VariableSum()") > 0) and variable) or nil
+				if sdk.get_tdb_version() > 67 then 
+					o.core_handles = o.core_handles or {}
+					for i, core_handle in ipairs(core_handles) do 
+						o.core_handles[i] = BHVTCoreHandle:new{obj=core_handle, index=i-1}
+						local variable = core_handle:call("get_UserVariable")
+						o.variables[core_handle.name or i] = (variable and (variable:call("get_VariableSum()") > 0) and variable) or nil
+					end
 				end
 			end
 		end
