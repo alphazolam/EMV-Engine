@@ -4574,7 +4574,8 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				var_metadata.timer_start = nil
 			end
 			
-			if not var_metadata.display_name and not imgui.same_line() and imgui.button(freeze and "Unfreeze" or "Freeze") then --and not var_metadata.show_var_data 
+			--var_metadata.display_name is used when embedding the prop in a different menu
+			if not var_metadata.display_name and not imgui.same_line() and imgui.button(freeze and "Unfreeze" or "Freeze") then
 				if element_idx then 
 					var_metadata.freezetable[element_idx] = not var_metadata.freezetable[element_idx]
 				else
@@ -4586,7 +4587,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 			
 			if freeze or (var_metadata.timer_start and (uptime - var_metadata.timer_start) > 0.1) or var_metadata.do_reset_value then
 				--if var_metadata.value_org ~= var_metadata.value and (not var_metadata.ret_type:is_a("System.Boolean") or not imgui.same_line()) and imgui.button("X") then
-				if (not imgui.same_line() and imgui.button("X")) or var_metadata.do_reset_value then --value_org ~= --(not var_metadata.show_var_data or var_metadata.display_name) and 
+				if (not var_metadata.display_name and not imgui.same_line() and imgui.button("X")) or var_metadata.do_reset_value then --value_org ~= --(not var_metadata.show_var_data or var_metadata.display_name) and 
 					var_metadata.do_reset_value = nil
 					if element_idx then 
 						value = var_metadata.value_org[element_idx]
@@ -4785,10 +4786,10 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 				arr_tbl.update = true
 			end
 		end
-		
+		]]
 		if not is_elements then
 			imgui.tree_pop()
-		end]]
+		end
 	end
 	
 	--if tbl_was_changed then 
@@ -5440,16 +5441,20 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						
 						changed, poser.current_slot_idx = imgui.combo("Slot", poser.current_slot_idx, poser.slots)
 						
+						local clear_slot = poser.slots[poser.current_slot_idx]:find("*") and not imgui.same_line() and imgui.button("X")
+						
 						changed, poser.current_prop_name_idx = imgui.combo("Rotation Type", poser.current_prop_name_idx, poser.prop_names)
 						poser.prop_name = poser.prop_names[poser.current_prop_name_idx]
 						
 						changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
 						
-						if imgui.button("Save Pose") then 
+						if imgui.button("Save Pose") or clear_slot then 
 							local poses = {}
-							for i, joint in ipairs(anim_object.joints or {}) do
-								if joint[poser.prop_name].freeze then 
-									poses[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
+							if not clear_slot  then
+								for i, joint in ipairs(anim_object.joints or {}) do
+									if joint[poser.prop_name].freeze then 
+										poses[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
+									end
 								end
 							end
 							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
@@ -5479,45 +5484,58 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						end
 						
 						imgui.same_line()
-						if imgui.same_line and imgui.button("Unfreeze All Joints") then 
+						if imgui.same_line and imgui.button("Freeze All") then 
 							for i, joint in ipairs(anim_object.joints or {}) do 
-								joint[poser.prop_name].freeze = nil
-								old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+								joint[poser.prop_name].freeze = true
+								deferred_calls[joint] = {func="set" .. poser.prop_name, args=joint[poser.prop_name].cvalue, vardata=joint[poser.prop_name]}
 							end
 						end
 						
+						imgui.same_line()
+						if imgui.same_line and imgui.button("Unfreeze All") then 
+							local frozen_total = 0
+							for i, joint in ipairs(anim_object.joints or {}) do 
+								if joint[poser.prop_name].freeze then 
+									frozen_total = frozen_total + 1
+									joint[poser.prop_name].freeze = nil
+									old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+								end
+							end
+							if frozen_total == 0 then 
+								old_deferred_calls = {}
+							end
+						end
+						
+						imgui.text("Hotkeys:\n	[Z] - Undo\n	[Shift] - Freeze hovered joint\n	[Alt] - Unfreeze hovered joint")
 						local text_pos = {statics.width/4*3, statics.height/4*3}
 						local closest_to_mouse = {}
+						local prop_changed
 						
 						for i, joint in ipairs(anim_object.joints or {}) do 
-							
 							j_o_tbl = joint._ or create_REMgdObj(joint)
 							j_o_tbl.last_opened = uptime
-							joint[poser.prop_name].display_name = j_o_tbl.Name
+							local var_metadata = joint[poser.prop_name]
+							var_metadata.display_name = j_o_tbl.Name
 							imgui.push_id(joint)
-								
-								changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
-								if changed then 
-									poser.undo.last = joint
-									joint[poser.prop_name].freeze = true
-									j_o_tbl.selected = true
-								end
+								local selected_changed
+								selected_changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
+								local hovered = imgui.is_item_hovered()
 								
 								imgui.same_line()
-								local prop_changed
-								if show_prop(joint, joint[poser.prop_name], key_name .. "p" .. i) and (joint[poser.prop_name].freeze == false) then 
+								
+								if show_prop(joint, var_metadata, key_name .. "p" .. i) then --and (var_metadata.freeze == false) then 
 									poser.undo.last = joint
-									joint[poser.prop_name].freeze = 1
-									--prop_changed = true
+									var_metadata.freeze = 1
+									prop_changed = joint
 								end
-								joint[poser.prop_name].update = true
+								var_metadata.update = true
 								
 								if anim_object.joint_positions then 
 									local mat_screen, mat_screen_top
 									local mat = (poser.is_local and anim_object.joint_positions[joint][1]) or anim_object.joint_positions[joint][2]
 									local pos = anim_object.joint_positions[joint][2][3] --world pos
 									mat[3] = pos
-									if joint[poser.prop_name].freeze ~= nil or j_o_tbl.selected then
+									if var_metadata.freeze ~= nil or j_o_tbl.selected then
 										local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
 										mat_screen = draw.world_to_screen(pos)
 										mat_screen_top = draw.world_to_screen(pos + Vector3f.new(0, 0.08 * cam_dist, 0))
@@ -5532,14 +5550,25 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 											if not closest_to_mouse[1] or (mouse_delta < closest_to_mouse[4]) then
 												closest_to_mouse = {joint, mat_screen, mat, mouse_delta}
 											end
-										--elseif poser.undo[joint] and not prop_changed then
-										--	poser.undo[joint].start = uptime
 										end
 									end
 								end
 								
+								hovered = hovered or imgui.is_item_hovered()
+								if selected_changed or (not var_metadata.freeze and hovered and check_key_released(via.hid.KeyboardKey.Shift, 0.0))  then 
+									poser.undo.last = joint
+									var_metadata.freeze = true
+									j_o_tbl.selected = true
+									deferred_calls[joint] = {func="set" .. poser.prop_name, args=var_metadata.cvalue, vardata=var_metadata}
+								end
+								if var_metadata.freeze and (not imgui.same_line() and imgui.button("X") or (hovered and check_key_released(via.hid.KeyboardKey.Menu, 0.0))) then
+									old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+									var_metadata.freeze = nil
+									j_o_tbl.selected = nil
+								end
+								
 							imgui.pop_id()
-							joint[poser.prop_name].display_name = nil
+							var_metadata.display_name = nil
 						end
 						
 						if not closest_to_mouse[1] and poser.selected then 
@@ -5553,32 +5582,32 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 							if changed then 
 								deferred_calls[joint] = {func="set" .. poser.prop_name, args=mat:to_quat():to_euler(), vardata=joint[poser.prop_name]}
 								joint[poser.prop_name].freeze = 1
-								prop_changed = true
+								prop_changed = joint
 							end
 							draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
 							draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
-							
-							if prop_changed then
-								if not poser.undo[joint] or (uptime - poser.undo[joint].start) > 1.2 then --or not mouse_state.down[via.hid.MouseButton.L] then 
-									poser.undo.last = joint
-									poser.undo[joint] = {start=uptime, prev_rot=joint[poser.prop_name].cvalue}
-								end
-								poser.undo[joint].start = uptime
+						end
+						
+						if prop_changed then
+							local joint = prop_changed
+							if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 1.2)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
+								poser.undo.last = joint
+								poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint[poser.prop_name].cvalue}
+								table.insert(poser.undo[joint].prev_rot, joint[poser.prop_name].cvalue)
 							end
-							--if poser.undo[joint] then 
-							--	poser.undo[joint].start = uptime
-							--end
+							poser.undo[joint].start = uptime
 						end
 						
 						if poser.undo.last and poser.undo[poser.undo.last] and check_key_released(via.hid.KeyboardKey.Z) then
 							local joint = poser.undo.last
 							joint[poser.prop_name].freeze = 1
-							deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot, vardata=joint[poser.prop_name]}
+							deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
+							poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
 						end
 						imgui.tree_pop()
 					end
 					
-					if anim_object and anim_object.materials and imgui.tree_node_ptr_id(anim_object.mesh:get_address() - 1235, "Materials") then
+					if anim_object and anim_object.materials and anim_object.materials[1] and imgui.tree_node_ptr_id(anim_object.materials[1].mesh:get_address() - 1235, "Materials") then
 						show_imgui_mat(anim_object) 
 						imgui.tree_pop()
 					end
@@ -6359,10 +6388,10 @@ BHVT = {
 		o.tree_count = o.obj:call("getTreeCount")
 		
 		if o.tree_count > 0 then
-			local core_handles = lua_get_system_array(o.obj:call("get_Layer()")) or (not BHVT.nodes_failed and o.obj.get_trees and o.obj:get_trees())
+			local core_handles = lua_get_system_array(o.obj:call("get_Layer()")) or (not BHVT.nodes_failed and o.obj:get_trees())
 			if core_handles then 
 				o.variables = o.variables or {}
-				if sdk.get_tdb_version() > 67 then 
+				if isDMC or sdk.get_tdb_version() > 67 then 
 					o.core_handles = o.core_handles or {}
 					for i, core_handle in ipairs(core_handles) do 
 						o.core_handles[i] = BHVTCoreHandle:new{obj=core_handle, index=i-1}
@@ -6514,6 +6543,10 @@ BHVT = {
 					}
 					for i, core_handle in ipairs(self.core_handles or {}) do
 						if core_handle and imgui.tree_node(core_handle.name) then
+							if imgui.tree_node_ptr_id(core_handle.obj, "Object") then
+								imgui.managed_object_control_panel(core_handle.obj)
+								imgui.tree_pop()
+							end
 							for j, node_tbl in ipairs(core_handle.parent_nodes or {}) do 
 								self:imgui_bhvt_nodes(node_tbl, node_tbl.name, self.imgui_keyname, dfcall_template, dfcall_json)
 							end
