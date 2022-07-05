@@ -6749,7 +6749,7 @@ GameObject = {
 					end
 				end
 				for name, joint in pairs(pose) do 
-					pose[name] = merge_tables(current_file["num:" .. poser.current_slot_idx][name], pose[name])
+					pose[name] = merge_tables(current_file["num:" .. poser.current_slot_idx] and current_file["num:" .. poser.current_slot_idx][name] or {}, pose[name])
 				end
 			end
 			current_file["num:" .. poser.current_slot_idx] = pose
