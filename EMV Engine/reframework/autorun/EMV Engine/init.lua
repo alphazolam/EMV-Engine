@@ -6056,9 +6056,18 @@ end
 --Displays the "Collection" menu in imgui
 local function show_collection()
 	local dump_collection
-	--if imgui.button("Clear Collection") then 
-	--	Collection = {}
-	--end
+	
+	if imgui.button("Empty Collection") then 
+		Collection = {}
+	end
+	
+	imgui.same_line()
+	if imgui.button("Cleanse Collection") then 
+		Collection = jsonify_table(json.load_file("EMV_Engine\\Collection.json") or {}, true)
+		for name, obj in pairs(Collection) do
+			Collection[name] = obj.xform and obj or nil
+		end
+	end
 	
 	--imgui.same_line()
 	if imgui.button("Scan All") then 
@@ -6075,8 +6084,8 @@ local function show_collection()
 		local new_collection = merge_tables({}, Collection)
 		for i, result in ipairs(merge_tables(merged, find("via.motion.DummySkeleton"))) do 
 			if (not player or motfsms[result]) then
-				local name = result:call("get_GameObject"):call("get_Name")
-				new_collection[name] = new_collection[name] or GameObject:new{xform=result}
+				local obj = held_transforms[result] or GameObject:new{xform=result}
+				new_collection[obj.name] = obj or new_collection[obj.name]
 			end
 		end
 		for name, obj in pairs(new_collection) do --remove new objects that are children of other new objects
@@ -6092,7 +6101,7 @@ local function show_collection()
 		dump_collection = true
 	end
 	
-	for name, obj in pairs(Collection) do 
+	for name, obj in orderedPairs(Collection) do 
 		imgui.text("	")
 		imgui.same_line()
 		if obj.xform and obj.xform:read_qword(0x10) ~= 0 then
@@ -6104,7 +6113,7 @@ local function show_collection()
 				end
 			imgui.pop_id()
 			imgui.same_line()
-			if imgui.tree_node(obj.name) then 
+			if imgui.tree_node(name) then 
 				imgui_anim_object_viewer(obj)
 				imgui.tree_pop()
 			end
@@ -6391,7 +6400,8 @@ BHVT = {
 					}
 					for i, core_handle in ipairs(self.core_handles or {}) do
 						if core_handle and imgui.tree_node(core_handle.name) then
-							if imgui.tree_node_ptr_id(core_handle.obj, "Object") then
+							core_handle.obj._ = core_handle.obj._ or create_REMgdObj(core_handle.obj)
+							if imgui.tree_node_ptr_id(core_handle.obj, core_handle.obj._.name_full) then
 								imgui.managed_object_control_panel(core_handle.obj)
 								imgui.tree_pop()
 							end
@@ -6626,7 +6636,7 @@ GameObject = {
 				for i, part in ipairs(split(possible_name, "/")) do 
 					local sub_tbl = split(part, "_")
 					for j, sub_part in ipairs(sub_tbl or {}) do
-						if sub_part:find("[ep][ml]%d%d")==1 and #sub_tbl > 1 then
+						if sub_part:find("[ep][ml]%d%d")==1 and #sub_tbl > 1 and sub_tbl[#sub_tbl] ~= "ev" then
 							o.char_name = sub_tbl[#sub_tbl]
 							goto exit
 						end
@@ -6813,7 +6823,7 @@ GameObject = {
 		local prop_changed
 		
 		for i, joint in ipairs(self.joints or {}) do 
-			j_o_tbl = joint._ or create_REMgdObj(joint)
+			local j_o_tbl = joint._ or create_REMgdObj(joint)
 			j_o_tbl.last_opened = uptime
 			local var_metadata = joint[poser.prop_name]
 			var_metadata.display_name = j_o_tbl.Name
@@ -7453,7 +7463,7 @@ re.on_frame(function()
 	
 	if reframework:is_drawing_ui() then
 		shown_transforms = {} 
-		SettingsCache.detach_collection = SettingsCache.detach_collection and not not next(Collection)
+		--SettingsCache.detach_collection = SettingsCache.detach_collection and not not next(Collection)
 		if not SettingsCache.detach_collection or (imgui.begin_window("Collection", true, SettingsCache.transparent_bg and 128 or 0) == false) then 
 			SettingsCache.detach_collection = false
 		end
