@@ -559,6 +559,9 @@ local function show_console_settings()
 		changed, SettingsCache.transparent_bg = imgui.checkbox("Transparent background", SettingsCache.transparent_bg); was_changed = was_changed or changed
 		changed, SettingsCache.always_update_lists = imgui.checkbox("Always Update Lists", SettingsCache.always_update_lists); was_changed = was_changed or changed 
 		changed, SettingsCache.show_editable_tables = imgui.checkbox("Editable Tables", SettingsCache.show_editable_tables); was_changed = was_changed or changed 
+		if isDMC then
+			changed, SettingsCache.add_DMC5_names = imgui.checkbox("Add Character Names", SettingsCache.add_DMC5_names); was_changed = was_changed or changed 
+		end
 		--changed, SettingsCache.deferred_console = imgui.checkbox("Deferred Console", SettingsCache.deferred_console); was_changed = was_changed or changed 
 		if imgui.button("Clear History") then 
 			history, history_idx, history_metadata, first_history_idx = {}, {}, {}, 1

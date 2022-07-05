@@ -37,6 +37,7 @@ SettingsCache = {
 	show_uvars = true,
 	detach_collection = false,
 	show_editable_tables = false,
+	add_DMC5_names = isDMC or false,
 }
 
 --tmp:call("trigger", )
@@ -427,11 +428,11 @@ local function orderedNext(t, state)
     local key = nil
     if state == nil then
 		local do_multitype = type(state) ~= "string" and type(state) ~= "number"
-		--if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
+		if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
 			t.__orderedIndex = __genOrderedIndex(t , do_multitype)
-		--	G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
-		--end
-		--t.__orderedIndex = G_ordered[t].ords or __genOrderedIndex( t , do_multitype)
+			G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
+		end
+		t.__orderedIndex = G_ordered[t].ords or __genOrderedIndex( t , do_multitype)
         key = t.__orderedIndex[1]
     elseif t.__orderedIndex then
 		--t.__orderedIndex = G_ordered[t].ords
@@ -447,7 +448,6 @@ local function orderedNext(t, state)
     t.__orderedIndex = nil
     return
 end
-
 
 local function orderedPairs(t)
     return orderedNext, t, nil
@@ -940,6 +940,9 @@ local function read_imgui_pairs_table(tbl, key, is_array, editable)
 								if is_obj then 
 									name = elem_key .. ":	" .. logv(element)
 								else
+									if not pcall(function() isArray(element) end) then
+										test = {element}
+									end
 									if element.name and (element.new or element.update) then --or (can_index(element) and element.new and (element.name .. ""))
 										name = elem_key .. ":	" .. element.name .. "	[Object] (" .. get_table_size(element) .. " elements)"
 									elseif isArray(element) then
@@ -986,9 +989,7 @@ local function read_imgui_pairs_table(tbl, key, is_array, editable)
 								end
 								imgui.tree_pop()
 							end
-						elseif editable then 
-							editable_table_field(elem_key, element, tbl)
-						else
+						elseif not editable or not editable_table_field(elem_key, element, tbl) then 
 							imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
 						end
 						tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, }
@@ -1327,7 +1328,7 @@ local function get_enum(return_type)
 	local return_type_name = return_type:get_full_name()
 	local enum, value_to_list_order, enum_names = global_enums[return_type_name] 
 	if not enum then 
-		enum, value_to_list_order, enum_names = generate_statics(return_type_name)
+		enum, value_to_list_order, enum_names = generate_statics_global(return_type_name)
 		global_enums[return_type_name] = table.pack(enum, value_to_list_order, enum_names)
 	else
 		enum, value_to_list_order, enum_names = table.unpack(enum)
@@ -1844,7 +1845,7 @@ local function save_json_gameobject(anim_object, merge_table, single_component)
 		local raw_tbl = {[single_component]=anim_object.components_named[single_component] or anim_object.gameobj}
 		local file_style = jsonify_table(raw_tbl, false, {dont_nest_components=true})
 		output = {[anim_object.name]=merge_tables(old_file[anim_object.name], file_style)}
-		test = {raw_tbl, file_style, output}
+		--test = {raw_tbl, file_style, output}
 	else
 		output = { [anim_object.name] = merge_tables(anim_object.components_named, {["GameObject"]=anim_object.gameobj} ) }
 		for i, child in ipairs(anim_object.children or {}) do
@@ -2075,20 +2076,23 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 															for fname, val in pairs(sub_tbl) do 
 																local sub_mth = sub_pd.setters[fname]
 																if sub_mth then
+																	local so_tbl = sub_obj._ or create_REMgdObj(sub_obj)
 																	log.info("Sub table set " .. sub_mth:get_name() .. " " .. logv(val, nil, 0) .. " for " .. logv(sub_obj, nil, 0) )
-																	table.insert(deferred_calls[sub_obj], { func=sub_mth:get_name(), args=val } )
+																	table.insert(deferred_calls[sub_obj], { func=sub_mth:get_name(), args=val , vardata=sub_obj[fname]} )
 																end
 															end
 														end
 													else --if (type(to_set[i])~="string") or not to_set[i]:find("%.%.%.") then
+														local o_tbl = obj._ or create_REMgdObj(obj)
 														log.info("Multi-param set " .. method_name .. " " .. logv(to_set[i], nil, 0) .. " at idx " .. (i-1) .. " for " .. logv(obj, nil, 0) )
-														table.insert(deferred_calls[obj], { func=method:get_name(), args= (not method:get_param_types()[2]:is_primitive()) and {i-1, to_set[i]} or {to_set[i], i-1} } )
+														table.insert(deferred_calls[obj], { func=method:get_name(), args= (not method:get_param_types()[2]:is_primitive()) and {i-1, to_set[i]} or {to_set[i], i-1}, vardata=obj[method_name] } )
 													end
 												end
 											end
 										elseif (to_set ~= nil) and (to_set ~= "") then
+											local o_tbl = obj._ or create_REMgdObj(obj)
 											log.info("Setting " .. method_name .. " " .. logv(to_set, nil, 0) .. " for " .. logv(obj, nil, 0) )
-											table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set } )
+											table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set, vardata=obj[method_name] } )
 										end
 									end
 								end
@@ -2257,10 +2261,10 @@ end
 --Check if xform is child of another -------------------------------------------------------------------------------------------------
 local function is_child_of(child_xform, possible_parent_xform)
 	while is_valid_obj(child_xform) do
+		child_xform = child_xform:call("get_Parent")
 		if child_xform == possible_parent_xform then
 			return true
 		end
-		child_xform = child_xform:call("get_Parent")
 	end
 	return false
 end
@@ -4585,10 +4589,9 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				goto exit
 			end
 			
-			if freeze or (var_metadata.timer_start and (uptime - var_metadata.timer_start) > 0.1) or var_metadata.do_reset_value then
+			if freeze or (var_metadata.timer_start and (uptime - var_metadata.timer_start) > 0.1) then
 				--if var_metadata.value_org ~= var_metadata.value and (not var_metadata.ret_type:is_a("System.Boolean") or not imgui.same_line()) and imgui.button("X") then
-				if (not var_metadata.display_name and not imgui.same_line() and imgui.button("X")) or var_metadata.do_reset_value then --value_org ~= --(not var_metadata.show_var_data or var_metadata.display_name) and 
-					var_metadata.do_reset_value = nil
+				if (not var_metadata.display_name and not imgui.same_line() and imgui.button("X")) then --value_org ~= --(not var_metadata.show_var_data or var_metadata.display_name) and 
 					if element_idx then 
 						value = var_metadata.value_org[element_idx]
 						var_metadata.freezetable[element_idx] = nil
@@ -4621,7 +4624,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		else
 			var_metadata.freeze = freeze or false 
 		end
-		var_metadata.timer_start = (changed and (freeze == nil) and uptime) or var_metadata.timer_start --set the timer when its changed (otherwise it flickers) --
+		var_metadata.timer_start = (changed and (freeze == nil) and uptime) or var_metadata.timer_start or nil--set the timer when its changed (otherwise it flickers) --
 	end
 	
 	if var_metadata.show_var_data then 
@@ -4652,7 +4655,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 			end
 			if not is_obj then 
 				local freeze_changed
-				var_metadata.timer_start = (freeze ~= nil) and uptime
+				var_metadata.timer_start = (freeze ~= nil) and uptime or nil
 				freeze_changed, freeze = imgui.checkbox("Freeze", freeze)
 				if freeze_changed then 
 					if element_idx then 
@@ -4664,7 +4667,15 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				end
 				imgui.same_line()
 				if imgui.button("Reset Value") then 
-					var_metadata.do_reset_value = true
+					if element_idx then 
+						value = var_metadata.value_org[element_idx]
+						var_metadata.freezetable[element_idx] = nil
+					else
+						value = var_metadata.value_org
+						var_metadata.value = value
+						var_metadata.freeze = nil
+					end
+					changed = true
 				end
 			end
 			for key, value in orderedPairs(var_metadata) do 
@@ -5274,8 +5285,8 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						held_transforms[anim_object.parent] = held_transforms[anim_object.parent] or GameObject:new_AnimObject{xform = anim_object.parent}
 					end
 					
-					if Collection and not Collection[anim_object.xform] and (not imgui.same_line() and imgui.button("Add to Collection")) then 
-						Collection[anim_object.xform] = anim_object
+					if Collection and (not Collection[anim_object.name] or not Collection[anim_object.name].xform) and (not imgui.same_line() and imgui.button("Add to Collection")) then 
+						Collection[anim_object.name] = anim_object
 						SettingsCache.detach_collection = true
 						json.dump_file("EMV_Engine\\Collection.json",  jsonify_table(Collection, false, {convert_lua_objs=true}))
 					end
@@ -5394,231 +5405,17 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					
 					anim_object.joints = anim_object.joints or lua_get_system_array(anim_object.xform:call("get_Joints"))
 					
-					if (not anim_object.same_joints_constraint or not anim_object.parent) and anim_object.joints and imgui.tree_node("Poser") then
-						
-						anim_object.poser = anim_object.poser or {
-							name=anim_object.key_name:gsub("/", "."),
-							slots={},
-							current_slot_idx=1, 
-							current_object_idx=1,
-							current_prop_name_idx=1,
-							prop_names={"_LocalEulerAngle", "_EulerAngle"},
-							use_gizmos=true,
-							undo={},
-						}
-						local poser = anim_object.poser
-						
-						if not poser.names then
-							poser.current_name = poser.current_name or poser.name
-							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
-							poser.slots = {}
-							for i = 1, 8 do 
-								poser.slots[i] = tostring(i) .. (current_file["num:" .. i] and "*" or "")
-							end
-							poser.paths=fs.glob([[EMV_Engine\\Poses\\.*.json]])
-							poser.names = {}
-							for i, filepath in ipairs(poser.paths) do 
-								table.insert(poser.names, filepath:match("^.+\\(.+)%."))
-							end
-							poser.current_object_idx = find_index(poser.names, poser.current_name) or table.binsert(poser.names, poser.current_name)
-						end
-						
-						poser.is_open = uptime
-						
-						poser.is_local = (poser.current_prop_name_idx==1) or nil
-						
-						if imgui.tree_node("[Lua]") then
-							read_imgui_element(poser)
-							imgui.tree_pop()
-						end
-						
-						changed, poser.current_object_idx = imgui.combo("Object", poser.current_object_idx, poser.names)
-						if changed then 
-							poser.current_name = poser.names[poser.current_object_idx]
-							poser.names = nil
-							poser.current_slot_idx = 1
-						end
-						
-						changed, poser.current_slot_idx = imgui.combo("Slot", poser.current_slot_idx, poser.slots)
-						
-						local clear_slot = poser.slots[poser.current_slot_idx]:find("*") and not imgui.same_line() and imgui.button("X")
-						
-						changed, poser.current_prop_name_idx = imgui.combo("Rotation Type", poser.current_prop_name_idx, poser.prop_names)
-						poser.prop_name = poser.prop_names[poser.current_prop_name_idx]
-						
-						changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
-						
-						if imgui.button("Save Pose") or clear_slot then 
-							local poses = {}
-							if not clear_slot  then
-								for i, joint in ipairs(anim_object.joints or {}) do
-									if joint[poser.prop_name].freeze then 
-										poses[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
-									end
-								end
-							end
-							local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
-							current_file["num:" .. poser.current_slot_idx] = poses
-							json.dump_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json", current_file)
-							poser.names = nil
-						end
-						
-						imgui.same_line()
-						if imgui.same_line and imgui.button("Load Pose") then 
-							old_deferred_calls = {}
-							local poses = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json")
-							poses = poses and poses["num:" .. poser.current_slot_idx]
-							if poses then
-								for i, joint in pairs(anim_object.joints) do 
-									local saved_joint = poses[joint._.Name]
-									if saved_joint then 
-										old_deferred_calls[logv(joint) .. " " .. poser.prop_name]  = nil
-										jsonify_table(saved_joint, true, {set_props=true, obj_to_load_to=joint})
-										joint._ = joint._ or create_REMgdObj(joint)
-										joint[poser.prop_name].freeze = 1
-										deferred_calls[joint].vardata = joint[poser.prop_name]
-									end
-								end
-							end
-							poser.names = nil
-						end
-						
-						imgui.same_line()
-						if imgui.same_line and imgui.button("Freeze All") then 
-							for i, joint in ipairs(anim_object.joints or {}) do 
-								joint[poser.prop_name].freeze = true
-								deferred_calls[joint] = {func="set" .. poser.prop_name, args=joint[poser.prop_name].cvalue, vardata=joint[poser.prop_name]}
-							end
-						end
-						
-						imgui.same_line()
-						if imgui.same_line and imgui.button("Unfreeze All") then 
-							local frozen_total = 0
-							for i, joint in ipairs(anim_object.joints or {}) do 
-								if joint[poser.prop_name].freeze then 
-									frozen_total = frozen_total + 1
-									joint[poser.prop_name].freeze = nil
-									old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
-								end
-							end
-							if frozen_total == 0 then 
-								old_deferred_calls = {}
-							end
-						end
-						
-						imgui.text("Hotkeys:\n	[Z] - Undo\n	[Shift] - Freeze hovered joint\n	[Alt] - Unfreeze hovered joint")
-						local text_pos = {statics.width/4*3, statics.height/4*3}
-						local closest_to_mouse = {}
-						local prop_changed
-						
-						for i, joint in ipairs(anim_object.joints or {}) do 
-							j_o_tbl = joint._ or create_REMgdObj(joint)
-							j_o_tbl.last_opened = uptime
-							local var_metadata = joint[poser.prop_name]
-							var_metadata.display_name = j_o_tbl.Name
-							imgui.push_id(joint)
-								local selected_changed
-								selected_changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
-								local hovered = imgui.is_item_hovered()
-								
-								imgui.same_line()
-								
-								if show_prop(joint, var_metadata, key_name .. "p" .. i) then --and (var_metadata.freeze == false) then 
-									poser.undo.last = joint
-									var_metadata.freeze = 1
-									prop_changed = joint
-								end
-								var_metadata.update = true
-								
-								if anim_object.joint_positions then 
-									local mat_screen, mat_screen_top
-									local mat = (poser.is_local and anim_object.joint_positions[joint][1]) or anim_object.joint_positions[joint][2]
-									local pos = anim_object.joint_positions[joint][2][3] --world pos
-									mat[3] = pos
-									if var_metadata.freeze ~= nil or j_o_tbl.selected then
-										local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
-										mat_screen = draw.world_to_screen(pos)
-										mat_screen_top = draw.world_to_screen(pos + Vector3f.new(0, 0.08 * cam_dist, 0))
-									end
-									if mat_screen and mat_screen_top then --if frozen or selected
-										local delta = (mat_screen - mat_screen_top):length()
-										local mouse_delta = (mat_screen - imgui.get_mouse()):length()
-										if j_o_tbl.selected then
-											poser.selected = {joint, mat_screen, mat, mouse_delta}
-										end
-										if (mouse_delta <= delta) or j_o_tbl.selected then
-											if not closest_to_mouse[1] or (mouse_delta < closest_to_mouse[4]) then
-												closest_to_mouse = {joint, mat_screen, mat, mouse_delta}
-											end
-										end
-									end
-								end
-								
-								hovered = hovered or imgui.is_item_hovered()
-								if selected_changed or (not var_metadata.freeze and hovered and check_key_released(via.hid.KeyboardKey.Shift, 0.0))  then 
-									poser.undo.last = joint
-									var_metadata.freeze = true
-									j_o_tbl.selected = true
-									deferred_calls[joint] = {func="set" .. poser.prop_name, args=var_metadata.cvalue, vardata=var_metadata}
-								end
-								if var_metadata.freeze and (not imgui.same_line() and imgui.button("X") or (hovered and check_key_released(via.hid.KeyboardKey.Menu, 0.0))) then
-									old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
-									var_metadata.freeze = nil
-									j_o_tbl.selected = nil
-								end
-								
-							imgui.pop_id()
-							var_metadata.display_name = nil
-						end
-						
-						if not closest_to_mouse[1] and poser.selected then 
-							closest_to_mouse = poser.selected
-						end
-						
-						if poser.use_gizmos and (closest_to_mouse[1]) then 
-							local joint = closest_to_mouse[1]
-							local mat = closest_to_mouse[3]
-							changed, mat = draw.gizmo(joint:get_address(), mat, imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
-							if changed then 
-								deferred_calls[joint] = {func="set" .. poser.prop_name, args=mat:to_quat():to_euler(), vardata=joint[poser.prop_name]}
-								joint[poser.prop_name].freeze = 1
-								prop_changed = joint
-							end
-							draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
-							draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
-						end
-						
-						if prop_changed then
-							local joint = prop_changed
-							if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 1.2)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
-								poser.undo.last = joint
-								poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint[poser.prop_name].cvalue}
-								table.insert(poser.undo[joint].prev_rot, joint[poser.prop_name].cvalue)
-							end
-							poser.undo[joint].start = uptime
-						end
-						
-						if poser.undo.last and poser.undo[poser.undo.last] and check_key_released(via.hid.KeyboardKey.Z) then
-							local joint = poser.undo.last
-							joint[poser.prop_name].freeze = 1
-							deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
-							poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
-						end
+					if (not anim_object.same_joints_constraint or not anim_object.parent or anim_object.body_part == "Face") and anim_object.joints and imgui.tree_node("Poser") then
+						anim_object:imgui_poser()
 						imgui.tree_pop()
 					end
-					
+					--[[
 					if anim_object and anim_object.materials and anim_object.materials[1] and imgui.tree_node_ptr_id(anim_object.materials[1].mesh:get_address() - 1235, "Materials") then
 						show_imgui_mat(anim_object) 
 						imgui.tree_pop()
 					end
 					
-					if anim_object.behaviortrees and imgui.tree_node_str_id(anim_object.name .. "Trees", "Action Monitor") then 
-						for i, bhvt_obj in ipairs(anim_object.behaviortrees) do
-							bhvt_obj:imgui_behaviortree()
-						end
-						imgui.tree_pop()
-					end
-					
+					anim_object:action_monitor()]]
 				end
 				
 				
@@ -5648,12 +5445,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 			elseif o_tbl.type:is_a("via.behaviortree.BehaviorTree") then 
 				o_tbl.gameobj = o_tbl.gameobj or m_obj:call("get_GameObject")
 				o_tbl.go = o_tbl.go or (o_tbl.gameobj and held_transforms[o_tbl.xform or o_tbl.gameobj:call("get_Transform")] or GameObject:new{gameobj=o_tbl.gameobj})
-				if o_tbl.go.behaviortrees and imgui.tree_node_str_id(o_tbl.go.name .. "Trees", "Action Monitor") then 
-					for i, bhvt_obj in ipairs(o_tbl.go.behaviortrees) do
-						bhvt_obj:imgui_behaviortree()
-					end
-					imgui.tree_pop()
-				end
+				o_tbl.go:action_monitor(m_obj)
 			elseif o_tbl.name == "UserVariablesHub" then
 				show_imgui_uservariables(m_obj)
 			end
@@ -5817,7 +5609,7 @@ local function clear_object(xform)
 			GameObject.clear_Spawn(nil, xform, is_player)
 		end
 		held_transforms[xform] = nil
-		Collection[xform] = nil
+		--Collection[xform] = nil
 		if player and player.xform == xform then player = nil end
 		if xform.get_address then
 			log.info("Removed lua objects with transform " .. xform:get_address())
@@ -5895,6 +5687,172 @@ local Material = {
         return setmetatable(o, self)
 	end,
 	
+	--Changes material variables, up to multiple at once from multiple related objects:
+	change_multi = function(self, og_var_name, og_var_id, og_diff, og_object)
+		og_object = og_object or self.anim_object
+		local changed_objs = {[og_object.xform]=og_object}
+		
+		local function recurse_multi(mat, var_name, var_id, diff, object)
+			object = object or mat.anim_object	
+			mat.multi[var_id] = mat.multi[var_id] or {}
+			if mat.multi[var_id].do_multi then 
+				
+				mat.multi[var_id].search_terms = mat.multi[var_id].search_terms or {}
+				mat.multi[var_id].search_terms[1] = mat.multi[var_id].search_terms[1] or mat.multi[var_id].search_term or ""
+				
+				for m, other_mat in ipairs(object.materials or {}) do 
+					for t, search_term in ipairs(mat.multi[var_id].search_terms) do
+						if other_mat ~= mat and (search_term == "" or other_mat.name:lower():find(search_term:lower()))  then 
+							local other_id = other_mat.var_names_dict[var_name]
+							local other_var = other_mat.on and other_mat.variables[other_id]
+							if other_var then 
+								if not diff then 
+									other_mat.variables[other_id] = (other_mat.variable_types[other_id] == 4 and Vector4f.new(other_mat.orig_vars[other_id].x, other_mat.orig_vars[other_id].y, other_mat.orig_vars[other_id].z, other_mat.orig_vars[other_id].w)) or other_mat.orig_vars[other_id] --for reset
+								elseif other_mat.variable_types[other_id] == 4 then
+									--for changing only by the amount of difference changed in the original mat:
+									--other_mat.variables[other_id] = Vector4f.new(other_var.x + diff.x, other_var.y + diff.y, other_var.z + diff.z, other_var.w + diff.w) or (other_var + diff) 
+									--for changing to exactly the value of the original mat:
+									other_mat.variables[other_id] = Vector4f.new(mat.variables[var_id].x, mat.variables[var_id].y, mat.variables[var_id].z, mat.variables[var_id].w) or (mat.variables[var_id]) 
+								end
+								table.insert(other_mat.deferred_vars, other_mat.var_names_dict[var_name])
+								other_mat.anim_object.update_materials = true
+								changed_objs[object.xform] = object
+							end
+						end
+					end 
+				end
+				
+				if SettingsCache.affect_children then 
+					for i, child in ipairs(object.children or {}) do
+						if child ~= mat.anim_object.xform then 
+							held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
+							recurse_multi(mat, var_name, var_id, diff, held_transforms[child]) --change children
+						end
+					end
+					if mat.anim_object.mesh_name_short and object==mat.anim_object then 
+						
+						local parent = object.pairing and (object.pairing.xform == object.parent) and object.pairing
+						
+						if not parent then --check sibling gameobjects of original gameobject be checking if the parent's gameobject has the same 4 chars of mesh name:
+							parent = object.parent and held_transforms[object.parent] or GameObject:new_AnimObject{ xform=object.parent }
+							parent = (parent and (parent.name:find(mat.anim_object.mesh_name_short:sub(1, 4)) or (figure_mode and (isRE2 or isRE3) and parent.name:find("_figure")))) and parent
+						end
+						if parent then
+							
+							for i, child in ipairs(parent.children or {}) do
+								if child ~= mat.anim_object.xform then 
+									held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
+									recurse_multi(mat, var_name, var_id, diff, held_transforms[child])
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		recurse_multi(self, og_var_name, og_var_id, og_diff, og_object)
+		og_object.shared_material_objects = changed_objs
+	end,
+	
+	--Displays one material variable from Material class in imgui:
+	draw_material_variable = function(self, var_name, v)
+		imgui.push_id(self.mesh:get_address() + v)
+		imgui.begin_rect()
+			
+			--[[if self.variables[v] ~= self.orig_vars[v] then 
+				imgui.text("*")
+				imgui.same_line()
+			end]]
+			
+			local can_reset = (self.variables[v] ~= self.orig_vars[v])
+			if can_reset then imgui.begin_rect() imgui.begin_rect() end
+			if imgui.button(var_name) then 
+				self.anim_object.update_materials = true
+				self.variables[v] = self.variable_types[v] == 4 and Vector4f.new(self.orig_vars[v].x, self.orig_vars[v].y, self.orig_vars[v].z, self.orig_vars[v].w) or self.orig_vars[v]
+				table.insert(self.deferred_vars, v)
+				self:change_multi(var_name, v)
+			end
+			if can_reset then 
+				imgui.end_rect(2) 
+				imgui.end_rect(3)
+				imgui.same_line()
+				imgui.text("*")
+			else
+				imgui.same_line()
+				imgui.text("  ")
+			end
+			
+			imgui.same_line()
+			self.multi[v] = self.multi[v] or {}
+			changed, self.multi[v].do_multi = imgui.checkbox("Change Multiple", self.multi[v].do_multi)
+			
+			local new_var =  self.variable_types[v] == 4 and Vector4f.new(self.variables[v].x, self.variables[v].y, self.variables[v].z, self.variables[v].w) or self.variables[v]
+			
+			if self.variable_types[v] == 1 then 
+				changed, new_var = imgui.drag_float(var_name, new_var, 0.01, -10000, 10000)
+			elseif self.variable_types[v] == 4 then
+				local was_changed = false
+				changed, new_var = show_imgui_vec4(new_var, var_name)
+			else
+				changed, new_var = imgui.checkbox(var_name, new_var)
+			end
+			if changed then 
+				self.anim_object.update_materials = true
+				table.insert(self.deferred_vars, v)
+				self.variables[v] = new_var
+				self:change_multi(var_name, v, new_var - self.variables[v]) 
+			end
+			if self.multi[v].do_multi then 
+				changed, self.multi[v].search_term = imgui.input_text("Search Terms", self.multi[v].search_term or self.last_search_terms)
+				self.multi[v].search_terms = self.multi[v].search_terms or {}
+				self.multi[v].search_terms[1] = self.multi[v].search_terms[1] or self.multi[v].search_term
+				if changed then
+					self.last_search_terms = self.multi[v].search_term
+					self.multi[v].search_terms  = split(self.multi[v].search_term, " ") or table.pack(self.multi[v].search_term)
+				end
+			end
+		imgui.end_rect(3)
+		imgui.spacing()
+		imgui.pop_id()
+	end,
+	
+	--Draw the whole material menu in imgui
+	draw_imgui = function(self)
+		imgui.push_id(self.name)
+			changed, self.on = imgui.checkbox("", self.on)
+			if changed then
+				self.mesh:call("setMaterialsEnable", self.id, self.on)
+			end
+			imgui.same_line()
+			if imgui.tree_node_str_id(self.name, self.name) then
+				
+				if self.textures[1] and imgui.tree_node("Textures") then
+					self.tex_idxes = self.tex_idxes or {}
+					for t, texture in ipairs(self.textures) do 
+						local tex_name = texture:call("ToString()"):match("^.+%[@?(.+)%]")
+						local mat_name = self.mesh:call("getMaterialTextureName", self.id, t-1) or t
+						--local mat_name = ({pcall(self.mesh.call, self.mesh, "getMaterialTextureName", self.id, t-1)})
+						--mat_name = mat_name[1] and mat_name[2] or t
+						self.tex_idxes[t] = add_resource_to_cache(texture)
+						changed, self.tex_idxes[t] = imgui.combo((mat_name or t), self.tex_idxes[t], RN.tex_resource_names) --self.tex_idxes[t] or find_index(RN.tex_resource_names, tex_name) or 1
+						if changed then 
+							local mat_var_idx = self.mesh:call("getMaterialVariableIndex", self.id, hashing_method(mat_name)) 
+							deferred_calls[self.mesh] = { func="setMaterialTexture", args={self.id, (mat_var_idx ~= 255) and mat_var_idx or t-1, RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ] } }
+							self.textures[t] = RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ]
+						end
+					end
+					imgui.tree_pop()
+				end
+			
+				for v, var_name in ipairs(self.variable_names) do  
+					self:draw_material_variable(var_name, v)
+				end
+				
+				imgui.tree_pop() 
+			end
+		imgui.pop_id()
+	end,
+	
 	update = function(self)
 		if self.var_num then 
 			for v=1, self.var_num do
@@ -5914,135 +5872,6 @@ local Material = {
 		end
 	end,
 }
-
---Changes material variables, sometimes multiple at once from multiple related objects:
-local function change_multi(og_mat, og_var_name, og_var_id, og_diff, og_object)
-	og_object = og_object or og_mat.anim_object
-	local changed_objs = {[og_object.xform]=og_object}
-	
-	local function recurse_multi(mat, var_name, var_id, diff, object)
-		object = object or mat.anim_object	
-		mat.multi[var_id] = mat.multi[var_id] or {}
-		if mat.multi[var_id].do_multi then 
-			
-			mat.multi[var_id].search_terms = mat.multi[var_id].search_terms or {}
-			mat.multi[var_id].search_terms[1] = mat.multi[var_id].search_terms[1] or mat.multi[var_id].search_term or ""
-			
-			for m, other_mat in ipairs(object.materials or {}) do 
-				for t, search_term in ipairs(mat.multi[var_id].search_terms) do
-					if other_mat ~= mat and (search_term == "" or other_mat.name:lower():find(search_term:lower()))  then 
-						local other_id = other_mat.var_names_dict[var_name]
-						local other_var = other_mat.on and other_mat.variables[other_id]
-						if other_var then 
-							if not diff then 
-								other_mat.variables[other_id] = (other_mat.variable_types[other_id] == 4 and Vector4f.new(other_mat.orig_vars[other_id].x, other_mat.orig_vars[other_id].y, other_mat.orig_vars[other_id].z, other_mat.orig_vars[other_id].w)) or other_mat.orig_vars[other_id] --for reset
-							elseif other_mat.variable_types[other_id] == 4 then
-								--for changing only by the amount of difference changed in the original mat:
-								--other_mat.variables[other_id] = Vector4f.new(other_var.x + diff.x, other_var.y + diff.y, other_var.z + diff.z, other_var.w + diff.w) or (other_var + diff) 
-								--for changing to exactly the value of the original mat:
-								other_mat.variables[other_id] = Vector4f.new(mat.variables[var_id].x, mat.variables[var_id].y, mat.variables[var_id].z, mat.variables[var_id].w) or (mat.variables[var_id]) 
-							end
-							table.insert(other_mat.deferred_vars, other_mat.var_names_dict[var_name])
-							other_mat.anim_object.update_materials = true
-							changed_objs[object.xform] = object
-						end
-					end
-				end 
-			end
-			
-			if SettingsCache.affect_children then 
-				for i, child in ipairs(object.children or {}) do
-					if child ~= mat.anim_object.xform then 
-						held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
-						recurse_multi(mat, var_name, var_id, diff, held_transforms[child]) --change children
-					end
-				end
-				if mat.anim_object.mesh_name_short and object==mat.anim_object then 
-					
-					local parent = object.pairing and (object.pairing.xform == object.parent) and object.pairing
-					
-					if not parent then --check sibling gameobjects of original gameobject be checking if the parent's gameobject has the same 4 chars of mesh name:
-						parent = object.parent and held_transforms[object.parent] or GameObject:new_AnimObject{ xform=object.parent }
-						parent = (parent and (parent.name:find(mat.anim_object.mesh_name_short:sub(1, 4)) or (figure_mode and (isRE2 or isRE3) and parent.name:find("_figure")))) and parent
-					end
-					if parent then
-						
-						for i, child in ipairs(parent.children or {}) do
-							if child ~= mat.anim_object.xform then 
-								held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
-								recurse_multi(mat, var_name, var_id, diff, held_transforms[child])
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-	recurse_multi(og_mat, og_var_name, og_var_id, og_diff, og_object)
-	og_object.shared_material_objects = changed_objs
-end
-
---Displays one material variable from Material class in imgui:
-local function draw_material_variable(mat, var_name, v)
-	imgui.push_id(mat.mesh:get_address() + v)
-	imgui.begin_rect()
-		
-		--[[if mat.variables[v] ~= mat.orig_vars[v] then 
-			imgui.text("*")
-			imgui.same_line()
-		end]]
-		
-		local can_reset = (mat.variables[v] ~= mat.orig_vars[v])
-		if can_reset then imgui.begin_rect() imgui.begin_rect() end
-		if imgui.button(var_name) then 
-			mat.anim_object.update_materials = true
-			mat.variables[v] = mat.variable_types[v] == 4 and Vector4f.new(mat.orig_vars[v].x, mat.orig_vars[v].y, mat.orig_vars[v].z, mat.orig_vars[v].w) or mat.orig_vars[v]
-			table.insert(mat.deferred_vars, v)
-			change_multi(mat, var_name, v)
-		end
-		if can_reset then 
-			imgui.end_rect(2) 
-			imgui.end_rect(3)
-			imgui.same_line()
-			imgui.text("*")
-		else
-			imgui.same_line()
-			imgui.text("  ")
-		end
-		
-		imgui.same_line()
-		mat.multi[v] = mat.multi[v] or {}
-		changed, mat.multi[v].do_multi = imgui.checkbox("Change Multiple", mat.multi[v].do_multi)
-		
-		local new_var =  mat.variable_types[v] == 4 and Vector4f.new(mat.variables[v].x, mat.variables[v].y, mat.variables[v].z, mat.variables[v].w) or mat.variables[v]
-		
-		if mat.variable_types[v] == 1 then 
-			changed, new_var = imgui.drag_float(var_name, new_var, 0.01, -10000, 10000)
-		elseif mat.variable_types[v] == 4 then
-			local was_changed = false
-			changed, new_var = show_imgui_vec4(new_var, var_name)
-		else
-			changed, new_var = imgui.checkbox(var_name, new_var)
-		end
-		if changed then 
-			mat.anim_object.update_materials = true
-			table.insert(mat.deferred_vars, v)
-			mat.variables[v] = new_var
-			change_multi(mat, var_name, v, new_var - mat.variables[v]) 
-		end
-		if mat.multi[v].do_multi then 
-			changed, mat.multi[v].search_term = imgui.input_text("Search Terms", mat.multi[v].search_term or mat.last_search_terms)
-			mat.multi[v].search_terms = mat.multi[v].search_terms or {}
-			mat.multi[v].search_terms[1] = mat.multi[v].search_terms[1] or mat.multi[v].search_term
-			if changed then
-				mat.last_search_terms = mat.multi[v].search_term
-				mat.multi[v].search_terms  = split(mat.multi[v].search_term, " ") or table.pack(mat.multi[v].search_term)
-			end
-		end
-	imgui.end_rect(3)
-	imgui.spacing()
-	imgui.pop_id()
-end
 
 --Displays one full material from the Material class in imgui:
 show_imgui_mat = function(anim_object)
@@ -6090,39 +5919,7 @@ show_imgui_mat = function(anim_object)
 	end
 	
 	for i, mat in ipairs(anim_object.materials) do
-		imgui.push_id(mat.name)
-			changed, mat.on = imgui.checkbox("", mat.on)
-			if changed then
-				anim_object.mesh:call("setMaterialsEnable", i-1, anim_object.materials[i].on)
-			end
-			imgui.same_line()
-			if imgui.tree_node_str_id(mat.name, mat.name) then
-				
-				if mat.textures[1] and imgui.tree_node("Textures") then
-					mat.tex_idxes = mat.tex_idxes or {}
-					for t, texture in ipairs(mat.textures) do 
-						local tex_name = texture:call("ToString()"):match("^.+%[@?(.+)%]")
-						local mat_name = mat.mesh:call("getMaterialTextureName", i-1, t-1) or t
-						--local mat_name = ({pcall(mat.mesh.call, mat.mesh, "getMaterialTextureName", i-1, t-1)})
-						--mat_name = mat_name[1] and mat_name[2] or t
-						mat.tex_idxes[t] = add_resource_to_cache(texture)
-						changed, mat.tex_idxes[t] = imgui.combo((mat_name or t), mat.tex_idxes[t], RN.tex_resource_names) --mat.tex_idxes[t] or find_index(RN.tex_resource_names, tex_name) or 1
-						if changed then 
-							local mat_var_idx = mat.mesh:call("getMaterialVariableIndex", i-1, hashing_method(mat_name)) 
-							deferred_calls[mat.mesh] = { func="setMaterialTexture", args={i-1, (mat_var_idx ~= 255) and mat_var_idx or t-1, RSCache.tex_resources[ RN.tex_resource_names[ mat.tex_idxes[t] ] ] } }
-							mat.textures[t] = RSCache.tex_resources[ RN.tex_resource_names[ mat.tex_idxes[t] ] ]
-						end
-					end
-					imgui.tree_pop()
-				end
-			
-				for v, var_name in ipairs(mat.variable_names) do  
-					draw_material_variable(mat, var_name, v)
-				end
-				
-				imgui.tree_pop() 
-			end
-		imgui.pop_id()
+		mat:draw_imgui()
 	end
 end
 
@@ -6191,8 +5988,8 @@ local function imgui_anim_object_viewer(anim_object, obj_name, index)
 				--if not is_only_parent then imgui.begin_rect() end
 					held_transforms[anim_object.parent] = held_transforms[anim_object.parent] or GameObject:new_AnimObject{ xform=anim_object.parent }
 					if imgui.tree_node_str_id(obj_name .. "Prt", is_only_parent or held_transforms[anim_object.parent].name) then
-						--imgui_anim_object_viewer(held_transforms[anim_object.parent], held_transforms[anim_object.parent].name)
-						imgui.managed_object_control_panel(anim_object.parent, "Parent", held_transforms[anim_object.parent].name)
+						imgui_anim_object_viewer(held_transforms[anim_object.parent], held_transforms[anim_object.parent].name)
+						--imgui.managed_object_control_panel(anim_object.parent, "Parent", held_transforms[anim_object.parent].name)
 						imgui.tree_pop()
 					end
 				--if not is_only_parent then imgui.end_rect() end
@@ -6206,8 +6003,8 @@ local function imgui_anim_object_viewer(anim_object, obj_name, index)
 			for i, child in ipairs(anim_object.children or {}) do
 				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
 				if held_transforms[child] and imgui.tree_node_str_id(obj_name .. "Ch" .. i,  is_only_child or held_transforms[child].name) then
-					--imgui_anim_object_viewer(held_transforms[child], "Object")
-					imgui.managed_object_control_panel(child, "Ch" .. i, held_transforms[child].name)
+					imgui_anim_object_viewer(held_transforms[child], "Object")
+					--imgui.managed_object_control_panel(child, "Ch" .. i, held_transforms[child].name)
 					imgui.tree_pop()
 				end
 			end
@@ -6218,20 +6015,20 @@ local function imgui_anim_object_viewer(anim_object, obj_name, index)
 		end
 	end
 	
-	if not figure_mode and not cutscene_mode and anim_object.behaviortrees and anim_object.behaviortrees[1] and anim_object.behaviortrees[1].names_indexed and imgui.tree_node_str_id(anim_object.name .. "Trees", "Action Monitor") then 
-		anim_object.opened = true
-		for i, bhvt_obj in ipairs(anim_object.behaviortrees or {}) do
-			if imgui.tree_node(bhvt_obj.name) then
-				bhvt_obj:imgui_behaviortree()
-				imgui.tree_pop()
-			end
-		end
+	--[[if (not anim_object.same_joints_constraint or not anim_object.parent or anim_object.body_part == "Face") and anim_object.joints and imgui.tree_node("Poser") then
+		anim_object:imgui_poser()
 		imgui.tree_pop()
+	end]]
+	
+	if not figure_mode and not cutscene_mode and anim_object.behaviortrees and anim_object.behaviortrees[1] then --and imgui.tree_node_str_id(anim_object.name .. "Trees", "Action Monitor") then 
+		anim_object.opened = true
+		anim_object:action_monitor()
 	end
 	
 	--if anim_object.mesh and not anim_object.materials then 
 	--	anim_object:set_materials() 
 	--end
+	
 	if anim_object.materials and imgui.tree_node_ptr_id(anim_object.mesh, "Materials") then
 		show_imgui_mat(anim_object) 
 		imgui.tree_pop()
@@ -6258,28 +6055,79 @@ end
 
 --Displays the "Collection" menu in imgui
 local function show_collection()
-	if imgui.button("Clear Collected Objects") then 
-		Collection = {}
-	end
-	imgui.same_line()
-	if imgui.button("Scan for Objects") then 
+	local dump_collection
+	--if imgui.button("Clear Collection") then 
+	--	Collection = {}
+	--end
+	
+	--imgui.same_line()
+	if imgui.button("Scan All") then 
 		Collection = jsonify_table(json.load_file("EMV_Engine\\Collection.json") or {}, true)
 	end
-	for xform, obj in pairs(Collection) do 
-		if xform:read_qword(0x10) ~= 0 then
-			if imgui.tree_node_ptr_id(xform, obj.name) then 
-				imgui.same_line()
-				if imgui.button("X") then 
-					Collection[xform] = nil 
-					json.dump_file("EMV_Engine\\Collection.json",  jsonify_table(Collection, false, {convert_lua_objs=true}))
+	
+	imgui.same_line()
+	if imgui.button("Find Characters") then
+		local motfsms = {}
+		for i, result in ipairs(find("via.motion.MotionFsm2")) do 
+			motfsms[result] = true
+		end
+		local merged = merge_tables(find("via.motion.ActorMotion"), find("via.physics.CharacterController"))
+		local new_collection = merge_tables({}, Collection)
+		for i, result in ipairs(merge_tables(merged, find("via.motion.DummySkeleton"))) do 
+			if (not player or motfsms[result]) then
+				local name = result:call("get_GameObject"):call("get_Name")
+				new_collection[name] = new_collection[name] or GameObject:new{xform=result}
+			end
+		end
+		for name, obj in pairs(new_collection) do --remove new objects that are children of other new objects
+			if not Collection[name] then
+				for nm2, obj2 in pairs(new_collection) do 
+					if is_child_of(obj.xform, obj2.xform) then 
+						new_collection[name] = nil
+					end
 				end
+			end
+		end
+		Collection = new_collection
+		dump_collection = true
+	end
+	
+	for name, obj in pairs(Collection) do 
+		imgui.text("	")
+		imgui.same_line()
+		if obj.xform and obj.xform:read_qword(0x10) ~= 0 then
+			obj.object_json = obj.object_json or jsonify_table({obj}, false, {convert_lua_objs=true})[1]
+			imgui.push_id(name .. "X")
+				if imgui.button("X") then 
+					Collection[name] = nil 
+					dump_collection = true
+				end
+			imgui.pop_id()
+			imgui.same_line()
+			if imgui.tree_node(obj.name) then 
 				imgui_anim_object_viewer(obj)
 				imgui.tree_pop()
 			end
 		else
-			clear_object(xform)
-			Collection[xform] = {name=obj.name .. " [Deleted]"}
+			if obj.name then
+				Collection[name] = obj.object_json
+				clear_object(obj.xform)
+			else--if imgui.tree_node(name) then 
+				imgui.push_id(name .. "X")
+					if imgui.button("Scan") then 
+						file = json.load_file("EMV_Engine\\Collection.json")
+						if file[name] then
+							Collection[name] = jsonify_table(file[name], true)
+						end
+					end
+				imgui.pop_id()
+				imgui.same_line()
+				imgui.text(name)
+			end
 		end
+	end
+	if dump_collection then 
+		json.dump_file("EMV_Engine\\Collection.json",  jsonify_table(Collection, false, {convert_lua_objs=true}))
 	end
 end
 
@@ -6417,7 +6265,7 @@ BHVT = {
 			static_objs.setn
 		}
 		if imgui.button_w_hotkey(name, self.imgui_keyname .. "." .. name, dfcall_template, dfcall_args, dfcall_json) then
-			self:set_node(name)
+			self:set_node(name, node.tree_idx)
 		end
 		
 		if (node.children or node.transitions or node.actions) then 
@@ -6520,7 +6368,7 @@ BHVT = {
 						changed, self.merge_name_idx = imgui.combo("[" .. i .."] Merge List", self.merge_name_idx or 1, nodes_history_names) 
 						if changed and CachedActions[ nodes_history_names[self.merge_name_idx] ][self.name] then
 							CachedActions[self.object.name][self.name] = merge_tables(CachedActions[self.object.name][self.name], CachedActions[ nodes_history_names[self.merge_name_idx] ][self.name])
-							self:set_node(nil, 1)
+							self:set_node(nil, 0, 1)
 						end
 					end]]
 				end
@@ -6613,12 +6461,12 @@ BHVT = {
 		self.obj:call("restartTree")
 	end,
 	
-	set_node = function(self, node_name, node_id, check_idx)
+	set_node = function(self, node_name, tree_idx, node_id, check_idx)
 		node_name = node_name or self.names_indexed[check_idx or self.current_name_idx]
 		if node_id then 
 			self.obj:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", node_id, nil, nil)
 		else
-			self.obj:call("setCurrentNode(System.String, System.UInt32, via.behaviortree.SetNodeInfo)", node_name, self.tree_idx, static_objs.setn)
+			self.obj:call("setCurrentNode(System.String, System.UInt32, via.behaviortree.SetNodeInfo)", node_name, tree_idx or self.tree_idx, static_objs.setn)
 		end
 	end,
 	
@@ -6665,6 +6513,22 @@ BHVT = {
 	end,
 }
 
+--Get which body part a GameObject represents (body, face, hair or item):
+local function get_body_part(str)
+	local body_part_name = str
+	local lower_name = str:lower()
+	if lower_name:find("face") or lower_name:find("head") or lower_name:find("face") or (isRE8 and lower_name:find("20_")) or (isDMC and lower_name:find("%d%d%d%d_[01]1")) or (isRE3 and lower_name:find("[ep][ml]%d%d%d1")) then
+		body_part_name = "Face"
+	elseif (lower_name:find("hair") and not lower_name:find("chair")) or lower_name:find("entacle") then --no chairs pls
+		body_part_name = "Hair"
+	elseif not lower_name:find("wp_") and (isDMC or not lower_name:find("%d%d%d%d_%d%d")) and (lower_name:find("body") or lower_name:find("ch%d%d_") or lower_name:find("em%d%d") or lower_name:find("pl%d%d")) then
+		body_part_name = "Body"
+	else
+		body_part_name = "Other"
+	end
+	return body_part_name
+end
+
 --GameObject lua class, used for everything: -------------------------------------------------------------------------------------------------
 GameObject = {
 	
@@ -6690,6 +6554,7 @@ GameObject = {
 		o.children = args.children or get_children(o.xform)
 		o.display = args.display or o.gameobj:call("get_Draw") --or number_to_bool[o.gameobj:read_byte(0x13)]
 		o.same_joints_constraint = o.xform:call("get_SameJointsConstraint") or nil
+		o.body_part = args.body_part or o.body_part or get_body_part(o.name)
 		o.components = args.components
 		
 		if o.parent then
@@ -6717,7 +6582,7 @@ GameObject = {
 				o.is_light = o.is_light or (typedef:get_name() == "IBL") or (not not (fname:find("Light[Shaft]-$") and fname:find("^via%.render"))) or nil
 				if typedef:is_a("via.behaviortree.BehaviorTree") then 
 					o.behaviortrees = o.behaviortrees or {}
-					local bhvt = BHVT:new{obj=component, xform=o.xform, object=o, index=#o.behaviortrees+1}
+					local bhvt = {obj=component, xform=o.xform, object=o, index=#o.behaviortrees+1}
 					table.insert(o.behaviortrees, bhvt)
 					--log.info(json.log(bhvt.names) .. " " ..  get_table_size(bhvt.names) .. " " .. o.behaviortrees.total_actions .. " " .. tostring(bhvt.names_indexed and #bhvt.names_indexed))
 				end
@@ -6755,7 +6620,42 @@ GameObject = {
 		o.key_name = get_gameobj_path(o.gameobj)
 		o.key_hash = o.key_name and hashing_method(o.key_name)
 		
+		if isDMC and SettingsCache.add_DMC5_names then 
+			local possible_names = {o.mesh_name, o.key_name}
+			for s, possible_name in ipairs(possible_names) do
+				for i, part in ipairs(split(possible_name, "/")) do 
+					local sub_tbl = split(part, "_")
+					for j, sub_part in ipairs(sub_tbl or {}) do
+						if sub_part:find("[ep][ml]%d%d")==1 and #sub_tbl > 1 then
+							o.char_name = sub_tbl[#sub_tbl]
+							goto exit
+						end
+						break
+					end
+				end
+			end
+			::exit::
+			if o.char_name then 
+				o.name = o.name .. " (" .. o.char_name .. ")"
+			end
+		end
+		
         return setmetatable(o, self)
+	end,
+	
+	action_monitor = function(self, tree_obj)
+		if self.behaviortrees and imgui.tree_node_str_id(self.name .. "Trees", "Action Monitor") then 
+			for i, bhvt_obj in ipairs(self.behaviortrees) do
+				if not tree_obj or bhvt_obj.obj == tree_obj then
+					if not bhvt_obj.imgui_behaviortree then 
+						bhvt_obj = BHVT:new(bhvt_obj)
+						self.behaviortrees[i] = bhvt_obj
+					end
+					bhvt_obj:imgui_behaviortree()
+				end
+			end
+			imgui.tree_pop()
+		end
 	end,
 	
 	change_child_setting = function(self, setting_name)
@@ -6783,6 +6683,236 @@ GameObject = {
 		if comps and comps[1] and next(comps_named) then 
 			self.components = comps
 			self.components_named = comps_named
+		end
+	end,
+	
+	imgui_poser = function(self)
+		self.poser = self.poser or {
+			name=self.key_name:gsub("/", "."),
+			slots={},
+			current_slot_idx=1, 
+			current_object_idx=1,
+			current_prop_name_idx=1,
+			prop_names={"_LocalEulerAngle", "_EulerAngle", "_LocalPosition", "_Position"},
+			use_gizmos=true,
+			undo={},
+		}
+		local poser = self.poser
+		
+		if not poser.names then
+			poser.current_name = poser.current_name or poser.name
+			local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
+			poser.slots = {}
+			for i = 1, 8 do 
+				poser.slots[i] = tostring(i) .. (current_file["num:" .. i] and "*" or "")
+			end
+			poser.paths=fs.glob([[EMV_Engine\\Poses\\.*.json]])
+			poser.names = {}
+			for i, filepath in ipairs(poser.paths) do 
+				table.insert(poser.names, filepath:match("^.+\\(.+)%."))
+			end
+			poser.current_object_idx = find_index(poser.names, poser.current_name) or table.binsert(poser.names, poser.current_name)
+		end
+		
+		poser.is_open = uptime
+		
+		if imgui.tree_node("[Lua]") then
+			read_imgui_element(poser)
+			imgui.tree_pop()
+		end
+		
+		changed, poser.current_object_idx = imgui.combo("Object", poser.current_object_idx, poser.names)
+		if changed then 
+			poser.current_name = poser.names[poser.current_object_idx]
+			poser.names = nil
+			poser.current_slot_idx = 1
+		end
+		
+		changed, poser.current_slot_idx = imgui.combo("Slot", poser.current_slot_idx, poser.slots)
+		
+		local clear_slot = poser.slots[poser.current_slot_idx]:find("*") and not imgui.same_line() and imgui.button("X")
+		
+		changed, poser.current_prop_name_idx = imgui.combo("Property Type", poser.current_prop_name_idx, poser.prop_names)
+		poser.prop_name = poser.prop_names[poser.current_prop_name_idx]
+		poser.is_local = not not poser.prop_name:find("ocal") or nil
+		
+		changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
+		
+		if imgui.button("Save Pose") or clear_slot then 
+			local pose = {}
+			local tmpo = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
+			local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
+			if not clear_slot  then
+				for i, joint in ipairs(self.joints or {}) do
+					if joint[poser.prop_name].freeze then 
+						pose[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
+					end
+				end
+				for name, joint in pairs(pose) do 
+					pose[name] = merge_tables(current_file["num:" .. poser.current_slot_idx][name], pose[name])
+				end
+			end
+			current_file["num:" .. poser.current_slot_idx] = pose
+			json.dump_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json", current_file)
+			poser.names = nil
+		end
+		
+		imgui.same_line()
+		if imgui.same_line and imgui.button("Load Pose") then 
+			old_deferred_calls = {}
+			local pose = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json")
+			pose = pose and pose["num:" .. poser.current_slot_idx]
+			if pose then
+				for i, joint in pairs(self.joints) do 
+					local saved_joint = pose[joint._.Name]
+					if saved_joint then 
+						joint._ = joint._ or create_REMgdObj(joint)
+						local joint_tbl = {__address=saved_joint.__address, __typedef=saved_joint.__typedef}
+						for key, value in pairs(saved_joint) do 
+							if key == poser.prop_name and joint[key] then 
+								old_deferred_calls[logv(joint) .. " " .. poser.prop_name]  = nil
+								--deferred_calls[joint].vardata = joint[key]
+								joint[key].freeze = 1
+								joint_tbl[key] = value
+							end
+						end
+						jsonify_table(joint_tbl, true, {set_props=true, obj_to_load_to=joint})
+					end
+				end
+			end
+			poser.names = nil
+		end
+		
+		imgui.same_line()
+		if imgui.same_line and imgui.button("Freeze All") then 
+			for i, joint in ipairs(self.joints or {}) do 
+				joint[poser.prop_name].freeze = true
+				deferred_calls[joint] = {func="set" .. poser.prop_name, args=joint[poser.prop_name].cvalue, vardata=joint[poser.prop_name]}
+			end
+		end
+		
+		imgui.same_line()
+		if imgui.same_line and imgui.button("Unfreeze All") then 
+			local frozen_total = 0
+			for i, joint in ipairs(self.joints or {}) do 
+				if joint[poser.prop_name].freeze then 
+					frozen_total = frozen_total + 1
+					joint[poser.prop_name].freeze = nil
+					old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+				end
+			end
+			if frozen_total == 0 then 
+				old_deferred_calls = {}
+			end
+		end
+		
+		SettingsCache.exception_methods["via.Joint"] = nil
+		imgui.text("Hotkeys:\n	[Z] - Undo\n	[Shift] - Freeze hovered joint, Stop changing gizmos\n	[Alt] - Unfreeze hovered joint")
+		local text_pos = {statics.width/4*3, statics.height/4*3}
+		local closest_to_mouse =  {}
+		local prop_changed
+		
+		for i, joint in ipairs(self.joints or {}) do 
+			j_o_tbl = joint._ or create_REMgdObj(joint)
+			j_o_tbl.last_opened = uptime
+			local var_metadata = joint[poser.prop_name]
+			var_metadata.display_name = j_o_tbl.Name
+			imgui.push_id(joint)
+				local selected_changed
+				selected_changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
+				local hovered = imgui.is_item_hovered()
+				
+				imgui.same_line()
+				
+				if show_prop(joint, var_metadata, self.key_hash .. "p" .. i) then --and (var_metadata.freeze == false) then 
+					poser.undo.last = joint
+					var_metadata.freeze = 1
+					prop_changed = joint
+				end
+				var_metadata.update = true
+				
+				if self.joint_positions then 
+					local mat_screen, mat_screen_top
+					local mat = (poser.is_local and self.joint_positions[joint][1]) or self.joint_positions[joint][2]
+					local pos = self.joint_positions[joint][2][3] --world pos
+					mat[3] = pos
+					if var_metadata.freeze ~= nil or j_o_tbl.selected then
+						local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
+						mat_screen = draw.world_to_screen(pos)
+						mat_screen_top = draw.world_to_screen(pos + Vector3f.new(0, 0.08 * cam_dist, 0))
+					end
+					if mat_screen and mat_screen_top then --if frozen or selected
+						local delta = (mat_screen - mat_screen_top):length()
+						local mouse_delta = (mat_screen - imgui.get_mouse()):length()
+						if j_o_tbl.selected then
+							poser.selected = {joint, mat_screen, mat, mouse_delta}
+						end
+						if j_o_tbl.selected or ((mouse_delta <= delta)) then
+							if not closest_to_mouse[1] or (mouse_delta < closest_to_mouse[4]) then
+								closest_to_mouse = {joint, mat_screen, mat, mouse_delta}
+							end
+						end
+					end
+				end
+				
+				hovered = hovered or imgui.is_item_hovered()
+				if selected_changed or (not var_metadata.freeze and hovered and check_key_released(via.hid.KeyboardKey.Shift, 0.0))  then 
+					poser.undo.last = joint
+					var_metadata.freeze = true
+					j_o_tbl.selected = true
+					deferred_calls[joint] = {func="set" .. poser.prop_name, args=var_metadata.cvalue, vardata=var_metadata}
+				end
+				
+				if var_metadata.freeze and (not imgui.same_line() and imgui.button("X") or (hovered and check_key_released(via.hid.KeyboardKey.Menu, 0.0))) then
+					old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+					var_metadata.freeze = nil
+					j_o_tbl.selected = nil
+				end
+				
+			imgui.pop_id()
+			var_metadata.display_name = nil
+		end
+
+		if not closest_to_mouse[1] and poser.selected then 
+			closest_to_mouse = poser.selected
+		elseif check_key_released(via.hid.KeyboardKey.Shift, 0.0) then 
+			closest_to_mouse = poser.last_closest_to_mouse
+		else
+			poser.last_closest_to_mouse = closest_to_mouse
+		end
+
+		if poser.use_gizmos and (closest_to_mouse[1]) then 
+			local joint = closest_to_mouse[1]
+			local mat = closest_to_mouse[3]
+			changed, mat = draw.gizmo(joint:get_address(), mat, (poser.prop_name:find("osition") and imgui.ImGuizmoOperation.TRANSLATE) or imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
+			if changed then 
+				deferred_calls[joint] = {func="set" .. poser.prop_name, args=mat:to_quat():to_euler(), vardata=joint[poser.prop_name]}
+				joint[poser.prop_name].freeze = 1
+				prop_changed = joint
+			end
+			draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
+			draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
+		end
+
+		if prop_changed then
+			local joint = prop_changed
+			if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 0.5)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
+				poser.undo.last = joint
+				poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint[poser.prop_name].cvalue}
+				table.insert(poser.undo[joint].prev_rot, joint[poser.prop_name].cvalue)
+			end
+			poser.undo[joint].start = uptime
+		end
+		
+		if poser.undo.last and poser.undo[poser.undo.last] and check_key_released(via.hid.KeyboardKey.Z) then
+			local joint = poser.undo.last
+			joint[poser.prop_name].freeze = 1
+			deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
+			poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
+			if not poser.undo[joint].prev_rot[1] then
+				old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+				joint[poser.prop_name].freeze = nil
+			end
 		end
 	end,
 	
@@ -6969,7 +7099,9 @@ GameObject = {
 			if self.behaviortrees then
 				for i, bhvt_obj in ipairs(self.behaviortrees) do 
 					--self.behaviortrees[i] = (touched_gameobjects[self.xform] and touched_gameobjects[self.xform].behaviortrees and touched_gameobjects[self.xform].behaviortrees[i]) or bhvt_obj
-					bhvt_obj:update()
+					if bhvt_obj.update then
+						bhvt_obj:update()
+					end
 				end
 			end
 			
@@ -7122,7 +7254,7 @@ re.on_application_entry("UpdateMotion", function()
 		end
 	--end
 	
-	if not isMHR then 
+	if not isMHR and not isDMC then 
 		GameObject.update_all_joint_positions()
 	end
 	
@@ -7152,7 +7284,7 @@ end)
 
 --On pre-LockScene -------------------------------------------------------------------------------------------------------------------------------------------
 re.on_pre_application_entry("LockScene", function()
-	if isMHR then 
+	if isMHR or isDMC then 
 		GameObject.update_all_joint_positions()
 	end
 end)
@@ -7396,6 +7528,9 @@ re.on_draw_ui(function()
 			changed, SettingsCache.max_element_size = imgui.drag_int("Elements Per Grouping", SettingsCache.max_element_size, 1, 10, 1000); csetting_was_changed = csetting_was_changed or changed
 			changed, SettingsCache.always_update_lists = imgui.checkbox("Always Update Lists", SettingsCache.always_update_lists); csetting_was_changed = csetting_was_changed or changed 
 			changed, SettingsCache.show_editable_tables = imgui.checkbox("Editable Tables", SettingsCache.show_editable_tables); csetting_was_changed = csetting_was_changed or changed 
+			if isDMC then
+				changed, SettingsCache.add_DMC5_names = imgui.checkbox("Add Character Names", SettingsCache.add_DMC5_names); csetting_was_changed = csetting_was_changed or changed 
+			end
 			
 			imgui.same_line() 
 			if imgui.button("Reset Settings") then 
@@ -7425,7 +7560,7 @@ re.on_draw_ui(function()
 		imgui.tree_pop()
 	end
 	
-	if next(Collection) and imgui.tree_node("Collection") then 
+	if imgui.tree_node("Collection") then --next(Collection) and 
 		changed, SettingsCache.detach_collection = imgui.checkbox("Detach", SettingsCache.detach_collection)
 		imgui.same_line()
 		show_collection()
@@ -7562,6 +7697,7 @@ local EMV = {
 	make_obj = make_obj,
 	create_gameobj = create_gameobj,
 	obj_to_json = obj_to_json,
+	get_body_part = get_body_part,
 }
 mathex_dict = nil
 

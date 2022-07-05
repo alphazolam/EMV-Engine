@@ -21,6 +21,7 @@ local deferred_prefab_calls = {}
 local spawned_lights = {} 
 local last_camera_pos
 local toks
+local changed
 
 local GameObject = EMV.GameObject
 local is_valid_obj = EMV.is_valid_obj
@@ -468,7 +469,7 @@ local function show_enemy_spawner()
 				
 				if isRE2 or isRE3 then 
 					imgui.same_line()
-					changed, SettingsCache.loiter_by_default = imgui.checkbox("Loiter", SettingsCache.loiter_by_default); setting_was_changed = setting_was_changed or changed
+					changed, SettingsCache.loiter_by_default = imgui.checkbox("Loiter", SettingsCache.loiter_by_default)
 					if changed then 
 						for xform, object in pairs(spawned_prefabs) do 
 							object.is_loitering = SettingsCache.loiter_by_default

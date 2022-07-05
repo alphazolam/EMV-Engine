@@ -283,7 +283,7 @@ local function find_matching_mot(orig_object, tested_object, frame_count, orig_n
 	--log.info(tostring(exclude_keyword))
 	local total = 0
 	local matches = {}
-	if tested_object.matched_random_limit and tested_object ~= orig_object and tested_object.display and (isRE8 or not tested_object.name:find("entacle")) then --and tested_object.body_part ~= "Item" 
+	if tested_object.matched_random_limit and tested_object ~= orig_object and tested_object.display and (isRE8 or not tested_object.name:find("entacle")) then --and tested_object.body_part ~= "Other" 
 		for i, mot in ipairs(tested_object.all_mots) do
 			--log.info(tostring(tested_object.cached_banks[ mot[1] ]))
 			if i > tested_object.matched_random_limit then 
@@ -391,7 +391,7 @@ local function imgui_anim_object_figure_viewer(anim_object, obj_name, index)
 						change_multi(anim_object.materials[1], "BaseColor", 1)
 					end
 					if anim_object.greenscreen_on and anim_object.materials[1] then
-						draw_material_variable(anim_object.materials[1], "BaseColor", 1)
+						anim_object.materials[1]:draw_material_variable("BaseColor", 1)
 					else
 						imgui.new_line()
 						imgui.new_line()
@@ -550,21 +550,6 @@ local function is_matchable_mot(mot_name)
 	return true
 end
 --self.body_part ~= "Hair"
---Get which body part a GameObject represents (body, face, hair or item):
-local function get_body_part(str)
-	local body_part_name = str
-	local lower_name = str:lower()
-	if lower_name:find("face") or lower_name:find("head") or lower_name:find("face") or (isRE8 and lower_name:find("20_")) or (isDMC and lower_name:find("%d%d%d%d_[01]1")) or (isRE3 and lower_name:find("[ep][ml]%d%d%d1")) then
-		body_part_name = "Face"
-	elseif (lower_name:find("hair") and not lower_name:find("chair")) or lower_name:find("entacle") then --no chairs pls
-		body_part_name = "Hair"
-	elseif not lower_name:find("wp_") and (isDMC or not lower_name:find("%d%d%d%d_%d%d")) and (lower_name:find("body") or lower_name:find("ch%d%d_") or lower_name:find("em%d%d") or lower_name:find("pl%d%d")) then
-		body_part_name = "Body"
-	else
-		body_part_name = "Item"
-	end
-	return body_part_name
-end
 
 --Create alternate list of mot names with frame count in them
 function get_motion_names_w_frames(cached_bank)
@@ -608,7 +593,6 @@ GameObject.new_AnimObject = function(self, args, o)
 	self.motion = args.motion or self.components_named.Motion or self.motion
 	self.layer = args.layer or (self.motion and self.motion:call("getLayer", 0)) or self.layer
 	self.materials = args.materials or self.materials
-	self.body_part = args.body_part or self.body_part or get_body_part(self.name)
 	self.force_center = args.force_center or (figure_mode and not not (self.body_part == "Body" or self.name:find("base")))
 	self.packed_init_transform = args.packed_init_transform or self.xform:call("get_WorldMatrix")
 	self.alt_names = args.alt_names
@@ -764,20 +748,6 @@ GameObject.new_AnimObject = function(self, args, o)
 			self.alt_names[self.em_name] = true
 		elseif figure_mode and isRE2 then
 			self.alt_names[self.figure_name:lower():gsub("_normal", ""):gsub("figure_", "")] = true
-		end
-		
-		if isDMC then 
-			local char_name_split = split(self.key_name, "/")
-			for i, part in ipairs(char_name_split or {}) do 
-				local sub_tbl = split(part, "_")
-				for j, sub_part in ipairs(sub_tbl or {}) do
-					if j==1 and sub_part:find("[ep][ml]%d%d")==1 then
-						self.char_name = sub_tbl[#sub_tbl]
-						goto exit
-					end
-				end
-			end
-			::exit::
 		end
 		
 		if not isRE8 then
@@ -1307,7 +1277,7 @@ GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync,
 				local exclude_keyword = "jack"
 				exclude_keyword = not self.current_bank_name:find(exclude_keyword) and exclude_keyword
 				for i, object in ipairs(imgui_anims) do 
-					if object ~= self and object.display and object.sync then --and not object.body_part == "Item" then 
+					if object ~= self and object.display and object.sync then --and not object.body_part == "Other" then 
 						local face_object, fc_mbank_idx, fc_mlist_idx, fc_mot_idx, frames, all_mots_idx = find_matching_mot(self, object, end_frame, mot_name, exclude_keyword)
 						if face_object then --and face_object ~= selected 
 							local face_cb = face_object.cached_banks[fc_mbank_idx]
@@ -1357,7 +1327,7 @@ GameObject.check_bank_name = function(self, name, object_name, quick_check)
 	--(isRE8 and (lower_name:find("pl%d%d00") or lower_name:find("em%d%d00") or lower_name:find("barehand"))
 	
 	--if self.name == "pl2000_face_00" then log.info("Checking " .. lower_name .. " vs " .. object_name .. ",  found facial: " .. tostring(found_facial) .. ", found_body: " .. tostring(found_body)) end
-	if self.body_part ~= "Item" and found_item then return false end
+	if self.body_part ~= "Other" and found_item then return false end
 	if self.body_part == "Body" and found_facial  then return false end --or (isDMC and lower_name:find("%d%d%d%d_%d%d") and not lower_name:find("_10"))
 	if (isRE2 or isRE3) and object_name:find("em%d%d%d") and lower_name:find("_[pe][ls]") then return false end
 	if quick_check and self.face_mode and not found_facial and found_body then return false end
@@ -1380,7 +1350,7 @@ GameObject.check_bank_name = function(self, name, object_name, quick_check)
 			elseif self.body_part == "Body" and not found_facial and not found_item then --and found_body 
 				if is_excluded() then return false end
 				return true
-			elseif self.body_part == "Item" and found_item then
+			elseif self.body_part == "Other" and found_item then
 				if is_excluded() then return false end
 				return true
 			end
@@ -2280,7 +2250,7 @@ local show_animation_controls
 local function show_imgui_animation(anim_object, idx, embedded_mode)
 	
 	local not_started = not forced_mode and ((not anim_object.running) and (tics - figure_start_time) < 10) and (anim_object.frame == 0) and not (isRE8 and anim_object.matched_banks_count == 0) --anim_object.mbank_idx == 1 or 
-	local subtitle_string = anim_object.name .. (isDMC and (" (" .. (anim_object.char_name and (anim_object.char_name .. ", ") or "") .. anim_object.body_part .. ") ") or "") .. (anim_object.synced  and (" [Synced]") or "") .. " [" .. (anim_object.mbank_idx or 1) .. "," .. (anim_object.mlist_idx or 1) .. "," .. (anim_object.mot_idx or 1) .. "]"
+	local subtitle_string = anim_object.name .. (isDMC and (" (" .. anim_object.body_part .. ") ") or "") .. (anim_object.synced  and (" [Synced]") or "") .. " [" .. (anim_object.mbank_idx or 1) .. "," .. (anim_object.mlist_idx or 1) .. "," .. (anim_object.mot_idx or 1) .. "]"
 	local is_main = (idx == 0)
 	
 	imgui.push_id(anim_object.gameobj:get_address()+1+(bool_to_number[is_main]))
@@ -2688,7 +2658,7 @@ local function show_emv_settings()
 			changed, EMVSettings.cutscene_viewer = imgui.checkbox("Cutscene Viewer", EMVSettings.cutscene_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.detach_ani_viewer = imgui.checkbox("Detach Animation Seek Bar", EMVSettings.detach_ani_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.detach_cs_viewer = imgui.checkbox("Detach Cutscene Seek Bar", EMVSettings.detach_cs_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
-			changed, EMVSettings.allow_performance_mode = imgui.checkbox("Allow Performance Mode", EMVSettings.allow_performance_mode); EMVSetting_was_changed = EMVSetting_was_changed or changed
+			--changed, EMVSettings.allow_performance_mode = imgui.checkbox("Allow Performance Mode", EMVSettings.allow_performance_mode); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.use_savedata = imgui.checkbox("Cache Figure Data", EMVSettings.use_savedata); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.hotkeys = imgui.checkbox("Enable Hotkeys", EMVSettings.hotkeys); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			if (figure_mode or forced_mode or cutscene_mode) and EMVSettings.hotkeys then
