@@ -3310,7 +3310,7 @@ re.on_frame(function()
 									if lightset.display or lightset.opened then 
 										
 										lightset.closed_count = 0
-										for i, light_obj in ipairs(lightset.lights) do
+										for i, light_obj in ipairs(lightset.lights or {}) do
 											
 											lightset.opened = lightset.opened or light_obj.opened
 											imgui.text("	"); imgui.same_line()

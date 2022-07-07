@@ -134,7 +134,7 @@ GGSettings.ray_layers_tables = {
 	["re3"] =		{0, 1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 19, 20, 22, 21, 23, 24 , 27, 28, 29, 30, 31, 32},
 	["re7"] =		{0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["mhrise"] =	{0, 1, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 17, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
-	["re8"] =		{1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
+	["re8"] =		{1, 4, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
 	["dmc5"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32}
 }
 
@@ -201,7 +201,6 @@ local logv = EMV.logv
 local hashing_method = EMV.hashing_method
 local imgui_anim_object_viewer = EMV.imgui_anim_object_viewer
 local imgui_saved_materials_menu = EMV.imgui_saved_materials_menu
-local mini_console = EMV.mini_console
 local get_first_gameobj = EMV.get_first_gameobj
 local editable_table_field = EMV.editable_table_field
 local get_folders = EMV.get_folders
@@ -502,7 +501,7 @@ GameObject.new_GrabObject = function(self, args, o)
 					local collider = comp:call("getColliders", c)
 					if collider then 
 						self.colliders = self.colliders or {}
-						table.insert(self.components, collider)
+						--table.insert(self.components, collider)
 						table.insert(self.colliders, collider)
 						local shape = collider:call("get_Shape")
 						local t_shape = collider:call("get_TransformedShape")
@@ -1130,7 +1129,9 @@ local function cast_rays(ray_method, ray_query)
 	
 	local gameobjects = {}
 	local ray_layers_table = GGSettings.ray_layers_tables[game_name]  --auto mode
-	if GGSettings.wanted_layer ~= -1 then ray_layers_table = {GGSettings.wanted_layer} end  --manual mode
+	if GGSettings.wanted_layer ~= -1 then 
+		ray_layers_table = {GGSettings.wanted_layer} 
+	end  --manual mode
 	
 	ray_query = ray_query or sdk.create_instance("via.physics.CastRayQuery"):add_ref()
 	ray_query:call("clearOptions")
@@ -1514,7 +1515,7 @@ local function gravity_gun()
 					end
 					if scale_multiplier ~= 1 then 
 						new_scale = new_scale * scale_multiplier
-						if game_object.hp ~= nil and game_object.scale.x > 1.0 then
+						if game_object.hp and game_object.scale.x > 1.0 then
 							game_object.hp:call("set_CurrentHitPoint", math.floor(game_object.hp:call("get_CurrentHitPoint") * scale_multiplier))
 						end
 					end
@@ -1524,7 +1525,7 @@ local function gravity_gun()
 					if not player or player.xform ~= game_object.xform then 
 						final_pos, new_rotation, new_scale = mat4_to_trs(game_object.init_worldmat)
 						reset_object(game_object)
-					else
+					elseif game_object.hp then
 						game_object.hp:call("set_CurrentHitPoint", game_object.hp:call("get_DefaultHitPoint"))
 					end
 					if game_object.think and game_object.hp and game_object.hp:call("get_CurrentHitPoint") == 0 then 
@@ -1611,7 +1612,7 @@ re.on_draw_ui(function()
 	if imgui.tree_node("Gravity Gun Settings") then
 		
 		changed, GGSettings.load_json = imgui.checkbox("Persistent Settings", GGSettings.load_json); setting_was_changed = setting_was_changed or changed
-		changed, GGSettings.action_monitor = imgui.checkbox("Action Monitor", GGSettings.action_monitor); setting_was_changed = setting_was_changed or changed
+		changed, GGSettings.action_monitor = imgui.checkbox("GrabObject Action Monitor", GGSettings.action_monitor); setting_was_changed = setting_was_changed or changed
 		changed, GGSettings.force_functions = imgui.checkbox("Forced functions", GGSettings.force_functions); setting_was_changed = setting_was_changed or changed
 		if isRE2 or isRE3 then 
 			changed, GGSettings.block_input = imgui.checkbox("Block input when UI", GGSettings.block_input); setting_was_changed = setting_was_changed or changed
@@ -1964,11 +1965,14 @@ re.on_frame(function()
 		end
 	end
 	
-	
 	if reframework:is_drawing_ui() then
-		if GGSettings.action_monitor and go and go.behaviortrees and go.behaviortrees[1] and go.behaviortrees[1].names[1] then
+		if GGSettings.action_monitor and go and go.behaviortrees and go.behaviortrees[1]  then
 			if imgui.begin_window("Action Monitor - " .. go.name, true, GGSettings.transparent_bg and 129) == false then GGSettings.action_monitor = false end--128
 				for i, bhvt_obj in ipairs(go.behaviortrees) do
+					if not bhvt_obj.imgui_behaviortree then 
+						bhvt_obj = BHVT:new(bhvt_obj)
+						go.behaviortrees[i] = bhvt_obj
+					end
 					bhvt_obj:imgui_behaviortree()
 				end
 			imgui.end_window()

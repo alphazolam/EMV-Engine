@@ -1,13 +1,19 @@
 --RE2 and RE3 Enemy Spawner by alphazomega
 --June 26, 2022
 --if true then return end
-if not (isRE2 or isRE3 or isDMC) then return end
+--if not (isRE2 or isRE3 or isDMC) then return end
 local EMV = require("EMV Engine")
 
 SettingsCache.loiter_by_default = true
-local spawned_prefabs = {}
+spawned_prefabs = {}
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
-spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", (isRE2 and "GUI_Rogue") or (isRE3 and "RopewayGrandSceneDevelop") or (isDMC and "Develop")))
+spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", 
+	(isRE2 and "GUI_Rogue") or 
+	(isRE3 and "RopewayGrandSceneDevelop") or 
+	(isDMC and "Develop") or 
+	(isMHR and "Item_b_000") or 
+	(isRE8 and "Debug") or "")
+)
 if not spawned_prefabs_folder then return end
 local spawned_enemies_count = 0
 local ray_method = sdk.find_type_definition( "via.collision" ):get_method("find(via.Ray, via.Plane, via.vec3, System.Single, via.vec3)")
@@ -219,7 +225,8 @@ local function spawn_deferred_prefab(packed_func_call)
 		pfb:call("set_Standby", true)
 		pfb:call(packed_func_call.func_name, table.unpack(packed_func_call.args)) --spawn
 		if isRE2 or isRE3 then
-			emmgr:call("requestInstantiate", ValueType.new(sdk.find_type_definition("System.Guid")), packed_func_call.packed_pfb.type_id, packed_func_call.packed_pfb.name, emmgr:get_field("<LastPlayerStaySceneID>k__BackingField"), packed_func_call.args[1], packed_func_call.args[2], true, nil, nil)
+			local guid = ValueType.new(sdk.find_type_definition("System.Guid")):call("NewGuid")
+			emmgr:call("requestInstantiate", guid, packed_func_call.packed_pfb.type_id, packed_func_call.packed_pfb.name, emmgr:get_field("<LastPlayerStaySceneID>k__BackingField"), packed_func_call.args[1], packed_func_call.args[2], true, nil, nil)
 			emmgr:call("execInstantiateRequests")
 		end
 	end
@@ -228,7 +235,7 @@ local function spawn_deferred_prefab(packed_func_call)
 	local xform = gameobj and gameobj:call("get_Transform")
 	
 	if xform then 
-		local new_spawn = spawned_prefabs[xform] or GameObject:new_GrabObject{xform=xform}
+		local new_spawn = spawned_prefabs[xform] or GameObject:new{xform=xform}
 		if not isDMC then
 			new_spawn.is_loitering=SettingsCache.loiter_by_default
 			for i, component in ipairs(new_spawn.components) do 
@@ -268,13 +275,14 @@ local function spawn_deferred_prefab(packed_func_call)
 		deferred_prefab_calls[pfb] = nil --dmc5 always works
 	end
 end
+--spawn_pfb(F:\modmanager\REtool\mhrise_chunk_000\natives\stm\enemy\em001\07\prefab\em001_07.pfb.17
 --F:\modmanager\REtool\DMC_chunk_000\natives\x64\prefab\leveldesign\orb\goldorb.pfb.16
 function spawn_pfb(pfb) 
 	if not pfb then return end
-	local prefab = pfb 
+	prefab = pfb 
 	if (type(pfb)=="string") then 
 		local clean_path = (pfb:match("natives\\%w%w%w\\(.+%.pfb)") or pfb):gsub("\\", "/")
-		prefab = sdk.create_instance("via.Prefab", true)
+		prefab = (sdk.create_instance("via.Prefab", true)):add_ref()
 		prefab:call("set_Path", clean_path)
 	end
 	if prefab and prefab:add_ref() then
@@ -282,11 +290,13 @@ function spawn_pfb(pfb)
 	end
 end
 
+--[[
 for i, xform in ipairs(EMV.search("MyLight")) do 
 	if xform then 
 		spawned_lights[xform] = GameObject.new_GrabObject and GameObject:new_GrabObject{xform=xform} or GameObject:new{xform=xform}
 	end
 end
+]]
 
 local function spawn_light(position, type_name, short_name)
 	local create_method = sdk.find_type_definition("via.GameObject"):get_method("create(System.String, via.Folder)")
@@ -381,29 +391,31 @@ local function show_enemy_spawner()
 			draw.world_text("X", last_impact_pos, 0xFF0000FF) --from gravity gun
 		end
 		
-		if not prefabs or not prefabs.enemies or not next(prefabs.enemies) then 
+		if (isDMC or isRE2 or isRE3) and (not prefabs or not prefabs.enemies or not next(prefabs.enemies)) then 
 			prefabs = get_prefabs()
 		end
 		
-		if prefabs then 
-			--if random(32) then
-				local spawns = get_folders(spawned_prefabs_folder:call("get_Children"))
-				--imgui.text(logv(spawns))
-				for key, xform in pairs(spawns or {}) do
-					if is_valid_obj(xform) then
-						local obj = spawned_prefabs[xform] or GameObject:new_GrabObject{xform=xform}
-						spawned_prefabs[xform] = obj and obj.mfsm2 and obj
-					else
-						if player and xform == player.xform then
-							spawned_prefabs = {}
-							spawned_prefabs_folder:call("deactivate") --fixes infinite loading
-							spawned_prefabs_folder:call("activate")
-							break
-						end
-						clear_object(xform)
+		--if random(32) then
+			spawns = get_folders(spawned_prefabs_folder:call("get_Children"))
+			--imgui.text(logv(spawns))
+			for key, xform in pairs(spawns or {}) do
+				if is_valid_obj(xform) then
+					local obj = spawned_prefabs[xform] or GameObject:new{xform=xform}
+					spawned_prefabs[xform] = obj and (obj.mfsm2 or (isRE8 and obj.components_named.EnemyUpdater)) and obj
+				else
+					if player and xform == player.xform then
+						spawned_prefabs = {}
+						spawned_prefabs_folder:call("deactivate") --fixes infinite loading
+						spawned_prefabs_folder:call("activate")
+						break
 					end
+					clear_object(xform)
 				end
-			--end
+			end
+		--end
+		
+		if next(prefabs or {}) then 
+			
 			imgui.begin_rect()
 				if false and isRE2 then --not working, the game is deleting the main object and leaving the mesh objects orphaned
 					changed, player_pfb_idx = imgui.combo("Player", player_pfb_idx, prefabs.player_names)
@@ -451,21 +463,8 @@ local function show_enemy_spawner()
 					spawn_zombie(name)
 				end
 				
-				imgui.text("*Enemy will spawn at the 'X'")
-				imgui.same_line()
-				
-				if imgui.button("Clear Spawned Enemies") then -- (Fix Infinite Loading)
-					prefabs = {}
-					for xform, object in pairs(spawned_prefabs) do
-						object.gameobj:call("destroy")
-						clear_object(xform)
-					end
-					spawned_prefabs_folder:call("deactivate")
-					spawned_prefabs_folder:call("activate")
-					if (isRE2 or isRE3) and emmgr then 
-						emmgr:call("get_ActiveEnemyList"):call("TrimExcess") 
-					end
-				end 
+				--imgui.text("*Enemy will spawn at the 'X'")
+				--imgui.same_line()
 				
 				if isRE2 or isRE3 then 
 					imgui.same_line()
@@ -476,20 +475,35 @@ local function show_enemy_spawner()
 						end
 					end
 				end
-				
-				if next(spawned_prefabs) and imgui.tree_node("Spawned Enemies (" .. get_table_size(spawned_prefabs) .. ")") then 
-					for xform, obj in pairs(spawned_prefabs) do 
-						if is_valid_obj(xform) and imgui.tree_node_ptr_id(xform, obj.name .. " @ " .. xform:get_address()) then
-							changed, obj.is_loitering = imgui.checkbox("Loiter", obj.is_loitering)
-							--if changed and obj.is_loitering then tics = tics + 240 - (toks % 240) end 
-							imgui.managed_object_control_panel(obj.xform)
-							imgui.tree_pop()
-						end
-					end
-					imgui.tree_pop()
-				end
 			imgui.end_rect()
 		end
+		
+		imgui.text("*Enemy will spawn at the red 'X'")
+		if imgui.button("Clear Spawned Enemies") then -- (Fix Infinite Loading)
+			prefabs = {}
+			spawned_prefabs_folder:call("deactivate")
+			spawned_prefabs_folder:call("activate")
+			if (isRE2 or isRE3) and emmgr then 
+				emmgr:call("get_ActiveEnemyList"):call("TrimExcess") 
+			end
+			for xform, object in pairs(spawned_prefabs) do
+				object.gameobj:call("destroy", object.gameobj)
+				clear_object(xform)
+			end
+		end 
+		
+		if next(spawned_prefabs) and imgui.tree_node("Spawned Enemies (" .. get_table_size(spawned_prefabs) .. ")") then 
+			for xform, obj in pairs(spawned_prefabs) do 
+				if is_valid_obj(xform) and imgui.tree_node_ptr_id(xform, obj.name .. " @ " .. xform:get_address()) then
+					changed, obj.is_loitering = imgui.checkbox("Loiter", obj.is_loitering)
+					--if changed and obj.is_loitering then tics = tics + 240 - (toks % 240) end 
+					imgui.managed_object_control_panel(obj.xform)
+					imgui.tree_pop()
+				end
+			end
+			imgui.tree_pop()
+		end
+		
 		imgui.tree_pop()
 	end
 end

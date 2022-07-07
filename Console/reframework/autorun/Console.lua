@@ -56,6 +56,7 @@ _G.log_value = EMV.log_value
 _G.read_bytes = EMV.read_bytes
 _G.obj_to_json = EMV.obj_to_json
 _G.is_valid_obj = EMV.is_valid_obj
+_G.searchf = EMV.searchf
 
 SettingsCache.deferred_console = true
 
@@ -69,31 +70,45 @@ local cached_command_text = {}
 local command_metadata = {}
 local force_autocomplete
 
+--RE2, RE3
 local cheats = {
-	["god"] = table.pack({ comp="HitPoint", method="set_NoDamage"}),
-	["God"] = table.pack({ comp="HitPoint", method="set_Invincible"}),
+	["god"] = table.pack({ comp="HitPoint", method="set_NoDamage", get_method="get_NoDamage"}),
+	["God"] = table.pack({ comp="HitPoint", method="set_Invincible", get_method="get_Invincible"}),
 	--["noclip"] = table.pack({ comp="CharacterController", method="set_Enabled", active=false }, { comp="GroundFixer", method="set_Enabled", active=false }),
 }
-for command, packed_cheats in pairs(cheats) do 
-	for i, cheat in ipairs(packed_cheats) do 
-		cheat.get_method = "g" .. cheat.method:sub(2,-1)
-	end
+
+if isRE8 then 
+	cheats.god = table.pack(
+		{ comp="PlayerUpdater", sub_obj="get_characterCore", field="isEnableDead"}
+	)
+	cheats.God = table.pack(
+		{ comp="PlayerUpdater", sub_obj="get_characterCore", field="isEnableDead"},
+		--{ comp="PlayerUpdater", sub_obj="get_characterCore", field="IsEnableDamageReaction"}, 
+		{ comp="PlayerUpdater", sub_obj="get_characterCore", field="IsEnableDamage"}
+	)
 end
 
 --Exectutes a string command input, dividing it up into separate sub-commands:
 local run_command = function(input)
+	input = input:gsub(" +$", "")
 	if cheats[input] then 
 		local active
 		for i, cheat in ipairs(cheats[input]) do
 			local player = EMV.get_player(true) 
-			for name, component in pairs((player and player.components_named) or {}) do 
-				if name:find(cheat.comp) then 
-					cheat.active = not not active or not component:call(cheat.get_method)
-					component:call(cheat.method, cheat.active)
-					cheats[input][i].active = component:call(cheat.get_method)
-					active = not not cheats[input][i].active or not not active --"not not" turns nil into false
-					break
+			local component = player.components_named[cheat.comp]
+			if component and cheat.sub_obj then 
+				component = component:call(cheat.sub_obj)
+			end
+			if component then 
+				cheat.active = active or not not ((cheat.field and component:get_field(cheat.field)) or (cheat.method and component:call(cheat.get_method)))
+				if cheat.field then
+					component:set_field(cheat.field, not cheat.active)
+					cheat.active = not component:get_field(cheat.field)
+				else
+					component:call(cheat.method, not cheat.active)
+					cheat.active = not component:call(cheat.get_method)
 				end
+				active = active or cheat.active
 			end
 		end
 		return active ~= nil and tostring(active)
@@ -130,9 +145,11 @@ local function show_history(do_minimal, new_first_history_idx)
 					force_command = true
 				end
 				imgui.same_line()
-				if not imgui.push_id(1236) and imgui.button(" ") then 
-					force_autocomplete = true
-				end imgui.pop_id()
+				imgui.push_id(1337)
+					if imgui.button(" ") then 
+						force_autocomplete = true
+					end 
+				imgui.pop_id()
 				imgui.same_line()
 				changed, command = imgui.input_text(" ", command)
 			end
@@ -223,7 +240,8 @@ local function show_history(do_minimal, new_first_history_idx)
 			end
 			command = History.history_idx[History.current_history_idx]
 			if command then 
-				command = string.gsub(History.history_idx[History.current_history_idx], '[ \t]+%f[\r\n%z]', '') --remove tailing spaces
+				--command = string.gsub(History.history_idx[History.current_history_idx], '[ \t]+%f[\r\n%z]', '') --remove tailing spaces
+				command = command:gsub(" +$", "")
 			end 
 			history_input_this_frame = true
 		end
@@ -243,11 +261,11 @@ local function show_history(do_minimal, new_first_history_idx)
 			force_command = true
 		end
 		imgui.same_line()
-		--imgui.push_id(1235)
-		if imgui.button(" ") then 
-			force_autocomplete = true
-		end 
-		--imgui.pop_id()
+		imgui.push_id(1235)
+			if imgui.button(" ") then 
+				force_autocomplete = true
+			end 
+		imgui.pop_id()
 		imgui.same_line()
 		changed, command = imgui.input_text(" ", command)
 		if not SettingsCache.use_child_windows then 
@@ -260,7 +278,7 @@ local function show_history(do_minimal, new_first_history_idx)
 end
 
 --Miniature version of the console input window with a text box and show_history():
-_G.mini_console = function(managed_object, key)
+local mini_console = function(managed_object, key)
 	
 	key = key or managed_object
 	typedef = managed_object:get_type_definition()
@@ -328,10 +346,13 @@ _G.mini_console = function(managed_object, key)
 	end
 end
 
+EMV.static_funcs.mini_console = mini_console
+
 --Auto-completes the inputted command:
 local function autocomplete()
 	
 	if force_autocomplete or check_key_released(via.hid.KeyboardKey.Tab) then --------------------------------------------------------------autocomplete
+		
 		force_autocomplete = nil
 		local function purify_key(key, only_remove_params)
 			local m = key:match("^.+{(.+)}")
@@ -484,6 +505,7 @@ local function show_console_window()
 	if (imgui.begin_window("Console", true, SettingsCache.transparent_bg and 128 or 0) == false) then 
 		SettingsCache.show_console = false 
 	end
+		
 		autocomplete()
 		show_history()
 		
