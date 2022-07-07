@@ -708,7 +708,7 @@ end
 
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
 local temptxt = {}
-local function editable_table_field(key, value, owner_tbl)
+local function editable_table_field(key, value, owner_tbl, display_name)
 	
 	if type(value)=="table" then 
 		
@@ -721,7 +721,7 @@ local function editable_table_field(key, value, owner_tbl)
 		return true
 		
 	elseif type(value) ~= "function" then
-		
+		display_name = display_name or key
 		local converted_value = value
 		if type(value)=="userdata" then 
 			converted_value = (jsonify_table({value}))[1]
@@ -756,7 +756,7 @@ local function editable_table_field(key, value, owner_tbl)
 			imgui.same_line() 
 		end
 		
-		local changed, new_value = imgui.input_text(key, (m_tbl and m_tbl[key]) or tostring(converted_value))
+		local changed, new_value = imgui.input_text(display_name, (m_tbl and m_tbl[key]) or tostring(converted_value))
 		if changed then
 			temptxt[owner_key] = temptxt[owner_key] or {}
 			temptxt[owner_key][key] = new_value
@@ -3593,6 +3593,11 @@ local VarData = {
 		end
 		o.is_vt = (o.is_vt and o.ret_type:get_method("Parse(System.String)") and "parse") or o.is_vt
 		
+		if o.ret_type:is_a("System.Single") or o.ret_type:is_a("via.vec3") or o.ret_type:is_a("via.vec4") or o.ret_type:is_a("via.Quaternion") or o.ret_type:is_a("via.mat4") then
+			o.increment = metadata_methods[rt_name].increment or 0.1
+			metadata_methods[rt_name].increment = o.increment
+		end
+		
 		if (type(o.value_org)=="table") and o_tbl.counts and o_tbl.counts.method and o_tbl.xform and o_tbl.counts.method:get_name():find("Joint") then
 			skeleton = o_tbl.xform.skeleton or lua_get_system_array(o_tbl.xform:call("get_Joints") or {}, nil, true)
 			if skeleton and skeleton[1].call then  for i=1, #skeleton do skeleton[i] = skeleton[i]:call("get_Name") end end --set up a list of bone names for arrays relating to bones
@@ -4326,15 +4331,16 @@ local function offer_show_world_pos(value, name, key_name, obj, field_or_method)
 end
 
 --Displays a vector2, 3 or 4 with editable fields in imgui:
-local function show_imgui_vec4(value, name, is_int)
+local function show_imgui_vec4(value, name, is_int, increment)
 	if not value then return end
 	local changed = false
+	local increment = increment or 0.1
 	if type(value) ~= "number" then
 		if value.w then 
 			if name:find("olor") then
 				changed, value = imgui.color_edit4(name, value, 17301504)
 			else
-				changed, value = imgui.drag_float4(name, value, 0.1, -10000.0, 10000.0)
+				changed, value = imgui.drag_float4(name, value, increment, -10000.0, 10000.0)
 				--if changed and (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
 					--value:normalize() 
 				--end
@@ -4345,17 +4351,17 @@ local function show_imgui_vec4(value, name, is_int)
 			elseif name:find("olor") then
 				changed, value = imgui.color_edit3(name, value, 17301504)
 			else
-				changed, value = imgui.drag_float3(name, value, 0.1, -10000.0, 10000.0)
+				changed, value = imgui.drag_float3(name, value, increment, -10000.0, 10000.0)
 			end
 		elseif value.y then
 			if is_int then  --17301504
 				changed, value = imgui.drag_float2(name, value, 1.0, -16777216, 16777216)
 			else
-				changed, value = imgui.drag_float2(name, value, 0.1, -10000.0, 10000.0)
+				changed, value = imgui.drag_float2(name, value, increment, -10000.0, 10000.0)
 			end
 		end
 	else
-		changed, value = imgui.drag_float(name, value, 0.1, -10000.0, 10000.0)
+		changed, value = imgui.drag_float(name, value, increment, -10000.0, 10000.0)
 	end
 	return changed, value
 end
@@ -4480,7 +4486,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		end
 	elseif values_type == "number" or values_type == "boolean" or return_type:is_primitive() then
 		if return_type:is_a("System.Single") then
-			changed, value = imgui.drag_float(display_name, value, 0.1, -100000.0, 100000.0)
+			changed, value = imgui.drag_float(display_name, value, var_metadata.increment, -100000.0, 100000.0)
 		elseif return_type:is_a("System.Boolean") then
 			changed, value = imgui.checkbox(display_name, value)
 		elseif return_type:is_a("System.UInt32") or return_type:is_a("System.UInt64") or return_type:is_a("System.UInt16") then
@@ -4500,7 +4506,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	elseif return_type:is_a("via.Position") then
 		
 		local new_value = Vector3f.new(value:get_field("x"):read_double(0x0), value:get_field("y"):read_double(0x0), value:get_field("z"):read_double(0x0))
-		changed, new_value = show_imgui_vec4(new_value, display_name)
+		changed, new_value = show_imgui_vec4(new_value, display_name, nil, var_metadata.increment)
 		--do_offer_worldpos = {new_value, display_name, key_name, parent_managed_object, (field or prop.get)}
 		if changed then value:write_double(0, new_value.x) ; value:write_double(0x8, new_value.y) ; value:write_double(0x10, new_value.z) end
 		
@@ -4508,7 +4514,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		if imgui.tree_node_str_id(key_name .. name, display_name) then 
 			local new_value = Matrix4x4f.new()
 			for i=0, 3 do 
-				changed, new_value[i] = show_imgui_vec4(value[i], "Row[" .. i .. "]")
+				changed, new_value[i] = show_imgui_vec4(value[i], "Row[" .. i .. "]", nil, var_metadata.increment)
 				was_changed = changed or was_changed
 				if i == 3 then 
 					do_offer_worldpos = { new_value[i], (o_tbl and (o_tbl.Name or o_tbl.name) or "") .. " " .. display_name, key_name, parent_managed_object, (field or prop.get) }
@@ -4520,7 +4526,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 			imgui.tree_pop()
 		end
 	elseif ((var_metadata.is_lua_type == "qua") or (var_metadata.is_lua_type == "vec")) then
-		changed, value = show_imgui_vec4(value, display_name)
+		changed, value = show_imgui_vec4(value, display_name, nil, var_metadata.increment)
 		if value and (return_type:is_a("via.vec3") or return_type:is_a("via.vec4") or return_type:is_a("via.Quaternion")) then
 			do_offer_worldpos = { value, display_name, key_name, parent_managed_object, (field or prop.get) }
 		end
@@ -4706,9 +4712,19 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 					changed = true
 				end
 			end
-			for key, value in orderedPairs(var_metadata) do 
-				editable_table_field(key, value, var_metadata)
+			local ret_name = var_metadata.ret_type:get_full_name()
+			if var_metadata.increment then
+				local rt_name, changed = var_metadata.ret_type:get_full_name()
+				changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment, 0.0001, 0, 1)
+				if changed then 
+					var_metadata.increment = metadata_methods[rt_name].increment
+				end
 			end
+			editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value")
+			editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
+			--for key, value in orderedPairs(var_metadata) do 
+			--	editable_table_field(key, value, var_metadata)
+			--end
 		imgui.end_rect(2)
 	end
 	
@@ -5227,7 +5243,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					anim_object.parents_list = anim_object.parents_list or {}
 					
 					local htc = get_table_size(held_transforms)
-					if not anim_object.index_h_count or (anim_object.index_h_count ~= htc) or not anim_object.parent or ((anim_object.parent:call("get_GameObject"):call("get_Name") ~= anim_object.parents_list[anim_object.parent_index])) then 
+					if not anim_object.index_h_count or (anim_object.index_h_count ~= htc) or (not anim_object.parent or ((anim_object.parent:call("get_GameObject"):call("get_Name") ~= anim_object.parents_list[anim_object.parent_index]))) then 
 						--if anim_object.parents_list[1] then imgui.text(anim_object.index_h_count .. " SORTING " .. #anim_object.parents_list[1]) end
 						imgui.same_line()
 						imgui.text("Sorting")
@@ -6790,6 +6806,10 @@ GameObject = {
 		
 		changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
 		
+		imgui.same_line()
+		
+		changed, poser.load_all = imgui.checkbox("Import All Properties", poser.load_all)
+		
 		if imgui.button("Save Pose") or clear_slot then 
 			local pose = {}
 			local tmpo = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
@@ -6821,7 +6841,7 @@ GameObject = {
 						joint._ = joint._ or create_REMgdObj(joint)
 						local joint_tbl = {__address=saved_joint.__address, __typedef=saved_joint.__typedef}
 						for key, value in pairs(saved_joint) do 
-							if key == poser.prop_name and joint[key] then 
+							if joint[key] and (poser.load_all or key == poser.prop_name) then 
 								old_deferred_calls[logv(joint) .. " " .. poser.prop_name]  = nil
 								--deferred_calls[joint].vardata = joint[key]
 								joint[key].freeze = 1
@@ -6934,7 +6954,7 @@ GameObject = {
 		else
 			poser.last_closest_to_mouse = closest_to_mouse
 		end
-
+		
 		if poser.use_gizmos and (closest_to_mouse[1]) then 
 			
 			local joint = closest_to_mouse[1]
@@ -7316,9 +7336,9 @@ re.on_application_entry("UpdateMotion", function()
 		end
 	--end
 	
-	if not isMHR and not isDMC then 
-		GameObject.update_all_joint_positions()
-	end
+	--if not isMHR and not isDMC then 
+	--	GameObject.update_all_joint_positions()
+	--end
 	
 	for managed_object, args in pairs(deferred_calls) do 
 		deferred_call(managed_object, args)
@@ -7346,9 +7366,9 @@ end)
 
 --On pre-LockScene -------------------------------------------------------------------------------------------------------------------------------------------
 re.on_pre_application_entry("LockScene", function()
-	if isMHR or isDMC then 
+	--if isMHR or isDMC then 
 		GameObject.update_all_joint_positions()
-	end
+	--end
 end)
 
 --On UpdateHID -------------------------------------------------------------------------------------------------------------------------------------------

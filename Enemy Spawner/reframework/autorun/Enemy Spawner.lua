@@ -28,7 +28,6 @@ local spawned_lights = {}
 local last_camera_pos
 local toks
 local changed
-
 local GameObject = EMV.GameObject
 local is_valid_obj = EMV.is_valid_obj
 local random = EMV.random
