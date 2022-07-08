@@ -153,6 +153,7 @@ if true then --or not isRE7 then
 end
 
 --local addresses of important functions and tables defined later:
+local EMV
 local GameObject
 local BHVT
 local Hotkey
@@ -165,6 +166,7 @@ local add_to_REMgdObj
 local obj_to_json
 local jsonify_table
 local get_fields_and_methods
+local add_pfb_to_cache
 local lua_find_component
 local deferred_call
 local hashing_method
@@ -701,68 +703,85 @@ local function run_command(input)
 		else
 			out = "ERROR: " .. tostring(out)
 		end
-		table.insert(outputs, (is_multi_command and {name=part, output=out}) or out)
+		table.insert(outputs, (is_multi_command and {name=part, output=out or tostring(out)}) or out or tostring(out))
 	end
-	return outputs[2] and outputs or outputs[1]
+	return (outputs[2]~=nil) and outputs or outputs[1]
 end
 
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
+--Returns true if it displayed an editable field, or 1 if the editable field was set
 local temptxt = {}
 local function editable_table_field(key, value, owner_tbl, display_name)
 	
+	if key == "__tics" then return end
+	local output = true
 	if type(value)=="table" then 
-		
 		if( next(value) ~= nil) and imgui.tree_node(key) then 
 			for k, v in pairs(value) do 
 				editable_table_field(k, v, value)
 			end
 			imgui.tree_pop()
 		end
-		return true
-		
+		return output
 	elseif type(value) ~= "function" then
+		
 		display_name = display_name or key
-		local converted_value = value
-		if type(value)=="userdata" then 
-			converted_value = (jsonify_table({value}))[1]
-			if converted_value == nil then return end
-		end
 		local owner_key = owner_tbl or key
 		owner_tbl = owner_tbl or _G
 		
-		local m_tbl =  temptxt[owner_key]
-		if m_tbl and m_tbl[key] ~= nil and m_tbl[key] ~= tostring(converted_value) then 
+		local m_tbl = temptxt[owner_key] or {}
+		m_tbl[key] = m_tbl[key] or {}
+		local m_subtbl = m_tbl[key]
+		m_subtbl.is_obj = m_subtbl.is_obj or ((m_subtbl.is_obj==nil) and (tostring(value):find("sol%.REManagedObject%*")==1)) or false
+		
+		local converted_value = m_subtbl.is_obj and "" or value
+		if not m_subtbl.is_obj and type(value)=="userdata" then 
+			converted_value = (jsonify_table({value}))[1]
+			if converted_value == nil then return end
+		end
+		
+		if m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value) then 
 			imgui.push_id(key)
 				if imgui.button("Set") then
-					_G.to_load = m_tbl[key]
-					if to_load:find(";") then
-						to_load = run_command(to_load).output
+					
+					if m_subtbl.value:find(";") then
+						_G.to_load = run_command(m_subtbl.value).output
 					elseif type(value)=="userdata" then
-						to_load = jsonify_table({to_load}, true)[1]
+						_G.to_load = jsonify_table({to_load}, true)[1]
 						to_load = type(to_load)~="table" and to_load
+					elseif type(value)=="string" then
+						_G.to_load = m_subtbl.value
 					end
-					local try, out = pcall(load("return " .. ((type(value)=="string") and ("'" .. to_load .. "'") or ("to_load"))))
-					if try and (out ~= nil) then 
+					
+					local cmd = ((to_load~=nil) and ((type(value)=="string") and ("'" .. to_load .. "'") or ("to_load"))) or m_subtbl.value or ""
+					local try, out = pcall(load("return " .. cmd))
+					
+					if try and (out ~= nil) and (type(out)==type(value)) and (not m_subtbl.is_obj or (sdk.is_managed_object(out) and out:get_type_definition():is_a(value:get_type_definition())) ) then 
 						owner_tbl[key] = out
+						output = 1
 					end
-					m_tbl[key] = nil
+					
 					_G.to_load = nil
+					m_subtbl = nil
 				end
 				imgui.same_line()
 				if imgui.button("X") then
-					m_tbl[key] = nil
+					m_subtbl = nil
 				end
 			imgui.pop_id()
 			imgui.same_line() 
 		end
 		
-		local changed, new_value = imgui.input_text(display_name, (m_tbl and m_tbl[key]) or tostring(converted_value))
+		local changed, new_value = imgui.input_text(display_name, m_subtbl and m_subtbl.value or tostring(converted_value))
 		if changed then
-			temptxt[owner_key] = temptxt[owner_key] or {}
-			temptxt[owner_key][key] = new_value
-			temptxt[owner_key].__tics = tics
+			m_subtbl.value = new_value
 		end
-		return true
+		
+		m_tbl.__tics = tics
+		m_tbl[key] = m_subtbl
+		temptxt[owner_key] = m_tbl
+		
+		return output
 	end
 end
 
@@ -944,9 +963,9 @@ local function read_imgui_pairs_table(tbl, key, is_array, editable)
 								if is_obj then 
 									name = elem_key .. ":	" .. logv(element)
 								else
-									if not pcall(function() isArray(element) end) then
-										test = {element}
-									end
+									--if not pcall(function() isArray(element) end) then
+									--	test = {element}
+									--end
 									if element.name and (element.new or element.update) then --or (can_index(element) and element.new and (element.name .. ""))
 										name = elem_key .. ":	" .. element.name .. "	[Object] (" .. get_table_size(element) .. " elements)"
 									elseif isArray(element) then
@@ -1932,13 +1951,17 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 			local tostring_val = tostring(value)
 			local val_type = type(value)
 			local str_prefix = go_back_to_table and ((tbl.__address and tbl.__address:sub(1,4)) or ((val_type == "string") and value:sub(1,4)))
-			local splittable = str_prefix and (str_prefix == "vec:" or str_prefix == "mat:" or str_prefix == "res:" or str_prefix == "lua:")
-			local is_mgd_obj, is_component, is_xform, is_gameobj = not go_back_to_table and is_valid_obj(value)
+			local splittable = str_prefix and (str_prefix == "vec:" or str_prefix == "mat:" or str_prefix == "res:" or str_prefix == "pfb:" or str_prefix == "lua:")
+			local is_mgd_obj, is_component, is_xform, is_gameobj = not go_back_to_table and is_valid_obj(value) and value:get_type_definition()
 			local dont_convert = false
 			if is_mgd_obj and dont_nest_components then
 				is_component = value:get_type_definition():is_a("via.Component")
 				is_xform = is_component and value:get_type_definition():is_a("via.Transform")
 				is_gameobj = value:get_type_definition():is_a("via.GameObject")
+			end
+			
+			if is_mgd_obj then
+				log.info("FOUND: " .. is_mgd_obj:get_full_name())
 			end
 			
 			--convert keys to strings
@@ -1964,8 +1987,12 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 				if type(value) == "number" then
 					new_tbl[key] = value
 				elseif is_mgd_obj and (not dont_nest_components or is_xform or (not (is_component or is_gameobj) or (level == 0))) then 
-					if value:get_type_definition():get_full_name():find("Holder$") then 
-						new_tbl[key] = "res:" .. value:call("ToString()") .. " " .. value:get_type_definition():get_full_name()
+					local fname = is_mgd_obj:get_full_name()
+					
+					if fname:find("Holder$") then 
+						new_tbl[key] = "res:" .. value:call("ToString()") .. " " .. fname
+					elseif fname == "via.Prefab" then
+						new_tbl[key] = "pfb:" .. value:call("get_Path")
 					else
 						if only_convert_addresses then
 							new_tbl[key] = "obj:" .. value:get_address()
@@ -1998,7 +2025,11 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 				
 				if str_prefix == "res:" then
 					new_tbl[key] = create_resource(splitted[1]:gsub("Resource%[", ""):gsub("%]", ""), splitted[2])
-				
+				elseif str_prefix == "pfb:" then
+					if splitted[1] and splitted[1] ~= "" then
+						add_pfb_to_cache(splitted[1])
+						new_tbl[key] = RSCache.pfb_resources[ splitted[1] ]
+					end
 				elseif tbl.__component_name or str_prefix == "obj:" then
 					
 					--Find object in scene using clues from json table:
@@ -2280,10 +2311,13 @@ end
 
 --Create an object and apply ctor --------------------------------------------------------------------------------------------------------
 local function constructor(type_name)
-	local output = sdk.create_instance(type_name)
-	output:call(".ctor")
-	output:add_ref()
-	return output
+	local output = sdk.create_instance(type_name) or sdk.create_instance(type_name, true)
+	if output and output:add_ref() then
+		if output:get_type_definition():get_method(".ctor()") then 
+			output:call(".ctor()")
+		end
+		return output
+	end
 end
 
 --GameObject and component based functions ------------------------------------------------------------------------------------------------
@@ -2483,6 +2517,21 @@ local function add_resource_to_cache(resource_holder, paired_resource_holder, da
 		current_idx = find_index(RN[ext .. "_resource_names"], resource_path)
 	end
 	return current_idx, resource_path, ext
+end
+
+--Adds a prefab to the cache
+add_pfb_to_cache = function(via_prefab, pfb_path)
+	RSCache.pfb_resources = RSCache.pfb_resources or {}
+	RN.pfb_resource_names = RN.pfb_resource_names or {}
+	if type(via_prefab)~="userdata" then
+		pfb_path = pfb_path or via_prefab
+		via_prefab = RSCache.pfb_resources[pfb_path] or constructor("via.Prefab")
+		via_prefab:call("set_Path", pfb_path)
+	end
+	pfb_path = pfb_path or via_prefab:call("get_Path")
+	local current_idx = not RSCache.pfb_resources[pfb_path] and table.binsert(RN.pfb_resource_names, pfb_path)
+	RSCache.pfb_resources[pfb_path] = via_prefab
+	return current_idx, pfb_path, "pfb"
 end
 
 --Get the local player -----------------------------------------------------------------------------------------------------------------
@@ -3511,13 +3560,21 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 				try, name = pcall(sdk.call_object_func, m_obj, fm_name)
 			end
 			name = try and (name ~= "") and name
-			if name and (type(name) ~= "string") and name.add_ref then 
-				--add_resource_to_cache(name, nil, o_tbl) --enabling this adds way too many cached resources
-				name = name:call("ToString()"):match("^.+%[@?(.+)%]") --fix resources
+			if name then 
+				if type(name.add_ref)=="function" then 
+					--add_resource_to_cache(name, nil, o_tbl) --enabling this adds way too many cached resources
+					name = name:call("ToString()"):match("^.+%[@?(.+)%]") --fix resources
+				end
+				if type(name)=="string" then
+					if name:find("%.pfb$") then 
+						add_pfb_to_cache(name)
+					end
+					break 
+				end
 			end
-			if name then break end
 		end
 	end
+	
 	if not name and not only_relevant then 
 		if o_tbl.msg or typedef:is_a("System.Guid") then
 			name = o_tbl.msg or static_funcs.guid_method:call(nil, m_obj)
@@ -4532,8 +4589,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		end
 	elseif not found_array and return_type:get_full_name():find("ResourceHolder")  then 
 		is_obj = true
-		changed, value = show_imgui_resource(value, name, key_name, var_metadata)
-		
+		changed, value = show_imgui_resource(value, name, key_name, var_metadata)		
 	elseif (return_type:is_a("System.String")) then
 		is_obj = true
 		was_changed, value = show_imgui_text_box(display_name, value, o_tbl, (field or prop.set), nil, field )
@@ -4561,7 +4617,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 			--if element_idx then
 			--	var_metadata.element_Names[element_idx] = var_metadata.element_Names[element_idx] or Name
 			--else
-				var_metadata.Name = (not do_update and var_metadata.Name) or (not display_name:lower():find(Name:lower()) and Name) or ""
+				var_metadata.Name = (not do_update and var_metadata.Name) or Name or "" --or (not display_name:lower():find(Name:lower()) and Name) or ""
 			--end
 			if Name ~= "" then
 				display_name = display_name .. "	\"" .. Name .. "\""
@@ -4687,7 +4743,21 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				end
 				imgui.same_line()
 			end
+			
+			if imgui.button("Reset Value") then 
+				if element_idx then 
+					value = var_metadata.value_org[element_idx]
+					var_metadata.freezetable[element_idx] = nil
+				else
+					value = var_metadata.value_org
+					var_metadata.value = value
+					var_metadata.freeze = nil
+				end
+				changed = true
+			end
+			
 			if not is_obj then 
+				imgui.same_line()
 				local freeze_changed
 				var_metadata.timer_start = (freeze ~= nil) and uptime or nil
 				freeze_changed, freeze = imgui.checkbox("Freeze", freeze)
@@ -4699,32 +4769,51 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						var_metadata.freeze = freeze
 					end
 				end
-				imgui.same_line()
-				if imgui.button("Reset Value") then 
-					if element_idx then 
-						value = var_metadata.value_org[element_idx]
-						var_metadata.freezetable[element_idx] = nil
-					else
-						value = var_metadata.value_org
-						var_metadata.value = value
-						var_metadata.freeze = nil
+				local ret_name = var_metadata.ret_type:get_full_name()
+				if var_metadata.increment then
+					local rt_name, changed = var_metadata.ret_type:get_full_name()
+					changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment, 0.0001, 0, 1)
+					if changed then 
+						var_metadata.increment = metadata_methods[rt_name].increment
 					end
-					changed = true
+				end
+				editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value")
+				editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
+			else
+				if (var_metadata.set or var_metadata.field) then
+					var_metadata.gvalue_name = var_metadata.gvalue_name or ""
+					var_metadata.value = var_metadata.value or var_metadata.value_org
+					if editable_table_field("gvalue_name", var_metadata.gvalue_name, var_metadata, "Global Alias") == 1 then
+						_G[var_metadata.gvalue_name] = var_metadata.value
+						if static_funcs.mini_console then
+							command = var_metadata.gvalue_name
+							force_command = true
+						end
+					end
+					if editable_table_field("value", var_metadata.value, var_metadata, "Set as Global Var") == 1 then
+						changed = true
+						value = var_metadata.value
+					end
+				end
+				if return_type:is_a("via.Prefab") then
+					local obj_changed
+					var_metadata.pfb_path = var_metadata.pfb_path or value:call("get_Path")
+					var_metadata.pfb_idx = not changed and var_metadata.pfb_idx
+					obj_changed, var_metadata.pfb_idx = imgui.combo("Change Prefab", var_metadata.pfb_idx or find_index(RN.pfb_resource_names, var_metadata.pfb_path) or 1, RN.pfb_resource_names)
+					if obj_changed then 
+						changed = true
+						value = RSCache.pfb_resources[ RN.pfb_resource_names[var_metadata.pfb_idx] ]
+						var_metadata.pfb_path = value:call("get_Path")
+					end
 				end
 			end
-			local ret_name = var_metadata.ret_type:get_full_name()
-			if var_metadata.increment then
-				local rt_name, changed = var_metadata.ret_type:get_full_name()
-				changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment, 0.0001, 0, 1)
-				if changed then 
-					var_metadata.increment = metadata_methods[rt_name].increment
+			if imgui.tree_node("[Lua]") then
+				for key, value in orderedPairs(var_metadata) do 
+					if not editable_table_field(key, value, var_metadata) then 
+						imgui.text(key .. ":	" .. tostring(value))
+					end
 				end
 			end
-			editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value")
-			editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
-			--for key, value in orderedPairs(var_metadata) do 
-			--	editable_table_field(key, value, var_metadata)
-			--end
 		imgui.end_rect(2)
 	end
 	
@@ -5243,7 +5332,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					anim_object.parents_list = anim_object.parents_list or {}
 					
 					local htc = get_table_size(held_transforms)
-					if not anim_object.index_h_count or (anim_object.index_h_count ~= htc) or (not anim_object.parent or ((anim_object.parent:call("get_GameObject"):call("get_Name") ~= anim_object.parents_list[anim_object.parent_index]))) then 
+					if not anim_object.index_h_count or (anim_object.index_h_count ~= htc) or (anim_object.parent and ((anim_object.parent:call("get_GameObject"):call("get_Name") ~= anim_object.parents_list[anim_object.parent_index]))) then 
 						--if anim_object.parents_list[1] then imgui.text(anim_object.index_h_count .. " SORTING " .. #anim_object.parents_list[1]) end
 						imgui.same_line()
 						imgui.text("Sorting")
@@ -6127,7 +6216,7 @@ local function show_collection()
 		Collection = merge_tables(Collection, jsonify_table(json.load_file("EMV_Engine\\Collection.json") or {}, true))
 		dump_collection = true
 	end
-	
+
 	imgui.same_line()
 	if imgui.button("Find Characters") then
 		local motfsms = {}
@@ -6151,7 +6240,7 @@ local function show_collection()
 				end
 			end
 		end
-		Collection = new_collection
+		Collection = merge_tables(Collection, new_collection)
 		dump_collection = true
 	end
 	
@@ -6800,6 +6889,7 @@ GameObject = {
 		local clear_slot = poser.slots[poser.current_slot_idx]:find("*") and not imgui.same_line() and imgui.button("X")
 		
 		changed, poser.current_prop_name_idx = imgui.combo("Property Type", poser.current_prop_name_idx, poser.prop_names)
+		
 		poser.prop_name = poser.prop_names[poser.current_prop_name_idx]
 		poser.is_local = not not poser.prop_name:find("ocal") or nil
 		poser.is_pos = not not poser.prop_name:find("osition")
@@ -6812,7 +6902,6 @@ GameObject = {
 		
 		if imgui.button("Save Pose") or clear_slot then 
 			local pose = {}
-			local tmpo = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
 			local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
 			if not clear_slot  then
 				for i, joint in ipairs(self.joints or {}) do
@@ -7154,7 +7243,6 @@ GameObject = {
 		
 		if is_known_valid or is_valid_obj(self.xform) then
 			
-			last = self
 			self.display = self.gameobj:call("get_Draw")
 			if self.display_org == nil then 
 				self.display_org = self.display
@@ -7655,7 +7743,7 @@ re.on_draw_ui(function()
 end)
 
 --These functions available by require() ------------------------------------------------------------------------------------------
-local EMV = {
+EMV = {
 	GameObject = GameObject,
 	REMgdObj = REMgdObj,
 	ChainGroup = ChainGroup,
@@ -7756,6 +7844,7 @@ local EMV = {
 	look_at = look_at,
 	offer_grab = offer_grab,
 	add_resource_to_cache = add_resource_to_cache,
+	add_pfb_to_cache = add_pfb_to_cache,
 	search = search,
 	sort = sort,
 	sort_components = sort_components,
@@ -7781,6 +7870,5 @@ local EMV = {
 	obj_to_json = obj_to_json,
 	get_body_part = get_body_part,
 }
-mathex_dict = nil
 
 return EMV

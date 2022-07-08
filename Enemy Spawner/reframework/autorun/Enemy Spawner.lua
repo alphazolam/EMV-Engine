@@ -73,6 +73,7 @@ function get_prefabs()
 					prefab_info:call("requestLoad", false)
 					prefab_info:call("update")
 					prefabs.enemies[name:lower()] = { prefab=pfb, name=name }
+					EMV.add_pfb_to_cache(pfb)
 				end
 			--end
 		end
@@ -95,6 +96,7 @@ function get_prefabs()
 						if path and path ~= "" then 
 							local name = path:match("^.+/(.+)%.pfb") .. "_" .. key
 							prefabs.players[name:lower()] = { prefab=pfb, name=name, body_part_idx=1 }
+							EMV.add_pfb_to_cache(pfb)
 						end
 					end
 				end
@@ -123,6 +125,7 @@ function get_prefabs()
 											prefabs.players[str].child_prefabs = prefabs.players[str].child_prefabs or {}
 											prefabs.players[str].child_prefabs[key] = prefabs.players[str].child_prefabs[key] or {}
 											prefabs.players[str].child_prefabs[key][name] = { prefab=pfb, name=name }
+											EMV.add_pfb_to_cache(pfb)
 										end
 									end
 								end
@@ -213,16 +216,19 @@ local function spawn_zombie(pfb_name, pfb, folder)
 end
 
 local function spawn_deferred_prefab(packed_func_call)
+	
 	if not packed_func_call.packed_pfb or not packed_func_call.packed_pfb.prefab then 
 		log.info("NO PFB")
 		EMV.log_value(packed_func_call)
 		return nil
 	end
+	
 	local pfb = packed_func_call.packed_pfb.prefab
+	local gameobj
 	
 	if not packed_func_call.already_exists then
 		pfb:call("set_Standby", true)
-		pfb:call(packed_func_call.func_name, table.unpack(packed_func_call.args)) --spawn
+		gameobj = pfb:call(packed_func_call.func_name, table.unpack(packed_func_call.args)) --spawn
 		if isRE2 or isRE3 then
 			local guid = ValueType.new(sdk.find_type_definition("System.Guid")):call("NewGuid")
 			emmgr:call("requestInstantiate", guid, packed_func_call.packed_pfb.type_id, packed_func_call.packed_pfb.name, emmgr:get_field("<LastPlayerStaySceneID>k__BackingField"), packed_func_call.args[1], packed_func_call.args[2], true, nil, nil)
@@ -230,7 +236,7 @@ local function spawn_deferred_prefab(packed_func_call)
 		end
 	end
 	
-	local gameobj = scene:call("findGameObject(System.String)", packed_func_call.packed_pfb.name) --NOT lowercase
+	gameobj = gameobj or scene:call("findGameObject(System.String)", packed_func_call.packed_pfb.name) --NOT lowercase
 	local xform = gameobj and gameobj:call("get_Transform")
 	
 	if xform then 
@@ -270,23 +276,23 @@ local function spawn_deferred_prefab(packed_func_call)
 		--old_calls[pfb] = packed_func_call
 		spawned_prefabs[xform] = new_spawn
 		return new_spawn
-	elseif isDMC then 
-		deferred_prefab_calls[pfb] = nil --dmc5 always works
+	--elseif isDMC then 
+	--	deferred_prefab_calls[pfb] = nil --dmc5 always works
 	end
 end
---spawn_pfb(F:\modmanager\REtool\mhrise_chunk_000\natives\stm\enemy\em001\07\prefab\em001_07.pfb.17
---F:\modmanager\REtool\DMC_chunk_000\natives\x64\prefab\leveldesign\orb\goldorb.pfb.16
+--spawn_pfb(F:/modmanager/REtool/mhrise_chunk_000/natives/stm/enemy/em001/07/prefab/em001_07.pfb.17
+--prefab/leveldesign/orb/goldorb.pfb
 function spawn_pfb(pfb) 
-	if not pfb then return end
-	prefab = pfb 
-	if (type(pfb)=="string") then 
+	prefab = pfb or (RSCache.pfb_resources and RSCache.pfb_resources[ RN.pfb_resource_names[all_pfb_idx] ])
+	if type(pfb)=="string" then 
 		local clean_path = (pfb:match("natives\\%w%w%w\\(.+%.pfb)") or pfb):gsub("\\", "/")
-		prefab = (sdk.create_instance("via.Prefab", true)):add_ref()
-		prefab:call("set_Path", clean_path)
+		EMV.add_pfb_to_cache(clean_path)
+		prefab = RSCache.pfb_resources[clean_path]
 	end
 	if prefab and prefab:add_ref() then
 		spawn_zombie(nil, prefab)
 	end
+	return prefab
 end
 
 --[[
@@ -412,97 +418,101 @@ local function show_enemy_spawner()
 				end
 			end
 		--end
-		
-		if next(prefabs or {}) then 
-			
-			imgui.begin_rect()
-				if false and isRE2 then --not working, the game is deleting the main object and leaving the mesh objects orphaned
-					changed, player_pfb_idx = imgui.combo("Player", player_pfb_idx, prefabs.player_names)
-					local body_part_names = prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_names
-					changed, prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_idx = imgui.combo("Player Body Part", prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_idx or 1, body_part_names)
-					local body_part = body_part_names[ prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_idx ]
-					local pfb_names = prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part .. "_names"]
-					changed, prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part].idx = imgui.combo("Child Prefab", prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part].idx or 1, pfb_names )			
-					if imgui.button("Spawn Player") then 
-						local deferred_call = spawn_zombie(  prefabs.player_names[player_pfb_idx] )
-						for body_part_name, body_part in pairs(prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs) do 
-							if not body_part_name:find("_names") then
-								local pfb_name = prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part_name .. "_names"][body_part.idx]
-								local packed_pfb = prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part_name][pfb_name]
-								packed_pfb.prefab:call("set_Standby", true)
-								deferred_prefab_calls[packed_pfb.prefab] = { func_name="instantiate(via.vec3, via.Quaternion, via.Folder)", args=deferred_call.args, counter=0, packed_pfb=packed_pfb, parent=deferred_call.packed_pfb.prefab }
+		imgui.begin_rect()
+			if next(prefabs or {}) then 
+				imgui.begin_rect()
+					if false and isRE2 then --not working, the game is deleting the main object and leaving the mesh objects orphaned
+						changed, player_pfb_idx = imgui.combo("Player", player_pfb_idx, prefabs.player_names)
+						local body_part_names = prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_names
+						changed, prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_idx = imgui.combo("Player Body Part", prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_idx or 1, body_part_names)
+						local body_part = body_part_names[ prefabs.players[ prefabs.player_names[player_pfb_idx] ].body_part_idx ]
+						local pfb_names = prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part .. "_names"]
+						changed, prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part].idx = imgui.combo("Child Prefab", prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part].idx or 1, pfb_names )			
+						if imgui.button("Spawn Player") then 
+							local deferred_call = spawn_zombie(  prefabs.player_names[player_pfb_idx] )
+							for body_part_name, body_part in pairs(prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs) do 
+								if not body_part_name:find("_names") then
+									local pfb_name = prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part_name .. "_names"][body_part.idx]
+									local packed_pfb = prefabs.players[ prefabs.player_names[player_pfb_idx] ].child_prefabs[body_part_name][pfb_name]
+									packed_pfb.prefab:call("set_Standby", true)
+									deferred_prefab_calls[packed_pfb.prefab] = { func_name="instantiate(via.vec3, via.Quaternion, via.Folder)", args=deferred_call.args, counter=0, packed_pfb=packed_pfb, parent=deferred_call.packed_pfb.prefab }
+								end
 							end
 						end
 					end
-				end
-				
-				changed, enemy_pfb_idx = imgui.combo("Enemy", enemy_pfb_idx, prefabs.enemy_names)
-				if imgui.button("Spawn Enemy") then 
-					spawn_zombie(prefabs.enemy_names[enemy_pfb_idx])
-				end
-				
-				if (isRE2 or isRE3) and not imgui.same_line() and imgui.button("Spawn Random Zombie") then
-					local random_table = {}
-					for i, name in ipairs(prefabs.enemy_names) do
-						if name:find("em0") or name:find("em8") or name:find("arasite") then 
-							table.insert(random_table, i)
-						end
+					
+					changed, enemy_pfb_idx = imgui.combo("Enemy", enemy_pfb_idx, prefabs.enemy_names)
+					if imgui.button("Spawn Enemy") then 
+						spawn_zombie(prefabs.enemy_names[enemy_pfb_idx])
 					end
-					spawn_zombie(prefabs.enemy_names[random_table[random_range(1, #random_table)]])
-				end
-				
-				imgui.same_line()
-				if imgui.button("Spawn Random Enemy") then
-					local name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
-					if isRE2 or isRE3 then
-						while name:find("em9000") or name:find("em7400") do
-							name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
+					
+					if (isRE2 or isRE3) and not imgui.same_line() and imgui.button("Spawn Random Zombie") then
+						local random_table = {}
+						for i, name in ipairs(prefabs.enemy_names) do
+							if name:find("em0") or name:find("em8") or name:find("arasite") then 
+								table.insert(random_table, i)
+							end
 						end
+						spawn_zombie(prefabs.enemy_names[random_table[random_range(1, #random_table)]])
 					end
-					spawn_zombie(name)
-				end
-				
-				--imgui.text("*Enemy will spawn at the 'X'")
-				--imgui.same_line()
-				
-				if isRE2 or isRE3 then 
+					
 					imgui.same_line()
-					changed, SettingsCache.loiter_by_default = imgui.checkbox("Loiter", SettingsCache.loiter_by_default)
-					if changed then 
-						for xform, object in pairs(spawned_prefabs) do 
-							object.is_loitering = SettingsCache.loiter_by_default
+					if imgui.button("Spawn Random Enemy") then
+						local name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
+						if isRE2 or isRE3 then
+							while name:find("em9000") or name:find("em7400") do
+								name = prefabs.enemy_names[random_range(1, #prefabs.enemy_names)]
+							end
+						end
+						spawn_zombie(name)
+					end
+					
+					if isRE2 or isRE3 then 
+						imgui.same_line()
+						changed, SettingsCache.loiter_by_default = imgui.checkbox("Loiter", SettingsCache.loiter_by_default)
+						if changed then 
+							for xform, object in pairs(spawned_prefabs) do 
+								object.is_loitering = SettingsCache.loiter_by_default
+							end
 						end
 					end
+				imgui.end_rect()
+			end
+			
+			if next(RSCache.pfb_resources or {}) then
+				if imgui.button("Spawn") then 
+					spawn_pfb()
 				end
-			imgui.end_rect()
-		end
-		
-		imgui.text("*Enemy will spawn at the red 'X'")
-		if imgui.button("Clear Spawned Enemies") then -- (Fix Infinite Loading)
-			prefabs = {}
-			spawned_prefabs_folder:call("deactivate")
-			spawned_prefabs_folder:call("activate")
-			if (isRE2 or isRE3) and emmgr then 
-				emmgr:call("get_ActiveEnemyList"):call("TrimExcess") 
+				imgui.same_line()
+				changed, all_pfb_idx = imgui.combo("All Prefabs", all_pfb_idx, RN.pfb_resource_names)
 			end
-			for xform, object in pairs(spawned_prefabs) do
-				object.gameobj:call("destroy", object.gameobj)
-				clear_object(xform)
-			end
-		end 
-		
-		if next(spawned_prefabs) and imgui.tree_node("Spawned Enemies (" .. get_table_size(spawned_prefabs) .. ")") then 
-			for xform, obj in pairs(spawned_prefabs) do 
-				if is_valid_obj(xform) and imgui.tree_node_ptr_id(xform, obj.name .. " @ " .. xform:get_address()) then
-					changed, obj.is_loitering = imgui.checkbox("Loiter", obj.is_loitering)
-					--if changed and obj.is_loitering then tics = tics + 240 - (toks % 240) end 
-					imgui.managed_object_control_panel(obj.xform)
-					imgui.tree_pop()
+			
+			imgui.text("*Enemy/Prefab will spawn at the red 'X'")
+			if imgui.button("Clear Spawns") then -- (Fix Infinite Loading)
+				prefabs = {}
+				spawned_prefabs_folder:call("deactivate")
+				spawned_prefabs_folder:call("activate")
+				if (isRE2 or isRE3) and emmgr then 
+					emmgr:call("get_ActiveEnemyList"):call("TrimExcess") 
 				end
+				for xform, object in pairs(spawned_prefabs) do
+					object.gameobj:call("destroy", object.gameobj)
+					clear_object(xform)
+				end
+			end 
+			
+			if next(spawned_prefabs) and imgui.tree_node("Existing Spawns (" .. get_table_size(spawned_prefabs) .. ")") then 
+				for xform, obj in pairs(spawned_prefabs) do 
+					if is_valid_obj(xform) and imgui.tree_node_ptr_id(xform, obj.name .. " @ " .. xform:get_address()) then
+						changed, obj.is_loitering = imgui.checkbox("Loiter", obj.is_loitering)
+						--if changed and obj.is_loitering then tics = tics + 240 - (toks % 240) end 
+						imgui.managed_object_control_panel(obj.xform)
+						imgui.tree_pop()
+					end
+				end
+				imgui.tree_pop()
 			end
-			imgui.tree_pop()
-		end
-		
+		imgui.end_rect(2)
 		imgui.tree_pop()
 	end
 end
@@ -514,16 +524,22 @@ re.on_application_entry("UpdateMotion", function()
 	if not last_camera_matrix then return end
 	last_camera_matrix = last_camera_matrix:call("get_WorldMatrix")
 	
-	if next(deferred_prefab_calls) then
+	if next(deferred_prefab_calls) ~= nil then
 		emmgr = emmgr or sdk.get_managed_singleton(sdk.game_namespace("EnemyManager"))
 		for pfb, packed_func_call in orderedPairs(deferred_prefab_calls) do --enemy spawner, code to actually spawn it
-			local spawn = (not packed_func_call.zombie or packed_func_call.zombie.xform) and spawn_deferred_prefab(packed_func_call)
-			local zombie = packed_func_call.zombie and spawn_deferred_prefab(packed_func_call.zombie)
-			if spawn and packed_func_call.zombie and packed_func_call.zombie.xform then 
-				spawn.xform:call("set_Parent", packed_func_call.zombie.xform)
-			end
-			if spawn then 
-				deferred_prefab_calls[pfb] = nil
+			if packed_func_call then
+				local spawn = (not packed_func_call.zombie or packed_func_call.zombie.xform) and spawn_deferred_prefab(packed_func_call)
+				local zombie = packed_func_call.zombie and spawn_deferred_prefab(packed_func_call.zombie)
+				if spawn and packed_func_call.zombie and packed_func_call.zombie.xform then 
+					spawn.xform:call("set_Parent", packed_func_call.zombie.xform)
+				end
+				if spawn then 
+					--if packed_func_call.global_varname then 
+					--	_G[packed_func_call.global_varname] = spawn
+					--end
+					_G.last_spawn = spawn
+					deferred_prefab_calls[pfb] = nil
+				end
 			end
 		end
 	end

@@ -604,6 +604,7 @@ GameObject.new_AnimObject = function(self, args, o)
 	self.center = (self.cog_joint and self.cog_joint:call("get_BaseLocalPosition")) --or (self.mesh and self.mesh:call("get_WorldAABB"):call("getCenter")) or Vector3f.new(0,1.25,0)
 	--self.init_cog_offset = self.cog_joint and self.cog_joint:call("get_Position")
 	self.is_light = args.is_light or self.is_light
+	self.is_wep = (self.name:find("wp%d%d")==1) or nil
 	
 	log.info(self.name .. " " .. tostring(self.body_part) .. " " .. tostring(args.body_part))
 	
@@ -703,8 +704,10 @@ GameObject.new_AnimObject = function(self, args, o)
 		end
 	end
 	
+	
+	
 	--setup figure mode:
-	if (figure_mode or forced_mode) and self.layer and ((self.body_part == "Body") or self.body_part == "Face") then 
+	if (figure_mode or forced_mode) and self.layer and ((self.body_part == "Body") or (self.body_part == "Face") or self.is_wep) then 
 	-- and (self.body_part ~= "Hair") then --or cutscene_mode [cutscene_mode animations are controlled by ActorMotion, which is not handled by this script)
 		
 		self.mbank_idx = args.mbank_idx or 1
@@ -792,6 +795,7 @@ GameObject.new_AnimObject = function(self, args, o)
 			self.force_center, self.aggressively_force_center = sd.force_center, sd.aggressively_force_center
 			self.matched_banks = merge_tables(sd.matched_banks, self.matched_banks)
 			sd.matched_banks = self.matched_banks
+			self.matched_banks_count = get_table_size(self.matched_banks)
 			self.display = sd.display
 			log.info("Loaded save data for " .. self.name)
 		end
@@ -1526,12 +1530,13 @@ end
 
 GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_searching_sync, is_pre_cache)
 	if (figure_mode or forced_mode) and self.layer then 
+		
 		mbank_idx = mbank_idx or self.mbank_idx
 		local motbank_name = (is_pre_cache and RN.motbank_resource_names[mbank_idx]) or self.motbank_names[mbank_idx]
 		local mb_asset = RSCache.motbank_resources[motbank_name]
+		
 		--log.info("Setting motionbank " .. mbank_idx .. " " .. (motbank_name and (motbank_name .. " " .. tostring(mb_asset)) or "[No Name Found]") .. " for " .. self.name)
 		if mb_asset then
-			
 			
 			self.old_dynamic_banks = self.old_dynamic_banks or {}
 			local dyn_bank_count = self.motion:call("getDynamicMotionBankCount")
@@ -1584,7 +1589,7 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 	end
 end
 
---Pre caches motbanks, finding their motlists and mots w/ all info, for any games besides RE8, filling up global_cached_banks with data tables
+--Pre caches motbanks, finding their motlists and mots w/ all info, filling up global_cached_banks with data tables
 GameObject.pre_cache_all_banks = function(self) 
 	log.info("Precache all banks: " .. self.name)
 	if not RN.motbank_resource_names then return end
@@ -1635,7 +1640,7 @@ GameObject.pre_cache_all_banks = function(self)
 	end
 end
 
-local appdata_td = sdk.find_type_definition( "via.motion.AppendDataArrayInfo" )
+--local appdata_td = sdk.find_type_definition( "via.motion.AppendDataArrayInfo" )
 
 --Create or retrieve a cached_bank and set up combo boxes for it:
 GameObject.update_banks = function(self, force)
@@ -2280,7 +2285,8 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 		if cutscene_mode then
 			imgui.same_line()
 			imgui_anim_object_viewer(anim_object, anim_object.name)
-		elseif (is_main or embedded_mode) or not imgui.same_line() and imgui.tree_node_str_id(anim_object.name, subtitle_string) then
+			
+		elseif (is_main or embedded_mode) or (not imgui.same_line() and imgui.tree_node_str_id(anim_object.name, subtitle_string)) then
 			
 			if anim_object.motbank_names then 
 				if not selected and anim_object.display and anim_object.body_part == "Body" then
@@ -2303,6 +2309,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 					anim_object:update_banks()
 					anim_object.mbank_idx = find_index(anim_object.motbank_names, mb_name) or 1
 					anim_object.savedata.matched_banks = anim_object.matched_banks
+					anim_object.matched_banks_count = get_table_size(anim_object.matched_banks)
 					if anim_object.pairing and anim_object.pairing.motion then
 						anim_object.pairing.matched_banks = anim_object.pairing.matched_banks or {}
 						anim_object.pairing.matched_banks[mb_name] = not matched_bank and anim_object.motbanks[mb_name] or nil
@@ -2310,6 +2317,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 						anim_object.pairing:update_banks()
 						anim_object.pairing.mbank_idx = find_index(anim_object.pairing.motbank_names, mb_name) or 1
 						anim_object.pairing.savedata.matched_banks = anim_object.pairing.matched_banks
+						anim_object.pairing.matched_banks_count = get_table_size(anim_object.pairing.matched_banks)
 					end
 				end
 				
