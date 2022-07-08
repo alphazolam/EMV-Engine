@@ -24,6 +24,7 @@ local emmgr
 local enemy_pfb_idx = 1
 local player_pfb_idx = 1
 local deferred_prefab_calls = {}
+local add_pfb_text = ""
 local spawned_lights = {} 
 local last_camera_pos
 local toks
@@ -485,6 +486,20 @@ local function show_enemy_spawner()
 				end
 				imgui.same_line()
 				changed, all_pfb_idx = imgui.combo("All Prefabs", all_pfb_idx, RN.pfb_resource_names)
+			end
+			
+			local full_txt = add_pfb_text:find("%.pfb$")
+			local do_set = full_txt and (imgui.button("Add"))
+			if full_txt then 
+				imgui.same_line()
+			end
+			changed, add_pfb_text = imgui.input_text("Add PFB File", add_pfb_text)
+			if do_set then 
+				EMV.add_pfb_to_cache(add_pfb_text)
+				if RSCache.pfb_resources[add_pfb_text] then
+					all_pfb_idx = EMV.find_index(RN.pfb_resource_names, add_pfb_text)
+					add_pfb_text = ""
+				end
 			end
 			
 			imgui.text("*Enemy/Prefab will spawn at the red 'X'")

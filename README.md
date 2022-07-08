@@ -32,6 +32,7 @@ Roll the mouse in and out to reel the object in or push it away.
 
 ## Enemy Spawner
 This script for RE2R and RE3R allows you to spawn enemies at the last location that the Gravity gun was aimed at.
+You can also spawn PFB files. A drop down menu will appear to let you spawn any PFB file you've seen, or one you input.
 
 ## Console
 This script creates an interactive Lua Console in the game, for use in researching the game engine and testing Lua code. 

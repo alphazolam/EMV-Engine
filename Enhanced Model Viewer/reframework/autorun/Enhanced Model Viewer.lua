@@ -40,10 +40,10 @@ global_cached_banks = {}
 shown_transforms = {}
 
 --Global (but just to check them in the console)
-RN = {} --resource names
-total_objects = nil
-imgui_anims = nil
-imgui_others = nil
+RN = RN or {} --resource names
+local total_objects = nil
+local imgui_anims = nil
+local imgui_others = nil
 figure_mode = nil
 cutscene_mode = nil
 forced_mode = nil

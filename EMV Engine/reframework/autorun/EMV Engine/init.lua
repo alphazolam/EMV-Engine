@@ -717,7 +717,7 @@ local function editable_table_field(key, value, owner_tbl, display_name)
 	local output = true
 	if type(value)=="table" then 
 		if( next(value) ~= nil) and imgui.tree_node(key) then 
-			for k, v in pairs(value) do 
+			for k, v in orderedPairs(value) do 
 				editable_table_field(k, v, value)
 			end
 			imgui.tree_pop()
@@ -747,7 +747,7 @@ local function editable_table_field(key, value, owner_tbl, display_name)
 					if m_subtbl.value:find(";") then
 						_G.to_load = run_command(m_subtbl.value).output
 					elseif type(value)=="userdata" then
-						_G.to_load = jsonify_table({to_load}, true)[1]
+						_G.to_load = jsonify_table({m_subtbl.value}, true)[1]
 						to_load = type(to_load)~="table" and to_load
 					elseif type(value)=="string" then
 						_G.to_load = m_subtbl.value
@@ -966,7 +966,7 @@ local function read_imgui_pairs_table(tbl, key, is_array, editable)
 									--if not pcall(function() isArray(element) end) then
 									--	test = {element}
 									--end
-									if element.name and (element.new or element.update) then --or (can_index(element) and element.new and (element.name .. ""))
+									if (element.new or element.update) and type(element.name)=="string" then --or (can_index(element) and element.new and (element.name .. ""))
 										name = elem_key .. ":	" .. element.name .. "	[Object] (" .. get_table_size(element) .. " elements)"
 									elseif isArray(element) then
 										name = elem_key .. ":	[table] (" .. #element .. " elements)" 
@@ -2529,9 +2529,11 @@ add_pfb_to_cache = function(via_prefab, pfb_path)
 		via_prefab:call("set_Path", pfb_path)
 	end
 	pfb_path = pfb_path or via_prefab:call("get_Path")
-	local current_idx = not RSCache.pfb_resources[pfb_path] and table.binsert(RN.pfb_resource_names, pfb_path)
-	RSCache.pfb_resources[pfb_path] = via_prefab
-	return current_idx, pfb_path, "pfb"
+	if via_prefab:call("get_Exist") then
+		local current_idx = not RSCache.pfb_resources[pfb_path] and table.binsert(RN.pfb_resource_names, pfb_path)
+		RSCache.pfb_resources[pfb_path] = via_prefab
+		return current_idx, pfb_path, "pfb"
+	end
 end
 
 --Get the local player -----------------------------------------------------------------------------------------------------------------
@@ -3279,7 +3281,8 @@ local ChainNode = {
 
 --ChainGroup class for handling Chain Groups -------------------------------------------------------------------------------------------
 local ChainGroup = {
-	group, xform, anim_object, settings_id, settings_ref, settings, terminal_name_hash, node_count, nodes, terminal_name, show_positions, do_blend, blend_id, blend_ratio,
+
+	uses_customsettings = (sdk.get_tdb_version() >= 69),
 	
 	new = function(self, args, o)
 		o = o or {}
@@ -3287,7 +3290,7 @@ local ChainGroup = {
 		o.group = args.group
 		o.xform = args.xform
 		o.anim_object = args.anim_object or held_transforms[o.xform]
-		o.chain = args.chain or o.anim_object.chain
+		o.chain = args.chain or o.anim_object.components_named.Chain or o.chain
 		o.settings_ref = o.group:read_qword(0x18)
 		o.settings = args.settings
 		o.terminal_name_hash = o.group:call("get_TerminalNameHash")
@@ -3305,7 +3308,7 @@ local ChainGroup = {
 	end,
 	
 	change_custom_setting = function(self, id)
-		if not (isRE8 or isMHR or isRE2) then return end
+		if not (self.uses_customsettings) then return end
 		id = id or self.settings_id
 		local chain_setting = sdk.create_instance("via.motion.ChainCustomSetting")
 		if chain_setting then 
@@ -3319,21 +3322,26 @@ local ChainGroup = {
 		end
 	end,
 	
-	update = function(self)
-		local pos_2d = {}
-		for i, node in ipairs(self.nodes) do
-			node:update()
-			if node.pos then
-				table.insert(pos_2d, draw.world_to_screen(node.pos))
-				if #pos_2d > 1 and pos_2d[i-1] and pos_2d[i] then 
-					if isDMC or isRE2 then
-						on_frame_calls[self.group] = on_frame_calls[self.group] or {} --every game has its own stupid rules about this I swear...
-						table.insert( on_frame_calls[self.group], { lua_func=draw.line, args=table.pack(pos_2d[i-1].x, pos_2d[i-1].y, pos_2d[i].x, pos_2d[i].y, 0xFF00FF00) })
-					else
-						draw.line(pos_2d[i-1].x, pos_2d[i-1].y, pos_2d[i].x, pos_2d[i].y, 0xFF00FF00)
+	update = function(self, do_deferred)
+		if do_deferred then
+			on_frame_calls[self.group] = on_frame_calls[self.group] or {}
+			table.insert( on_frame_calls[self.group], {lua_object=self, method=self.update} )
+		else
+			local pos_2d = {}
+			for i, node in ipairs(self.nodes) do
+				node:update()
+				--if node.pos then
+					table.insert(pos_2d, draw.world_to_screen(node.pos))
+					if #pos_2d > 1 and pos_2d[i-1] and pos_2d[i] then 
+						--if isDMC or isRE2 then
+						--	on_frame_calls[self.group] = on_frame_calls[self.group] or {} --every game has its own stupid rules about this I swear...
+						--	table.insert( on_frame_calls[self.group], { lua_func=draw.line, args=table.pack(pos_2d[i-1].x, pos_2d[i-1].y, pos_2d[i].x, pos_2d[i].y, 0xFF00FF00) })
+						--else
+							draw.line(pos_2d[i-1].x, pos_2d[i-1].y, pos_2d[i].x, pos_2d[i].y, 0xFF00FF00)
+						--end
+						--if parent_vec2 then draw.line(parent_vec2.x, parent_vec2.y, this_vec2.x, this_vec2.y, 0xFF00FFFF)  end
 					end
-					--if parent_vec2 then draw.line(parent_vec2.x, parent_vec2.y, this_vec2.x, this_vec2.y, 0xFF00FFFF)  end
-				end
+				--end
 			end
 		end
 	end,
@@ -3780,6 +3788,7 @@ local VarData = {
 			elseif self.get:get_num_params() == 1 then --and (forced_update or o_tbl.keep_updating or (self.mysize and self.mysize == 1) or math.random(1, 5) == 1) then
 				should_update_cvalue = should_update_cvalue or (#self.value ~= #self.cvalue)
 				self.mysize = self.mysize or (self.count and self.count:call(obj)) or (o_tbl.counts and o_tbl.counts.method and o_tbl.counts.method:call(obj)) or 0
+				self.mysize = (type(self.mysize)=="number") and self.mysize or 0
 				if should_update_cvalue and (self.mysize < 25) or random(3) then
 					self.value = {}
 					for j=0, (self.mysize and self.mysize-1) or 0 do 
@@ -4067,7 +4076,7 @@ local REMgdObj = {
 				end
 				if o_tbl.show_all_joints and o_tbl.cgroups and o_tbl.cgroups[1] then 
 					for i, group in ipairs(o_tbl.cgroups) do
-						group:update()
+						group:update(true)
 					end
 					o_tbl.last_opened = uptime --prevents deletion
 				end
@@ -4435,6 +4444,8 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 		changed, via_chain._.show_all_joints = imgui.checkbox("Show All Joints", via_chain._.show_all_joints)
 		
 		for i, group in ipairs(chain_groups) do 
+		
+			group.group._ = group.group._ or create_REMgdObj(group.group)
 			
 			if imgui.tree_node_str_id(game_object_name .. "Groups" .. i-1, i-1 .. ". Group " .. group.terminal_name) then 
 				
@@ -4456,7 +4467,7 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 					group:change_custom_setting()
 				end
 				
-				if isRE2 or isRE8 then 
+				if ChainGroup.uses_customsettings then 
 					changed, group.settings_id = imgui.combo("Set CustomSettings", group.settings_id, cached_chain_settings_names[via_chain])
 					if imgui.button("Reset CustomSettings") or changed then 
 						group:change_custom_setting()
@@ -4466,20 +4477,29 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 				
 				changed, group.show_positions = imgui.checkbox("Show Positions", group.show_positions) 
 				
-				if isRE2 or isRE8 then 
+				if ChainGroup.uses_customsettings then 
 					imgui.same_line()
 					changed, group.do_blend = imgui.checkbox("Blend", group.do_blend)
 					if group.do_blend then 
 						imgui.text("Note: Only blends original settings to original settings")
 						changed, group.blend_ratio = imgui.drag_float("Blend Ratio", group.blend_ratio, 0.01, -1, 1)
 						changed, group.blend_id = imgui.combo("Blend-To", group.blend_id, cached_chain_settings_names[via_chain])
-						if changed then 
+						if changed then
 							group:change_custom_setting()
 						end
 					end
+					if imgui.tree_node("CustomSettings") then 
+						imgui.managed_object_control_panel(group.settings, game_object_name .. "CS" .. i, nil) 
+						imgui.tree_pop()
+					end
+				end
+				if not ChainGroup.uses_customsettings or imgui.tree_node("ChainGroup") then
+					imgui.managed_object_control_panel(group.group, game_object_name .. "CGrp" .. i, group.terminal_name) 
+					if ChainGroup.uses_customsettings then
+						imgui.tree_pop()
+					end
 				end
 				
-				imgui.managed_object_control_panel(group.group, game_object_name .. "CGrp" .. i, group.terminal_name) 
 				group.group._.is_open = true
 				imgui.tree_pop()
 			elseif group.group._ then
@@ -4658,7 +4678,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		freeze = var_metadata.freezetable[element_idx]
 	end
 	
-	if not is_obj and (((freeze ~= nil) and (field or prop.set) and (var_metadata.value_org ~= nil)) or var_metadata.do_reset_value) then --freezing / resetting values 
+	if not is_obj and (((freeze ~= nil) and (field or prop.set) and (var_metadata.value_org ~= nil))) then --freezing / resetting values 
 		imgui.push_id(var_metadata.name or field:get_name() .. "F")
 			if (freeze == false) and var_metadata.timer_start and ((uptime - var_metadata.timer_start) > 5.0) then 
 				var_metadata.freeze = nil
@@ -4717,7 +4737,11 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		var_metadata.timer_start = (changed and (freeze == nil) and uptime) or var_metadata.timer_start or nil--set the timer when its changed (otherwise it flickers) --
 	end
 	
+	--var_metadata.show_var_data = var_metadata.show_var_data or (imgui.is_item_hovered() and not  and imgui.is_popup_open())
+	
 	if var_metadata.show_var_data then 
+		--imgui.begin_popup_context_item(1232141); imgui.text("lalala\n\n\n\n\n\n"); imgui.end_popup(1232141)
+		
 		imgui.text("		")
 		imgui.same_line()
 		imgui.begin_rect()
@@ -4743,44 +4767,44 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				end
 				imgui.same_line()
 			end
-			
-			if imgui.button("Reset Value") then 
-				if element_idx then 
-					value = var_metadata.value_org[element_idx]
-					var_metadata.freezetable[element_idx] = nil
-				else
-					value = var_metadata.value_org
-					var_metadata.value = value
-					var_metadata.freeze = nil
-				end
-				changed = true
-			end
-			
-			if not is_obj then 
-				imgui.same_line()
-				local freeze_changed
-				var_metadata.timer_start = (freeze ~= nil) and uptime or nil
-				freeze_changed, freeze = imgui.checkbox("Freeze", freeze)
-				if freeze_changed then 
+			if (var_metadata.set or var_metadata.field) then
+				if imgui.button("Reset Value") then 
 					if element_idx then 
-						var_metadata.freezetable = var_metadata.freezetable or {}
-						var_metadata.freezetable[element_idx] = freeze or false 
+						value = var_metadata.value_org[element_idx]
+						var_metadata.freezetable[element_idx] = nil
 					else
-						var_metadata.freeze = freeze
+						value = var_metadata.value_org
+						var_metadata.value = value
+						var_metadata.freeze, freeze = false
 					end
+					old_deferred_calls[logv(parent_managed_object) .. " " .. var_metadata.name]  = nil
+					changed = 1
 				end
-				local ret_name = var_metadata.ret_type:get_full_name()
-				if var_metadata.increment then
-					local rt_name, changed = var_metadata.ret_type:get_full_name()
-					changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment, 0.0001, 0, 1)
-					if changed then 
-						var_metadata.increment = metadata_methods[rt_name].increment
+				
+				if not is_obj then 
+					imgui.same_line()
+					local freeze_changed
+					var_metadata.timer_start = (freeze ~= nil) and uptime or nil
+					freeze_changed, freeze = imgui.checkbox("Freeze", freeze)
+					if freeze_changed then 
+						if element_idx then 
+							var_metadata.freezetable = var_metadata.freezetable or {}
+							var_metadata.freezetable[element_idx] = freeze or false 
+						else
+							var_metadata.freeze = freeze
+						end
 					end
-				end
-				editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value")
-				editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
-			else
-				if (var_metadata.set or var_metadata.field) then
+					local ret_name = var_metadata.ret_type:get_full_name()
+					if var_metadata.increment then
+						local rt_name, changed = var_metadata.ret_type:get_full_name()
+						changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment, 0.0001, 0, 1)
+						if changed then 
+							var_metadata.increment = metadata_methods[rt_name].increment
+						end
+					end
+					editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value")
+					editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
+				else
 					var_metadata.gvalue_name = var_metadata.gvalue_name or ""
 					var_metadata.value = var_metadata.value or var_metadata.value_org
 					if editable_table_field("gvalue_name", var_metadata.gvalue_name, var_metadata, "Global Alias") == 1 then
@@ -4794,25 +4818,23 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						changed = true
 						value = var_metadata.value
 					end
-				end
-				if return_type:is_a("via.Prefab") then
-					local obj_changed
-					var_metadata.pfb_path = var_metadata.pfb_path or value:call("get_Path")
-					var_metadata.pfb_idx = not changed and var_metadata.pfb_idx
-					obj_changed, var_metadata.pfb_idx = imgui.combo("Change Prefab", var_metadata.pfb_idx or find_index(RN.pfb_resource_names, var_metadata.pfb_path) or 1, RN.pfb_resource_names)
-					if obj_changed then 
-						changed = true
-						value = RSCache.pfb_resources[ RN.pfb_resource_names[var_metadata.pfb_idx] ]
-						var_metadata.pfb_path = value:call("get_Path")
+				
+					if return_type:is_a("via.Prefab") then
+						local obj_changed
+						var_metadata.pfb_path = var_metadata.pfb_path or value:call("get_Path")
+						var_metadata.pfb_idx = not changed and var_metadata.pfb_idx
+						obj_changed, var_metadata.pfb_idx = imgui.combo("Change Prefab", var_metadata.pfb_idx or find_index(RN.pfb_resource_names, var_metadata.pfb_path) or 1, RN.pfb_resource_names)
+						if obj_changed then 
+							changed = true
+							value = RSCache.pfb_resources[ RN.pfb_resource_names[var_metadata.pfb_idx] ]
+							var_metadata.pfb_path = value:call("get_Path")
+						end
 					end
 				end
 			end
 			if imgui.tree_node("[Lua]") then
-				for key, value in orderedPairs(var_metadata) do 
-					if not editable_table_field(key, value, var_metadata) then 
-						imgui.text(key .. ":	" .. tostring(value))
-					end
-				end
+				read_imgui_element(var_metadata, nil, true)
+				imgui.tree_pop()
 			end
 		imgui.end_rect(2)
 	end
@@ -4946,7 +4968,7 @@ end
 
 --Wrapper for read_field(), displays one REMgdObj field in imgui:
 local function show_field(managed_object, field, key_name)
-	
+	local changed
 	--[[local name = field:get_name()
 	local type = field:get_type()
 	local value = field:get_data(managed_object)
@@ -4989,7 +5011,7 @@ end
 
 --Wrapper for read_field(), displays one REMgdObj property in imgui:
 local function show_prop(managed_object, prop, key_name)
-	
+	local changed
 	--[[if prop.set and prop.value == nil then
 		local new_set, new_value
 		new_set, new_value = check_create_new_value(prop.value, key_name, prop.name, prop.ret_type, "[Create " .. prop.name .. "]", "[Set New " .. prop.name .. "]") 
@@ -5004,7 +5026,6 @@ local function show_prop(managed_object, prop, key_name)
 			managed_object._.clear = true
 		end
 	end]]
-	
 	if type(prop.cvalue) == "table" then
 		--imgui_check_value(managed_object._)
 		changed, value = show_managed_objects_table(managed_object, prop.cvalue, prop, key_name)
@@ -6320,13 +6341,18 @@ local BHVTNode = {
 			local action_obj = BHVTAction:new{obj=action, node_obj=o} --self:get_action_obj(action, o.owner)
 			o.actions[i] = action_obj
 		end
+		--[[for i, action in ipairs(o.obj:get_unloaded_actions()) do 
+			o.unl_actions = o.unl_actions or {}
+			local action_obj = BHVTAction:new{obj=action, node_obj=o} --self:get_action_obj(action, o.owner)
+			o.unl_actions[i] = action_obj
+		end
 		for i, transition in ipairs(o.obj:get_transitions()) do 
 			if transition.get_full_name then 
 				o.transitions = o.transitions or {}
 				local transition_obj = self:get_node_obj(transition, o.owner, o.tree_idx)
 				o.transitions[#o.transitions+1] = transition_obj
 			end
-		end
+		end]]
 		self.__index = self
 		return setmetatable(o, self)
 	end,
@@ -6415,42 +6441,46 @@ BHVT = {
 			node.tree_idx, 
 			static_objs.setn
 		}
-		if imgui.button_w_hotkey(name, self.imgui_keyname .. "." .. name, dfcall_template, dfcall_args, dfcall_json) then
-			self:set_node(name, node.tree_idx)
-		end
+		local is_running = (node.obj:get_status1() == 2) or (node.obj:get_status2() == 2)
 		
-		if (node.children or node.transitions or node.actions) then 
-			name = name or node.obj:get_full_name()
-			imgui_keyname = imgui_keyname or self.imgui_keyname
-			dfcall_template = dfcall_template or {obj=self.obj, func="setCurrentNode(System.String, System.UInt32, via.behaviortree.SetNodeInfo)"}
-			--dfcall_template = dfcall_template or {obj=node.layer.layer, func="setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)"}
-			imgui.same_line()
-			if imgui.tree_node_str_id(name.."C", "") then
-				if node.children and imgui.tree_node("Children") then
-					for i, child_node_obj in pairs(node.children) do 
-						self:imgui_bhvt_nodes(child_node_obj, child_node_obj.name, imgui_keyname, dfcall_template)
-					end
-					imgui.tree_pop()
-				end
-				if node.actions and imgui.tree_node("Actions") then
-					for i, action_obj in ipairs(node.actions) do 
-						--self:imgui_bhvt_nodes(action_node, action_name, imgui_keyname, dfcall_template)
-						if imgui.tree_node(i .. ". " .. action_obj.name) then 
-							imgui.managed_object_control_panel(action_obj.obj)
-							imgui.tree_pop()
-						end
-					end
-					imgui.tree_pop()
-				end
-				if node.transitions and imgui.tree_node("Transitions") then
-					for i, transition_node_obj in pairs(node.transitions) do 
-						self:imgui_bhvt_nodes(transition_node_obj, transition_node_obj.name, imgui_keyname, dfcall_template)
-					end
-					imgui.tree_pop()
-				end
-				imgui.tree_pop()
+		if is_running then imgui.begin_rect(); imgui.begin_rect() end
+			if imgui.button_w_hotkey(name, self.imgui_keyname .. "." .. name, dfcall_template, dfcall_args, dfcall_json) then
+				self:set_node(name, node.tree_idx)
 			end
-		end
+			
+			if (node.children or node.transitions or node.actions) then 
+				name = name or node.obj:get_full_name()
+				imgui_keyname = imgui_keyname or self.imgui_keyname
+				dfcall_template = dfcall_template or {obj=self.obj, func="setCurrentNode(System.String, System.UInt32, via.behaviortree.SetNodeInfo)"}
+				--dfcall_template = dfcall_template or {obj=node.layer.layer, func="setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)"}
+				imgui.same_line()
+				if imgui.tree_node_str_id(name.."C", "") then
+					if node.children and imgui.tree_node("Children") then
+						for i, child_node_obj in pairs(node.children) do 
+							self:imgui_bhvt_nodes(child_node_obj, child_node_obj.name, imgui_keyname, dfcall_template)
+						end
+						imgui.tree_pop()
+					end
+					if node.actions and imgui.tree_node("Actions") then
+						for i, action_obj in ipairs(node.actions) do 
+							--self:imgui_bhvt_nodes(action_node, action_name, imgui_keyname, dfcall_template)
+							if imgui.tree_node(i .. ". " .. action_obj.name) then 
+								imgui.managed_object_control_panel(action_obj.obj)
+								imgui.tree_pop()
+							end
+						end
+						imgui.tree_pop()
+					end
+					if node.transitions and imgui.tree_node("Transitions") then
+						for i, transition_node_obj in pairs(node.transitions) do 
+							self:imgui_bhvt_nodes(transition_node_obj, transition_node_obj.name, imgui_keyname, dfcall_template)
+						end
+						imgui.tree_pop()
+					end
+					imgui.tree_pop()
+				end
+			end
+		if is_running then imgui.end_rect(1); imgui.end_rect(2) end
 	end,
 	
 	imgui_behaviortree = function(self)
@@ -6843,6 +6873,7 @@ GameObject = {
 	end,
 	
 	imgui_poser = function(self)
+		
 		self.poser = self.poser or {
 			name=self.key_name:gsub("/", "."),
 			slots={},
@@ -6854,6 +6885,11 @@ GameObject = {
 			undo={},
 		}
 		local poser = self.poser
+		
+		local function clear_joint(joint)
+			old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+			joint[poser.prop_name].freeze = nil
+		end
 		
 		if not poser.names then
 			poser.current_name = poser.current_name or poser.name
@@ -6892,7 +6928,7 @@ GameObject = {
 		
 		poser.prop_name = poser.prop_names[poser.current_prop_name_idx]
 		poser.is_local = not not poser.prop_name:find("ocal") or nil
-		poser.is_pos = not not poser.prop_name:find("osition")
+		poser.is_pos = not not poser.prop_name:find("osition") or nil
 		
 		changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
 		
@@ -6958,8 +6994,7 @@ GameObject = {
 			for i, joint in ipairs(self.joints or {}) do 
 				if joint[poser.prop_name].freeze then 
 					frozen_total = frozen_total + 1
-					joint[poser.prop_name].freeze = nil
-					old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+					clear_joint(joint)
 				end
 			end
 			if frozen_total == 0 then 
@@ -6981,15 +7016,14 @@ GameObject = {
 			var_metadata.display_name = j_o_tbl.Name
 			imgui.push_id(joint)
 				local selected_changed
-				selected_changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last == joint))
+				selected_changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last and ((#poser.undo.last > 0) and (poser.undo.last[#poser.undo.last] == joint))) or ((not poser.undo.last or #poser.undo.last==0) and j_o_tbl.selected))
 				local hovered = imgui.is_item_hovered()
 				
 				imgui.same_line()
-				
-				if show_prop(joint, var_metadata, self.key_hash .. "p" .. i) then --and (var_metadata.freeze == false) then 
-					poser.undo.last = joint
-					var_metadata.freeze = 1
+				local changed = show_prop(joint, var_metadata, self.key_hash .. "p" .. i) --and var_metadata.freeze then --and (var_metadata.freeze == false) then 
+				if changed and changed ~= 1 then
 					prop_changed = joint
+					var_metadata.freeze = 1
 				end
 				var_metadata.update = true
 				
@@ -7020,16 +7054,20 @@ GameObject = {
 				
 				hovered = hovered or imgui.is_item_hovered()
 				if selected_changed or (not var_metadata.freeze and hovered and check_key_released(via.hid.KeyboardKey.Shift, 0.0))  then 
-					poser.undo.last = joint
+					if selected_changed then
+						poser.undo[joint] = poser.undo[joint] or { prev_rot={} }
+						poser.undo[joint].start = uptime
+						poser.undo.last = poser.undo.last or {}
+						table.insert(poser.undo.last, joint) 
+					end
 					var_metadata.freeze = true
 					j_o_tbl.selected = true
 					deferred_calls[joint] = {func="set" .. poser.prop_name, args=var_metadata.cvalue, vardata=var_metadata}
 				end
 				
-				if var_metadata.freeze and (not imgui.same_line() and imgui.button("X") or (hovered and check_key_released(via.hid.KeyboardKey.Menu, 0.0))) then
-					old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
-					var_metadata.freeze = nil
-					j_o_tbl.selected = nil
+				if var_metadata.freeze and (not imgui.same_line() and imgui.button((poser.undo[joint] and #poser.undo[joint].prev_rot > 0 and #poser.undo[joint].prev_rot) or "X") or (hovered and check_key_released(via.hid.KeyboardKey.Menu, 0.0))) then
+					poser.undo[joint] = nil
+					clear_joint(joint)
 				end
 				
 			imgui.pop_id()
@@ -7066,22 +7104,31 @@ GameObject = {
 
 		if prop_changed then
 			local joint = prop_changed
-			if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 0.75)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
-				poser.undo.last = joint
+			if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 0.25)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
+				poser.undo.last = poser.undo.last or {}
+				table.insert(poser.undo.last, joint) 
 				poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint[poser.prop_name].cvalue}
 				table.insert(poser.undo[joint].prev_rot, joint[poser.prop_name].cvalue)
 			end
 			poser.undo[joint].start = uptime
 		end
 		
-		if poser.undo.last and poser.undo[poser.undo.last] and check_key_released(via.hid.KeyboardKey.Z) then
-			local joint = poser.undo.last
-			joint[poser.prop_name].freeze = 1
-			deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
-			poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
-			if not poser.undo[joint].prev_rot[1] then
-				old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
-				joint[poser.prop_name].freeze = nil
+		::goback::
+		if poser.undo.last and check_key_released(via.hid.KeyboardKey.Z) then 
+			local joint = poser.undo.last[#poser.undo.last]
+			poser.undo.last[#poser.undo.last] = nil
+			if poser.undo.last[1] and (not joint or not poser.undo[joint] or not poser.undo[joint].prev_rot[1]) then
+				if joint and poser.undo[joint] then 
+					clear_joint(joint)
+				end
+				goto goback
+			elseif joint then
+				joint[poser.prop_name].freeze = 1
+				deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
+				poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
+				if not poser.undo[joint].prev_rot[1] then
+					clear_joint(joint)
+				end
 			end
 		end
 	end,
@@ -7731,10 +7778,12 @@ re.on_draw_ui(function()
 	end
 	
 	if imgui.tree_node("Collection") then --next(Collection) and 
-		changed, SettingsCache.detach_collection = imgui.checkbox("Detach", SettingsCache.detach_collection)
-		imgui.same_line()
-		show_collection()
-		imgui.tree_pop()
+		imgui.begin_rect()
+			changed, SettingsCache.detach_collection = imgui.checkbox("Detach", SettingsCache.detach_collection)
+			imgui.same_line()
+			show_collection()
+			imgui.tree_pop()
+		imgui.end_rect(2)
 	end
 	
 	if special_changed or (SettingsCache.load_settings and (csetting_was_changed or random(255))) then
