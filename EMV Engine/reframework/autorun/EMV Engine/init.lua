@@ -1757,8 +1757,9 @@ local function create_resource(resource_path, resource_type, force_create)
 	--	return create_resource(table.unpack(resource_path)) 
 	--end
 	if init_resources then 
-		init_resources() 
+		local fn = init_resources
 		init_resources = nil
+		fn() 
 	end
 	resource_path = resource_path:lower()
 	log.info("creating resource " .. resource_path)
