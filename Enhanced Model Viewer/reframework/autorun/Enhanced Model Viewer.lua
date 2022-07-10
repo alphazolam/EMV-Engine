@@ -27,6 +27,7 @@ EMVSettings.special_mode = isRE2 and 1
 EMVSettings.frozen_fov = 68.0
 EMVSettings.use_savedata = false
 EMVSettings.alt_sound_seek = not isDMC and true
+EMVSettings.use_frozen_fov = false
 
 EMVCache = {}
 EMVCache.global_cached_banks = {}
@@ -41,9 +42,9 @@ shown_transforms = {}
 
 --Global (but just to check them in the console)
 RN = RN or {} --resource names
-local total_objects = nil
-local imgui_anims = nil
-local imgui_others = nil
+total_objects = nil
+imgui_anims = nil
+imgui_others = nil
 figure_mode = nil
 cutscene_mode = nil
 forced_mode = nil
@@ -60,7 +61,6 @@ local do_move_light_set = false
 local do_show_all_lights = false
 local do_unlock_all_lights = false
 local EMVSetting_was_changed = false
-local setup_mbank_method = sdk.find_type_definition("via.motion.Motion"):get_method("setupMotionBank")
 local this_figure_via_motions_count = 0
 local new_mat4 = Matrix4x4f.new(Vector4f.new(1, 0, 0, 0), Vector4f.new(0, 1, 0, 0), Vector4f.new(0, 0, 1, 0), Vector4f.new(0, 0, 0, 1))
 
@@ -69,18 +69,15 @@ static_objs.scene_manager = sdk.get_native_singleton("via.SceneManager")
 static_objs.playermanager = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager")) or sdk.get_managed_singleton("snow.player.PlayerManager")
 static_objs.inputsystem = sdk.get_managed_singleton(sdk.game_namespace("InputSystem"))
 static_objs.via_app = sdk.get_native_singleton("via.Application")
-static_objs.cached_obj = sdk.create_instance()
 
 local static_funcs = EMV.static_funcs
 static_funcs.get_enum_names_func = sdk.find_type_definition("System.Enum"):get_method("GetNames")
 static_funcs.get_enum_values_func = sdk.find_type_definition("System.Enum"):get_method("GetValues")
+static_funcs.setup_mbank_method = sdk.find_type_definition("via.motion.Motion"):get_method("setupMotionBank")
 
 local scene = static_objs.scene_manager and sdk.call_native_func(static_objs.scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
-
 local base_mesh = nil
 local current_figure = nil
-local figure_mgr
-local current_light_set
 local current_figure_name
 local current_frame = 0
 local play_speed = 1.0
@@ -89,7 +86,7 @@ local changed, was_changed
 local tics = 0
 local toks = 0
 local current_em_name
-local figure_start_time
+local figure_start_time = nil
 local held_transforms_count = 0
 local ev_object = nil
 local figure_settings = nil
@@ -97,7 +94,7 @@ local figure_behavior
 local current_fig_name = nil
 local fig_mgr_name
 local cutscene_cam
-re2_figure_container_obj = nil
+local re2_figure_container_obj = nil
 local total_objects_names = {}
 local sorted_held_transforms = {}
 local cached_text_boxes = {}
@@ -350,7 +347,7 @@ end
 
 local function imgui_anim_object_figure_viewer(anim_object, obj_name, index)
 	imgui.begin_rect()
-		imgui.push_id(anim_object.gameobj:get_address()+ 3 + (index or 0))
+		imgui.push_id(anim_object.gameobj:get_address()+ 3 + (tonumber(index) or 0))
 			changed, anim_object.display = imgui.checkbox("",  anim_object.display)
 			if changed and not anim_object.name:find("amera") then 
 				anim_object:toggle_display()
@@ -528,7 +525,7 @@ re.on_application_entry("UpdateMotion", function()
 		]]
 		end
 		
-		if cutscene_cam and EMVSettings.frozen_fov then 
+		if cutscene_cam and EMVSettings.frozen_fov and EMVSettings.use_frozen_fov then 
 			cutscene_cam.components[2]:call("set_FOV", EMVSettings.frozen_fov)
 		end
 	end
@@ -606,7 +603,14 @@ GameObject.new_AnimObject = function(self, args, o)
 	self.is_light = args.is_light or self.is_light
 	self.is_wep = (self.name:find("wp%d%d")==1) or nil
 	
-	log.info(self.name .. " " .. tostring(self.body_part) .. " " .. tostring(args.body_part))
+	if self.is_light and self.parent then 
+		local p_xform, lightset_xform = self.parent
+		while p_xform do 
+			lightset_xform = p_xform
+			p_xform = p_xform:call("get_Parent")
+		end
+		self.lightset_xform = lightset_xform
+	end
 	
 	if self.components_named.IBL then
 		self.IBL = self.components_named.IBL
@@ -740,16 +744,17 @@ GameObject.new_AnimObject = function(self, args, o)
 		if current_figure then
 			if self.cog_init_transform then
 				local pos = current_figure.xform:call("get_Position")
-				self.cog_init_transform = Vector3f.new(pos.x, self.cog_init_transform.y, pos.z)
+				self.cog_init_transform[3] = Vector3f.new(pos.x, self.cog_init_transform.y, pos.z)
 			end
 			current_figure.em_name = self.em_name or current_figure.em_name
 		end
-		self.em_name = self.em_name or (current_figure and current_figure.em_name) --or self.mesh_name_short or self.name 
+		
+		self.em_name = self.em_name or (current_figure and current_figure.em_name)
 		self.em_name = self.em_name and self.em_name:lower()
 		
 		if isRE8 and self.em_name then 
 			self.alt_names[self.em_name] = true
-		elseif figure_mode and isRE2 then
+		elseif isRE2 and figure_mode then
 			self.alt_names[self.figure_name:lower():gsub("_normal", ""):gsub("figure_", "")] = true
 		end
 		
@@ -778,7 +783,11 @@ GameObject.new_AnimObject = function(self, args, o)
 					end
 				end
 			else
-				self.alt_names[self.mesh_name_short] = true
+				if isRE8 then 
+					self.alt_names[self.mesh_name_short:sub(1,7)] = true
+				else
+					self.alt_names[self.mesh_name_short] = true
+				end
 				if isDMC and self.mesh_name_short:find("_11") then
 					local name = self.mesh_name_short:gsub("_11", "_01")
 					self.alt_names[name] = true
@@ -804,9 +813,9 @@ GameObject.new_AnimObject = function(self, args, o)
 			for em_name, sub_table in pairs(res.alt_names) do
 				if self.mesh_name_short:find(em_name) then -- or em_name:find(self.mesh_name_short) then 
 					for key, tbl in pairs(sub_table) do
-						if self.face_mode or key ~= "face" then 
+						if key==self.body_part or key=="exclude" then 
 							for i, extra_name in ipairs(tbl) do
-								if key == "exclude" then 
+								if key=="exclude" then
 									self.excluded_names = self.excluded_names or {}
 									self.excluded_names[extra_name] = true
 								else
@@ -818,14 +827,6 @@ GameObject.new_AnimObject = function(self, args, o)
 				end
 			end
 		end
-		
-		--[[local layer_p = sdk.create_instance("via.motion.TreeLayer")
-		if layer_p and layer_p:add_ref() then 
-			layer_p:call(".ctor")
-			self.motion:call("setPrivateLayerCount", 1)
-			self.motion:call("setPrivateLayer", 0, layer_p)
-			self.layer_p = layer_p
-		end]]
 		
 		self:get_current_bank_name()
 		--self:build_banks_list()
@@ -882,7 +883,11 @@ GameObject.clear_AnimObject = function(self, xform)
 	if ev_object and xform == ev_object.xform then ev_object = nil end
 	if player and player.xform == xform then player = nil end
 	if self and self.total_objects_idx and total_objects[self.total_objects_idx] and xform == total_objects[self.total_objects_idx].xform then 
-		total_objects[self.total_objects_idx] = nil
+		table.remove(total_objects, self.total_objects_idx)
+		log.info(#total_objects)
+		if #total_objects == 0 then 
+			clear_figures()
+		end
 	end
 end
 
@@ -904,14 +909,15 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 			
 			if self.layer and self.motbanks then 
 				
-				--if not self.motbanks then
-				--	self:update_components()
-				--end
+				if (not self.motbanks or not self.motbank_names or not self.motbank_names[1]) and not self.cant_find_motbanks then
+					self:update_components()
+					self.cant_find_motbanks = not self.motbanks or nil
+				end
 				
 				if self.changed_bank then --delayed bank change
 					self.changed_bank = nil
 					log.info("Changing " .. self.name .. " motion after bank change " .. self.mbank_idx .. " " .. self.mlist_idx .. " " .. self.mot_idx)
-					if not setup_mbank_method then
+					if not static_funcs.setup_mbank_method then
 						self:update_banks((pre_cached_banks ~= nil))
 						self:change_motion()
 					end
@@ -962,29 +968,36 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 					end
 				end
 				
-				
 				if self.mlist_idx and self.motlist_names then --confirm mlist and mot names in their comboboxes
-					local mbank = self.active_mbanks and (self.active_mbanks[ self.motlist_names[self.mlist_idx] ] or self.active_mbanks[ tostring(self.mlist_idx-1) ])
-					mbank = mbank and self.motion:call("getActiveMotionBank", mbank)
+					local motion_node = self.layer:call("get_HighestWeightMotionNode")
+					local mot_name = motion_node and motion_node:call("get_MotionName")
+					local mbank = motion_node and self.motion:call("findMotionBank(System.UInt32, System.UInt32)", motion_node:call("get_MotionBankID"), motion_node:call("get_MotionBankType"))
+					--local mbank = self.active_mbanks and (self.active_mbanks[ self.motlist_names[self.mlist_idx] ] or self.active_mbanks[ tostring(self.mlist_idx-1) ])
+					--mbank = mbank and self.motion:call("getActiveMotionBank", mbank)
+					if self.name == "pl1000" then log.info("0") end
 					if mbank then 
 						local motlist = mbank:call("get_MotionList")
 						local motlist_name = motlist and motlist:call("ToString()"):match("^.+%[@?(.+)%]") 
 						local mlist_idx_new = (motlist_name and find_index(self.motlist_names, motlist_name))
-						local motion_node = self.layer:call("get_HighestWeightMotionNode")
-						if motion_node and mlist_idx_new then
-							local mot_name = motion_node:call("get_MotionName")
+						if self.name == "pl1000" then log.info("A") end
+						if mlist_idx_new then
+							if self.name == "pl1000" then log.info("B") end
 							local mot_idx_new = (mot_name and self.motion_names and find_index(self.motion_names[mlist_idx_new], mot_name))
 							if mot_idx_new then 
+								if self.name == "pl1000" then log.info("C") end
 								self.mlist_idx = mlist_idx_new
 								self.mot_idx = mot_idx_new
+								if self.name == "pl1000" then
+									testy = {mlist_idx_new, mot_idx_new, motlist_name, mot_name, tics, mbank, motion_node, self, self.layer:call("get_HighestWeightMotionNode")}
+								end
 							end
 						end
 					end
 				end
 				
-				if self.synced and self.running then 
-					if toks % 4 == 0 and (self.synced.end_frame ~= self.end_frame or self.frame > self.synced.frame+15 or self.frame < self.synced.frame-15) then 
-						self.synced = false
+				if self.synced and self.running and self.synced.end_frame then 
+					if toks % 4 == 0 and ((self.synced.end_frame ~= self.end_frame) ) then --or (self.frame > self.synced.frame+15) or (self.frame < self.synced.frame-15)) then 
+						self.synced = nil
 					end
 				end
 				
@@ -1101,6 +1114,7 @@ GameObject.build_banks_list = function(self)
 		}
 		self.savedata = EMVCache.savedata[self.key_hash]
 	end
+	
 	self.matched_banks_count = get_table_size(self.matched_banks)
 	
 	--Make ordered list with matched banks first:
@@ -1213,15 +1227,15 @@ GameObject.center_object = function(self)
 					local new_pos =  (isRE3 and self.cog_init_transform[3]) or self.center
 					if mathex and not self.aggressively_force_center and self.parent and self.init_cog_offset then 
 						new_pos = org_cog_pos + self.init_cog_offset
-						local transformed_pos = mathex:call("transform(via.vec3, via.mat4)", new_pos, self.parent:call(isRE2 and "get_WorldMatrix" or "get_LocalMatrix"))
+						local parent_matrix = isRE8 and Matrix4x4f.identity() or self.parent:call(isRE2 and "get_WorldMatrix" or "get_LocalMatrix")
+						local transformed_pos = mathex:call("transform(via.vec3, via.mat4)", new_pos, parent_matrix)
 						transformed_pos.y = new_pos.y
 						new_pos = transformed_pos
 					end
-					if forced_mode then 
-						new_pos.y = org_cog_pos.y
-						if new_pos.y < 0.1 then new_pos.y = 0.1 end --dont sink below ground
-					end
-					self.cog_joint:call("set_Position", new_pos)
+					--[[if forced_mode then 
+						--dont sink below ground
+					end]]
+					self.cog_joint:call(isRE8 and "set_LocalPosition" or "set_Position", new_pos)
 				end
 			end
 			
@@ -1238,7 +1252,6 @@ GameObject.center_object = function(self)
 					end
 				end
 			end
-			
 		end
 	end
 end
@@ -1273,7 +1286,7 @@ GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync,
 		self.layer:call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)", mlist, mot, start_frame or 0, interp_frames, 1, 0)
 		--self.layer_output = self.motion:call("continueMotionOnSeparateLayer", 0, 1, 0, 0, 1.0, 0)
 		
-		if self.selected and (self.sync and not forced_mode or self.puppetmode) and EMVSettings.sync_face_mots and not is_searching_sync and (self.face_mode or (self.body_part == "Body")) and self.end_frame > 10 then 
+		if EMVSettings.sync_face_mots and self.selected and (self.sync and not (forced_mode or self.puppetmode)) and not is_searching_sync and (self.face_mode or (self.body_part == "Body")) and self.end_frame > 10 then 
 		--and EMVSettings.seek_all  --and not self.synced and self.running 
 			if self.display and self.cached_banks[self.mbank_idx] and self.cached_banks[self.mbank_idx].mots_ids[self.mlist_idx] and self.cached_banks[self.mbank_idx].mots_ids[self.mlist_idx][self.mot_idx] then
 				local end_frame = self.cached_banks[self.mbank_idx].mots_ids[self.mlist_idx][self.mot_idx][4]
@@ -1281,7 +1294,7 @@ GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync,
 				local exclude_keyword = "jack"
 				exclude_keyword = not self.current_bank_name:find(exclude_keyword) and exclude_keyword
 				for i, object in ipairs(imgui_anims) do 
-					if object ~= self and object.display and object.sync then --and not object.body_part == "Other" then 
+					if (object ~= self) and object.display and object.sync and (object.body_part ~= self.body_part) then --and not object.body_part == "Other" then 
 						local face_object, fc_mbank_idx, fc_mlist_idx, fc_mot_idx, frames, all_mots_idx = find_matching_mot(self, object, end_frame, mot_name, exclude_keyword)
 						if face_object then --and face_object ~= selected 
 							local face_cb = face_object.cached_banks[fc_mbank_idx]
@@ -1330,7 +1343,7 @@ GameObject.check_bank_name = function(self, name, object_name, quick_check)
 	local found_body =  lower_name:find("body") or ((isRE8 and lower_name:find("ch%d%d_")) or (isRE8 and not found_facial)) or ((isRE2 or isRE3) and lower_name:find("[pe][lm]%d%d%d0"))
 	--(isRE8 and (lower_name:find("pl%d%d00") or lower_name:find("em%d%d00") or lower_name:find("barehand"))
 	
-	--if self.name == "pl2000_face_00" then log.info("Checking " .. lower_name .. " vs " .. object_name .. ",  found facial: " .. tostring(found_facial) .. ", found_body: " .. tostring(found_body)) end
+	--if self.name == "Face" then log.info("Checking " .. lower_name .. " vs " .. object_name .. ",  found facial: " .. tostring(found_facial) .. ", found_body: " .. tostring(found_body)) end
 	if self.body_part ~= "Other" and found_item then return false end
 	if self.body_part == "Body" and found_facial  then return false end --or (isDMC and lower_name:find("%d%d%d%d_%d%d") and not lower_name:find("_10"))
 	if (isRE2 or isRE3) and object_name:find("em%d%d%d") and lower_name:find("_[pe][ls]") then return false end
@@ -1369,8 +1382,6 @@ GameObject.control_action = function(self, args) --args = { paused, do_restart, 
 	--args.paused = args.paused or paused
 	args.play_speed = args.play_speed or self.play_speed
 	args.current_frame = args.current_frame or self.frame
-	
-	log.info(self.name .. logv(args))
 	
 	if args.do_reset_gpuc then 
 		self:reset_physics()
@@ -1423,7 +1434,7 @@ GameObject.customize_cached_bank = function(self, cb)
 	if cb and (self.body_part ~= "Hair") and self.matched_banks[cb.name] then 
 		local cached_bank = {motlist_names={}, motion_names={}, mots_ids={}, name=cb.name,}
 		for j, mlist_name in ipairs(cb.motlist_names) do
-			if self:check_bank_name(mlist_name, (self.alt_names and self.alt_names[1]) or self.mesh_name_short or self.em_name or self.name, true) then
+			if (isRE8 and mlist_name:find("msgmot")) or self:check_bank_name(mlist_name, (self.alt_names and self.alt_names[1]) or self.mesh_name_short or self.em_name or self.name, true) then
 				table.insert(cached_bank.motlist_names, mlist_name)
 				table.insert(cached_bank.motion_names, cb.motion_names[j])
 				table.insert(cached_bank.mots_ids, cb.mots_ids[j])
@@ -1438,8 +1449,11 @@ GameObject.get_current_bank_name = function(self, no_check)
 	if self.layer then
 		local bank = self.motion:call("get_MotionBankAsset")
 		if not bank then 
-			self.motion:call("set_MotionBankAsset", ({next(self.motbanks or {})})[2] or ({next(RSCache.motbank_resources or {})})[2]) --set any random motionbank just so it can get started
-			bank = self.motion:call("get_MotionBankAsset")
+			local rando_bank = ({next(self.motbanks or {})})[2] or ({next(RSCache.motbank_resources or {})})[2]
+			if rando_bank then
+				self.motion:call("set_MotionBankAsset", rando_bank) --set any random motionbank just so it can get started
+				bank = self.motion:call("get_MotionBankAsset")
+			end
 		end
 		self.current_bank_name = bank and bank:add_ref():call("ToString()"):match("^.+%[@?(.+)%]")
 		self.current_bank_name = self.current_bank_name and self.current_bank_name:lower()
@@ -1568,8 +1582,8 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 			self.layer:call("clearMotionResource")
 			self.motion:call("set_MotionBankAsset", mb_asset) 
 			
-			if setup_mbank_method then 
-				setup_mbank_method:call(self.motion)
+			if static_funcs.setup_mbank_method then 
+				static_funcs.setup_mbank_method:call(self.motion)
 			end
 			
 			if forced_mode and player and (self.xform == player.xform) and self.mfsm2 then 
@@ -1580,8 +1594,8 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 				self.mlist_idx, self.mot_idx = convert_mot_ids(global_cached_banks[self.motbank_names[mbank_idx]], mlist_idx, mot_idx)
 			end
 			self.mbank_idx = find_index(self.motbank_names, motbank_name) or mbank_idx
-			if setup_mbank_method then 
-				self:change_motion(self.mlist_idx, self.mot_idx, true) --thanks to setupMotionBank(), it can change immediately
+			if static_funcs.setup_mbank_method then 
+				self:change_motion(self.mlist_idx, self.mot_idx)--, true) --thanks to setupMotionBank(), it can change immediately
 				self:update_banks()
 			end
 			self.changed_bank = not is_pre_cache and true
@@ -1605,7 +1619,7 @@ GameObject.pre_cache_all_banks = function(self)
 			deferred_calls[self.gameobj] = {func="destroy", args=self.gameobj}
 		end
 		json.dump_file("EnhancedModelViewer\\EMVCache.json", jsonify_table(EMVCache))
-	elseif setup_mbank_method then 
+	elseif static_funcs.setup_mbank_method then 
 		if not self.cached_banks then return end
 		--if figure_mode then
 		--	self.motion:call("setDynamicMotionBankCount", 0)
@@ -1854,12 +1868,12 @@ re.on_application_entry("UpdateHID", function()
 				paused = not paused
 				control_action_args = { paused=paused }
 			end
-		elseif cutscene_cam and check_key_released(via.hid.KeyboardKey.Multiply) then
+		elseif EMVSettings.use_frozen_fov and cutscene_cam and check_key_released(via.hid.KeyboardKey.Multiply) then
 			EMVSettings.frozen_fov = nil
-		elseif cutscene_cam and kb_state.down[via.hid.KeyboardKey.Add] then
+		elseif EMVSettings.use_frozen_fov and cutscene_cam and kb_state.down[via.hid.KeyboardKey.Add] then
 			cutscene_cam.components[2]:call("set_FOV", cutscene_cam.components[2]:call("get_FOV") + ((kb_state.down[via	.hid.KeyboardKey.Shift] and (1)) or 0.25) ) --+ ((kb_state.down[via.hid.KeyboardKey.Shift] and (1.05)) or 1.01)
 			EMVSettings.frozen_fov = not ev_object.free_cam and cutscene_cam.components[2]:call("get_FOV")
-		elseif cutscene_cam and kb_state.down[via.hid.KeyboardKey.Subtract] then
+		elseif EMVSettings.use_frozen_fov and cutscene_cam and kb_state.down[via.hid.KeyboardKey.Subtract] then
 			cutscene_cam.components[2]:call("set_FOV", cutscene_cam.components[2]:call("get_FOV") - ((kb_state.down[via.hid.KeyboardKey.Shift] and (1)) or 0.25))
 			EMVSettings.frozen_fov = not ev_object.free_cam and cutscene_cam.components[2]:call("get_FOV")
 		elseif check_key_released(via.hid.KeyboardKey.Alpha2, 0.5) then
@@ -2201,6 +2215,8 @@ local function cs_viewer()
 						deferred_calls[ev_object.cam_layer] = { func="set_BlendMode", args=0 } --Private (cutscene-controlled)
 					end
 				end
+				imgui.same_line()
+				changed, EMVSettings.use_frozen_fov = imgui.checkbox("Zoom Control", EMVSettings.use_frozen_fov); EMVSetting_was_changed = changed or EMVSetting_was_changed
 			end
 			
 			imgui.same_line()
@@ -2301,7 +2317,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 				
 				--Add or remove a bank from matched_banks manually:
 				imgui.same_line()
-				local matched_bank = anim_object.matched_banks[ anim_object.motbank_names[anim_object.mbank_idx] ]
+				local matched_bank = anim_object.matched_banks and anim_object.matched_banks[ anim_object.motbank_names[anim_object.mbank_idx] ]
 				if imgui.button(matched_bank and "-" or "+") then
 					local mb_name = anim_object.motbank_names[anim_object.mbank_idx]
 					anim_object.matched_banks[mb_name] = not matched_bank and anim_object.motbanks[mb_name] or nil
@@ -2730,7 +2746,7 @@ end)
 
 re.on_frame(function()
 	
-	if (not RN.loaded_resources) and res and res.finished() then --FIRST FRAME STEPS
+	if not RN.loaded_resources and res.finished() then --FIRST FRAME STEPS
 		if (isRE2 or isRE3 or isDMC or isRE8) and not next(EMVCache.global_cached_banks) then
 			pre_cached_banks = {}
 		end
@@ -2757,8 +2773,8 @@ re.on_frame(function()
 		table.insert(results,{obj=result, amt=result:call("get_BindGameObjects"):get_size()}) 
 	end; 
 	qsort(results, "amt")
-	
 	]]
+	
 	if static_objs.scene_manager and not scene then 
 		scene = sdk.call_native_func(static_objs.scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
 	end
@@ -2767,8 +2783,13 @@ re.on_frame(function()
 	
 	if reframework:is_drawing_ui() then
 		
-		figure_mgr = scene and (isRE8 and scene:call("findGameObject(System.String)", "GUIFigureList")) or (isDMC and scene:call("findGameObject(System.String)", "ModelViewerCamera")) or scene:call("findGameObject(System.String)", "FigureManager")	
-		figure_mode = not not figure_mgr
+		if isRE8 then 
+			figure_mode = find(isRE8 and "app.FigureDataHolder")[1]
+			figure_mode = figure_mode and (held_transforms[figure_mode] or GameObject:new{xform=figure_mode}) or nil
+		else
+			figure_mgr = (isRE8 and scene:call("findGameObject(System.String)", "GUIFigureList")) or (isDMC and scene:call("findGameObject(System.String)", "ModelViewerCamera")) or scene:call("findGameObject(System.String)", "FigureManager")	
+			figure_mode = not not figure_mgr
+		end
 		
 		if EMVSettings.cutscene_viewer and not cutscene_mode then --and (uptime - start_time) > 15 
 			local schedule_obj
@@ -2876,8 +2897,11 @@ re.on_frame(function()
 	imgui_anims = imgui_anims or {}
 	imgui_others = imgui_others or {}
 	
+	--imgui.text(tostring(#total_objects) .. " " .. tostring(#imgui_anims) .. " " .. tostring(#imgui_others))
+	
 	--Build list of model viewer objects:
-	if not forced_mode and (((not imgui_anims[1] or not imgui_others[1])) or (#imgui_anims == 0 and this_figure_via_motions_count > 1)) then -- and random(60)
+	if not forced_mode and (not total_objects[1] or not imgui_anims[1] or not imgui_others[1]) then -- and random(60) --or (#imgui_anims == 0 and this_figure_via_motions_count > 1)
+		
 		log.info("Creating total_objects...")
 		if not fig_mgr_name then
 			fig_mgr_name, current_fig_name = nil, nil
@@ -2901,14 +2925,30 @@ re.on_frame(function()
 		
 		if fig_mgr_name and not cutscene_mode and scene:call("findGameObject(System.String)", fig_mgr_name) then
 			
-			total_objects = {}
+			--clear_figures()
+			total_objects, imgui_anims, imgui_others = {}, {}, {}
 			local total_args = {}
-			current_light_set, current_em_name = nil
+			local unique_xforms = {}
+			local temp_objs = {}
+			current_em_name = nil
 			if selected and not is_valid_obj(selected.xform) then 
 				selected = nil
 			end
 			
-			all_transforms = scene and lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof("via.Transform")) or {}, false, true)
+			--[[if isRE8 then 
+				local figdata = figure_mode.components_named.FigureDataHolder
+				figdata._ = figdata._ or create_REMgdObj(figdata)
+				figlist = {}
+				local list = merge_indexed_tables(lua_get_system_array(figdata.meshes), lua_get_system_array(figdata.physicsChains))
+				list = merge_indexed_tables(list, lua_get_system_array(figdata.physicsCloths))
+				list = merge_indexed_tables(list, lua_get_system_array(figdata.chains))
+				for i, elem in ipairs(merge_indexed_tables(list, lua_get_system_array(figdata.gpuCloths))) do 
+					local xform = elem:call("get_GameObject"):call("get_Transform")
+					figlist[xform] = xform and (held_transforms[xform] or GameObject:new_AnimObject{xform=xform})
+				end
+			end]]
+			
+			all_transforms = lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof("via.Transform")) or {}, false, true)
 			if all_transforms then --gather gameobjects for model viewer
 				local counter = 0
 				for i, xform in ipairs(all_transforms) do
@@ -2935,7 +2975,6 @@ re.on_frame(function()
 					end
 				end
 				
-				local unique_xforms, temp_objs = {}, {}
 				--total_args = reverse_table(total_args)
 				for i, args in ipairs(total_args) do 
 					local new_obj = held_transforms[args.xform] or New_AnimObject(args)
@@ -2949,9 +2988,6 @@ re.on_frame(function()
 						if name ~= new_obj.name then 
 							new_obj.name = name
 							new_obj.gameobj:call("set_Name", name)
-						end
-						if isRE8 and new_obj.name:find("LightSet") then 
-							current_light_set = new_obj 
 						end
 						if new_obj.name == current_figure_name then 
 							current_figure = new_obj
@@ -3002,11 +3038,11 @@ re.on_frame(function()
 				end
 			end]]
 		end
-	end 
+	end
 	
-	if random(59) or ((#imgui_anims == 0) or (#imgui_others == 0)) then
+	if ((#imgui_anims == 0) or (#imgui_others == 0)) or random(59) then
 	
-		--lightsets = {}
+		lightsets = {}
 		imgui_anims = {}
 		imgui_others = {}
 		lights = {}
@@ -3022,6 +3058,7 @@ re.on_frame(function()
 			end
 			unique_names[name] = true
 			if anim_object.layer and (anim_object.body_part ~= "Hair") then --or anim_object == re2_figure_container_obj then 
+			--if (anim_object.layer and (anim_object.body_part ~= "Hair")) or (figure_mode and (num_anims == 0) and anim_object.mesh and (tics - figure_start_time > 100)) then --or anim_object == re2_figure_container_obj then 
 				temp_anims[name] = anim_object
 			else
 				temp_others[name] = anim_object
@@ -3037,37 +3074,29 @@ re.on_frame(function()
 		end
 		
 		local old_disp = lightsets["No Light Set"] and lightsets["No Light Set"].display
-		if old_disp == nil then old_disp = true end
-		lightsets["No Light Set"] = { display=old_disp, lights={}, lights_names={}, display_org=true }
+		lightsets["No Light Set"] = { display=old_disp==nil and true, lights={}, lights_names={}, display_org=true }
 		
 		for i, light_obj in ipairs(imgui_others) do 
 			if light_obj.is_light then
 				table.insert(lights, light_obj)
-				if light_obj.parent_org and not light_obj.lightset then --and (not forced_mode or forced_mode.xform ~= light_obj.parent_org) then 
-					held_transforms[light_obj.parent_org] = held_transforms[light_obj.parent_org] or New_AnimObject({xform=light_obj.parent_org})
-					if held_transforms[light_obj.parent_org] then 
-						if held_transforms[light_obj.parent_org].name:find("ight") then --
-							light_obj.lightset = held_transforms[light_obj.parent_org] or New_AnimObject({ xform=light_obj.parent_org })
+				if light_obj.lightset_xform and not light_obj.lightset then --and (not forced_mode or forced_mode.xform ~= light_obj.lightset_xform) then 
+					held_transforms[light_obj.lightset_xform] = held_transforms[light_obj.lightset_xform] or New_AnimObject({xform=light_obj.lightset_xform})
+					if held_transforms[light_obj.lightset_xform] then 
+						if held_transforms[light_obj.lightset_xform].name:find("ight") then --
+							light_obj.lightset = held_transforms[light_obj.lightset_xform] or New_AnimObject({ xform=light_obj.lightset_xform })
+							light_obj.lightset.lights = light_obj.lightset.lights or {}
+							light_obj.lightset.lights[light_obj.name] = light_obj
 							--light_obj.lightset.gameobj:call("set_UpdateSelf", false)
-							if not lightsets[light_obj.lightset.name] then
-								if is_unique_xform(total_objects, light_obj.lightset.xform) then
-									table.insert(total_objects, light_obj.lightset)
-								end
-								light_obj.lightset.lights = light_obj.lightset.lights or {}
-								for j, child in ipairs(light_obj.lightset.children) do 
-									local child_obj = held_transforms[child] or New_AnimObject({ xform=child })
-									if child_obj.is_light then
-										table.insert(light_obj.lightset.lights, child_obj)
-									end
-								end
-								lightsets[light_obj.lightset.name] = light_obj.lightset
+							if is_unique_xform(total_objects, light_obj.lightset.xform) then
+								table.insert(total_objects, light_obj.lightset)
 							end
+							lightsets[light_obj.lightset.name] = light_obj.lightset
 						end
 					else
 						--clear_figures()
 						--return nil
 					end
-				elseif not light_obj.parent_org then
+				elseif not light_obj.lightset_xform then
 					local idx = table.binsert(lightsets["No Light Set"].lights_names, light_obj.name)
 					table.insert(lightsets["No Light Set"].lights, idx, light_obj)
 				elseif light_obj.lightset then
@@ -3149,6 +3178,11 @@ re.on_frame(function()
 				
 				show_emv_settings()
 				
+				if isRE8 and figure_mode then 
+					imgui.text("\nFIGURE SETTINGS")
+					imgui_anim_object_viewer(figure_mode)
+				end
+				
 				if cutscene_mode then
 					if not EMVSettings.detach_cs_viewer then
 						imgui.text("\nCUTSCENE VIEWER")
@@ -3210,7 +3244,7 @@ re.on_frame(function()
 				if isRE2 or isRE3 or isDMC then 
 					imgui.text("\nCAMERA")
 					if figure_mode and not figure_settings and not isDMC then
-						figure_behavior = scene and (scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("FigureObjectBehavior"))))
+						figure_behavior = (scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("FigureObjectBehavior"))))
 						figure_behavior = figure_behavior and figure_behavior.get_elements and figure_behavior:add_ref():get_elements()
 						for i, elem in ipairs(figure_behavior or {}) do 
 							figure_settings = figure_settings or  elem:get_field("_FigureSetting")
@@ -3288,7 +3322,7 @@ re.on_frame(function()
 									if lightset.toggle_display then 
 										lightset:toggle_display()
 									end
-									for j, light in ipairs(lightset.lights) do
+									for j, light in orderedPairs(lightset.lights) do
 										light:set_transform(({mat4_to_trs(light.packed_init_transform)}), isRE2)
 									end
 								end
@@ -3318,7 +3352,7 @@ re.on_frame(function()
 									if lightset.display or lightset.opened then 
 										
 										lightset.closed_count = 0
-										for i, light_obj in ipairs(lightset.lights or {}) do
+										for i, light_obj in orderedPairs(lightset.lights or {}) do
 											
 											lightset.opened = lightset.opened or light_obj.opened
 											imgui.text("	"); imgui.same_line()
@@ -3354,9 +3388,10 @@ re.on_frame(function()
 																if imgui.button(((last_grabbed_object and last_grabbed_object.active and last_grabbed_object.xform == light_obj.xform) and "Detach from Cam") or "Move to Cam") then
 																	if figure_mode then 
 																		light_obj.pressed_move_button = true
-																		if isRE8 then 
+																		--if isRE8 then 
 																			light_obj.unlock_light = true 
-																		end
+																			light_obj.pending_light_unlock_change = true 
+																		--end
 																	elseif cutscene_mode or forced_mode then
 																		if _G.grab then --and not last_grabbed_object or last_grabbed_object.xform ~= light_obj.xform then 
 																			--light_obj.xform:call("set_Parent", nil)
@@ -3399,7 +3434,7 @@ re.on_frame(function()
 						
 						if move_light_set_changed  then
 							
-							local parent_xform = (isRE8 and base_mesh) or current_figure -- or ((isRE8) and current_light_set)
+							local parent_xform = (isRE8 and base_mesh) or current_figure
 							local pos_xform = parent_xform
 							fixed_figure = (isDMC and base_mesh) or selected or base_mesh --re2_figure_container_obj or base_mesh
 							
@@ -3436,7 +3471,6 @@ re.on_frame(function()
 								deferred_calls[pos_xform.xform] = {func="set_LocalPosition", args=position}
 							else
 								if not isRE8 then 
-									
 									for i, light_obj in ipairs(lights) do 
 										if light_obj.display and not light_obj.unlock_light then
 											light_obj:set_parent((isRE3 and unlocked_parent.xform) or light_obj.parent_org or 0)
@@ -3451,7 +3485,7 @@ re.on_frame(function()
 										deferred_calls[fixed_figure.xform] = {func="set_Position", args=new_pos} -- ,{lua_object=parent_xform.gameobj, method=write_byte, args={0x12, 1} } }
 									end
 								end
-								fixed_figure:set_parent(parent_xform.xform or 0)
+								fixed_figure:set_parent(fixed_figure.parent_org)
 								--fixed_figure.xform:call("set_Parent", parent_xform.xform or 0) 
 								if isRE3 then --else its offset
 									for i, light_obj in ipairs(lights) do 
@@ -3594,6 +3628,8 @@ re.on_frame(function()
 				imgui.text("																	Script By alphaZomega")
 			imgui.end_window()
 		end
+	else
+		figure_start_time = nil
 	end
 	
 end)

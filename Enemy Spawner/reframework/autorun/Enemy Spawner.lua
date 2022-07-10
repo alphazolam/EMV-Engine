@@ -1,7 +1,6 @@
 --RE2 and RE3 Enemy Spawner by alphazomega
 --June 26, 2022
 --if true then return end
---if not (isRE2 or isRE3 or isDMC) then return end
 local EMV = require("EMV Engine")
 
 SettingsCache.loiter_by_default = true

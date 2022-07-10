@@ -45,5 +45,8 @@ This makes the console useful for debugging scripts, since you can just make you
 * Execute multiple lines of code within the console by using semicolons to separate statements
 * Use '=' to make assignments within for loops inside your Console commands, or ' = ' to make a one-line assignment and view the result
 
+# Known Bugs
+If your game is crashing on startup or when loading certain areas or animations, delete all JSON files in the reframework/data folder related to EMV Engine and Enhanced Model Viewer, as over time they may get corrupted by trying to cache unloadable files.
+
 ### Thanks to praydog for making REFramework and for all the guidance
 * These scripts are each a work-in-progress and may have bugs across the various game and engine versions

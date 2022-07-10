@@ -2,7 +2,7 @@
 --by alphaZomega
 
 local EMV = require("EMV Engine")
-
+--if true then return end
 local game_name = reframework.get_game_name()
 local create_resource = EMV.create_resource
 local orderedPairs = EMV.orderedPairs
@@ -10,24 +10,11 @@ local loaded_resources = false
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
 local alt_names = { 
-	--[[["ch02_00"]= { body=table.pack("ch02_050"), face=table.pack("em1262") }, 		--Bela RE8
-	["ch02_01"]= { body=table.pack("ch02_050"), face=table.pack("em1261") }, 		--Cassandra
-	["ch02_02"]= { body=table.pack("ch02_050"), face=table.pack("em1260") }, 		--Daniela
-	["ch09_40"]= { body=table.pack("ch07_20"), face=table.pack("em133", "em132") },  --Miranda
-	["ch07_20"]= { body=table.pack("ch09_40"), face=table.pack("em132", "em133") },  --Miranda
-	["ch10_33"]= { body=table.pack("ch10_30") },
-	["ch03_06"]= { body=table.pack("ch13_10") },
-	["ch03_02"]= { body=table.pack("ch03_01") }, --Hauler 
-	["ch13_01"]= { body=table.pack("ch13_00"), exclude=table.pack("ch07_20") },									--Lycan
-	["ch09_32"]= { body=table.pack("ch09_30"), face=table.pack("em414", "em115") },	--Chris (Jacket)
-	["ch09_30"]= { body=table.pack("ch09_32"), face=table.pack("em115", "em414") },	--Chris B
-	["ch09_01"]= { face=table.pack("em440") }, --Rosemary (Adult)
-	["ch09_05"]= { exclude=table.pack("ch09_00") }, --Mia]]
+	--["ch13_01"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") }
 }
 
 re.on_application_entry("UpdateMotion", function()
 	if not loaded_resources and game_name == "re2" and EMVSettings and RSCache and (figure_mode or forced_mode) then 
-		
 		local dlc_folder = scene:call("findFolder", "RopewayContents_Rogue")
 		if dlc_folder and dlc_folder:call("get_Active") == false then 
 			dlc_folder:call("activate")
@@ -601,7 +588,6 @@ re.on_application_entry("UpdateMotion", function()
 				RSCache.tex_resources[bg_name] = tex_resource
 			end
 		end
-		
 		loaded_resources = true
 	end
 end)

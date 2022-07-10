@@ -10,18 +10,18 @@ local loaded_resources = false
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
 local alt_names = { 
-	["ch02_00"]= { body=table.pack("ch02_050"), face=table.pack("em1262") }, 		--Bela
-	["ch02_01"]= { body=table.pack("ch02_050"), face=table.pack("em1261") }, 		--Cassandra
-	["ch02_02"]= { body=table.pack("ch02_050"), face=table.pack("em1260") }, 		--Daniela
-	["ch09_40"]= { body=table.pack("ch07_20"), face=table.pack("em133", "em132") },  --Miranda
-	["ch07_20"]= { body=table.pack("ch09_40"), face=table.pack("em132", "em133") },  --Miranda
-	["ch10_33"]= { body=table.pack("ch10_30") },
-	["ch03_06"]= { body=table.pack("ch13_10") },
-	["ch03_02"]= { body=table.pack("ch03_01") }, --Hauler 
-	["ch13_01"]= { body=table.pack("ch13_00"), exclude=table.pack("ch07_20") },		--Lycan
-	["ch09_32"]= { body=table.pack("ch09_30"), face=table.pack("em414", "em115") },	--Chris (Jacket)
-	["ch09_30"]= { body=table.pack("ch09_32"), face=table.pack("em115", "em414") },	--Chris B
-	["ch09_01"]= { face=table.pack("em440") }, --Rosemary (Adult)
+	["ch02_00"]= { Body=table.pack("ch02_050"), Face=table.pack("em1262") }, 		--Bela
+	["ch02_01"]= { Body=table.pack("ch02_050"), Face=table.pack("em1261") }, 		--Cassandra
+	["ch02_02"]= { Body=table.pack("ch02_050"), Face=table.pack("em1260") }, 		--Daniela
+	["ch09_40"]= { Body=table.pack("ch07_20"), Face=table.pack("em133", "em132", "ch07_20") },  --Miranda
+	["ch07_20"]= { Body=table.pack("ch09_40"), Face=table.pack("em132", "em133", "ch09_40") },  --Miranda
+	["ch10_33"]= { Body=table.pack("ch10_30") },
+	["ch03_06"]= { Body=table.pack("ch13_10") },
+	["ch03_02"]= { Body=table.pack("ch03_01") }, --Hauler 
+	["ch13_01"]= { Body=table.pack("ch13_00"), exclude=table.pack("ch07_20") },		--Lycan
+	["ch09_32"]= { Body=table.pack("ch09_30"), Face=table.pack("em414", "em115", "ch09_30") },	--Chris (Jacket)
+	["ch09_30"]= { Body=table.pack("ch09_32"), Face=table.pack("em115", "em414", "ch09_32") },	--Chris B
+	["ch09_01"]= { Face=table.pack("em440", "mod_facial") }, --Rosemary (Adult)
 	["ch09_05"]= { exclude=table.pack("ch09_00") }, --Mia
 }
 
@@ -813,7 +813,7 @@ re.on_application_entry("BeginRendering", function()
 			table.insert(all_motbanks, "event/presentation/c10/c10e200/c10e200_02/motbank/ch01_0000_c10e200_02_A.motbank")
 			table.insert(all_motbanks, "event/presentation/c10/c10e050/c10e050_00/motbank/ch01_0000_c10e050_00_A.motbank")
 			table.insert(all_motbanks, "event/presentation/c10/c10e001/c10e001_00/motbank/ch01_0000_c10e001_00_A.motbank")
-			table.insert(all_motbanks, "event/presentation/c21/c21e400/c21e400_02/motbank/sm90_090_c21e400_02_a.motbank")
+			--[[table.insert(all_motbanks, "event/presentation/c21/c21e400/c21e400_02/motbank/sm90_090_c21e400_02_a.motbank")
 			table.insert(all_motbanks, "event/presentation/c21/c21e400/c21e400_01/motbank/sm90_090_c21e400_01_a.motbank")
 			table.insert(all_motbanks, "event/presentation/c21/c21e400/c21e400_00/motbank/sm90_090_c21e400_00_a.motbank")
 			table.insert(all_motbanks, "event/presentation/c26/c26e200/c26e200_00/motbank/sm90_024_c26e200_00_a.motbank")
@@ -1097,7 +1097,8 @@ re.on_application_entry("BeginRendering", function()
 			table.insert(all_motbanks, "event/presentation/c22/c22e500/c22e500_00/motbank/sm80_070_c22e500_00_A.motbank")
 			table.insert(all_motbanks, "event/presentation/c22/c22e400/c22e400_02/motbank/sm80_009_c22e400_02_a.motbank")
 			table.insert(all_motbanks, "event/presentation/c22/c22e400/c22e400_01/motbank/sm80_009_c22e400_01_a.motbank")
-			table.insert(all_motbanks, "event/presentation/c22/c22e400/c22e400_00/motbank/sm80_009_c22e400_00_a.motbank")
+			table.insert(all_motbanks, "event/presentation/c22/c22e400/c22e400_00/motbank/sm80_009_c22e400_00_a.motbank")]]
+			
 			table.insert(all_motbanks, "event/presentation/c25/c25e710/c25e710_01/motbank/it10_200_c25e710_01_A.motbank")
 			table.insert(all_motbanks, "event/presentation/c25/c25e710/c25e710_00/motbank/it10_200_c25e710_00_A.motbank")
 			table.insert(all_motbanks, "event/presentation/c25/c25e700/c25e700_02/motbank/it10_200_c25e700_02_A.motbank")
@@ -1203,6 +1204,7 @@ re.on_application_entry("BeginRendering", function()
 			table.insert(all_motbanks, "event/presentation/c21/c21e290/c21e290_00/motbank/it01_019_c21e290_00_a.motbank")
 			table.insert(all_motbanks, "event/presentation/c21/c21e160/c21e160_01/motbank/it01_018_c21e160_01_B.motbank")
 			table.insert(all_motbanks, "event/presentation/c32/c32e390/c32e390_00/motbank/it01_000_c32e390_00_A.motbank")
+			
 			table.insert(all_motbanks, "character/ch/animation/ch09_5000/motbank/ch09_5000_Facial.motbank")
 			table.insert(all_motbanks, "character/ch/animation/ch01_0000/motbank/ch01_0000Ladder_Geek02.motbank")
 			table.insert(all_motbanks, "character/ch/animation/ch01_0000/motbank/ch01_0000Ladder_Geek.motbank")
