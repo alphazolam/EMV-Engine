@@ -25,7 +25,7 @@ EMVSettings.current_loaded_ids = {}
 EMVSettings.hotkeys = true
 EMVSettings.special_mode = isRE2 and 1
 EMVSettings.frozen_fov = 68.0
-EMVSettings.use_savedata = false
+EMVSettings.use_savedata = true
 EMVSettings.alt_sound_seek = not isDMC and true
 EMVSettings.use_frozen_fov = false
 
@@ -799,7 +799,7 @@ GameObject.new_AnimObject = function(self, args, o)
 		
 		--load json data
 		local sd = EMVCache.savedata[self.key_hash]
-		if sd and sd.mbank_idx and EMVSettings.use_savedata then
+		if sd and sd.mbank_idx and EMVSettings.use_savedata and sd.matched_banks and next(sd.matched_banks) then
 			self.mbank_idx, self.mlist_idx, self.mot_idx = sd.mbank_idx, sd.mlist_idx, sd.mot_idx
 			self.force_center, self.aggressively_force_center = sd.force_center, sd.aggressively_force_center
 			self.matched_banks = merge_tables(sd.matched_banks, self.matched_banks)
@@ -909,15 +909,27 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 			
 			if self.layer and self.motbanks then 
 				
-				if (not self.motbanks or not self.motbank_names or not self.motbank_names[1]) and not self.cant_find_motbanks then
-					self:update_components()
-					self.cant_find_motbanks = not self.motbanks or nil
+				--if (not self.cant_find_motbanks or self.cant_find_motbanks < 3) and (not self.motbanks or not self.motbank_names or not self.motbank_names[2]) then
+				if (not self.cant_find_motbanks ) and (not self.motbanks or not self.motbank_names or not self.motbank_names[2]) then --or (toks % 150 == 0)
+					self:update_components({cant_find_motbanks=true})
+					self.cant_find_motbanks = not self.motbanks and true or nil
+					--[[self.update_retries = self.update_retries or 0
+					self.update_retries = self.update_retries + 1
+					if self.update_retries == 5 then 
+						EMVCache.global_cached_banks, global_cached_banks, pre_cached_banks = {}, {}, {}
+						RN.loaded_resources = false
+						if forced_mode then
+							forced_mode = total_objects[1]
+							forced_mode.init_transform = forced_mode.xform:call("get_WorldMatrix")
+						end
+					end]]
+					--self.cant_find_motbanks = not self.motbanks and (self.cant_find_motbanks and (self.cant_find_motbanks + 1) or 0) or nil
 				end
 				
 				if self.changed_bank then --delayed bank change
 					self.changed_bank = nil
-					log.info("Changing " .. self.name .. " motion after bank change " .. self.mbank_idx .. " " .. self.mlist_idx .. " " .. self.mot_idx)
 					if not static_funcs.setup_mbank_method then
+						log.info("Changing " .. self.name .. " motion after bank change " .. self.mbank_idx .. " " .. self.mlist_idx .. " " .. self.mot_idx)
 						self:update_banks((pre_cached_banks ~= nil))
 						self:change_motion()
 					end
@@ -974,28 +986,28 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 					local mbank = motion_node and self.motion:call("findMotionBank(System.UInt32, System.UInt32)", motion_node:call("get_MotionBankID"), motion_node:call("get_MotionBankType"))
 					--local mbank = self.active_mbanks and (self.active_mbanks[ self.motlist_names[self.mlist_idx] ] or self.active_mbanks[ tostring(self.mlist_idx-1) ])
 					--mbank = mbank and self.motion:call("getActiveMotionBank", mbank)
-					if self.name == "pl1000" then log.info("0") end
+					--if self.name == "pl1000" then log.info("0") end
 					if mbank then 
 						local motlist = mbank:call("get_MotionList")
 						local motlist_name = motlist and motlist:call("ToString()"):match("^.+%[@?(.+)%]") 
 						local mlist_idx_new = (motlist_name and find_index(self.motlist_names, motlist_name))
 						if self.name == "pl1000" then log.info("A") end
 						if mlist_idx_new then
-							if self.name == "pl1000" then log.info("B") end
+							--if self.name == "pl1000" then log.info("B") end
 							local mot_idx_new = (mot_name and self.motion_names and find_index(self.motion_names[mlist_idx_new], mot_name))
 							if mot_idx_new then 
-								if self.name == "pl1000" then log.info("C") end
+								--if self.name == "pl1000" then log.info("C") end
 								self.mlist_idx = mlist_idx_new
 								self.mot_idx = mot_idx_new
-								if self.name == "pl1000" then
-									testy = {mlist_idx_new, mot_idx_new, motlist_name, mot_name, tics, mbank, motion_node, self, self.layer:call("get_HighestWeightMotionNode")}
-								end
+								--if self.name == "pl1000" then
+								--	testy = {mlist_idx_new, mot_idx_new, motlist_name, mot_name, tics, mbank, motion_node, self, self.layer:call("get_HighestWeightMotionNode")}
+								--end
 							end
 						end
 					end
 				end
 				
-				if self.synced and self.running and self.synced.end_frame then 
+				if self.synced and self.running and self.synced.end_frame and self.frame > 5 then 
 					if toks % 4 == 0 and ((self.synced.end_frame ~= self.end_frame) ) then --or (self.frame > self.synced.frame+15) or (self.frame < self.synced.frame-15)) then 
 						self.synced = nil
 					end
@@ -1174,6 +1186,7 @@ end
 
 GameObject.center_object = function(self)
 	
+	--log.info(tostring(self.cog_joint and self.cog_joint.call and is_valid_obj(self.xform)) .. " " .. tostring(self.start_time) .. " " .. tostring(self.cog_joint) .. " ")
 	self.cog_joint = self.xform:call("getJointByName", cog_names[game_name])
 	
 	if self.cog_joint and self.cog_joint.call and is_valid_obj(self.xform) then 
@@ -1190,6 +1203,7 @@ GameObject.center_object = function(self)
 		
 		if self.start_time  then
 			if self.cog_joint then 
+				--log.info("centering " .. self.name)
 				local do_reset_pos = self.do_next or self.do_prev or ((uptime - self.start_time < 0.01) and self.running and self.layer:call("get_Running")) or (self.anim_maybe_finished and self.end_frame > 10)
 				do_reset_pos = do_reset_pos and ((player ~= self) or self.puppetmode)
 				if not self.init_cog_offset or (do_reset_pos and (not (self.loop_a or self.loop_b) or (isRE3 and selected.delayed_seek)))  then
@@ -1257,7 +1271,7 @@ GameObject.center_object = function(self)
 end
 
 GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync, interp_frames) --sync is started in here automatically, only when a mot change is done manually
-	
+	if not self.cached_banks then return end
 	local cached_bank = self.cached_banks[self.mbank_idx] --self:customize_cached_bank(global_cached_banks[ self.motbank_names[self.mbank_idx] ])
 	mlist_idx, mot_idx = convert_mot_ids(cached_bank, mlist_idx or self.mlist_idx, mot_idx or self.mot_idx)
 	self.mlist_idx, self.mot_idx = mlist_idx, mot_idx
@@ -1317,9 +1331,12 @@ GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync,
 				end
 			end
 		end
-		self.start_time = uptime 
-		--self:change_child_setting("start_time")
+		self.frame = 0
+		self.start_time = uptime
+		self.layer:call("set_Frame", 0)
+		self.anim_finished, self.anim_maybe_finished = nil
 		self:reset_physics()
+		
 		
 		--if self.components_named.MotionFsm2 then
 		--	deferred_calls[self.components_named.MotionFsm2] = {func="restartTree"}
@@ -1327,10 +1344,6 @@ GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync,
 		--[[if self.layer:call("get_EndFrame") <= 10.0 then 
 			paused = true
 			self:control_action( { paused=true })
-		end]]
-		
-		--[[for i, object in ipairs(total_objects) do
-			object:reset_physics()
 		end]]
 	end
 end
@@ -1382,7 +1395,7 @@ GameObject.control_action = function(self, args) --args = { paused, do_restart, 
 	--args.paused = args.paused or paused
 	args.play_speed = args.play_speed or self.play_speed
 	args.current_frame = args.current_frame or self.frame
-	
+	--log.info("running control action " .. logv(args))
 	if args.do_reset_gpuc then 
 		self:reset_physics()
 	end	
@@ -1449,8 +1462,19 @@ GameObject.get_current_bank_name = function(self, no_check)
 	if self.layer then
 		local bank = self.motion:call("get_MotionBankAsset")
 		if not bank then 
-			local rando_bank = ({next(self.motbanks or {})})[2] or ({next(RSCache.motbank_resources or {})})[2]
-			if rando_bank then
+			--rando_bank = ({next(self.motbanks or {})})[2] or ({next(RSCache.motbank_resources or {})})[2] --NOT WORKING, FINDING DEAD BROKEN BANK OBJECTS SOMEHOW
+			local rando_bank, found
+			for key, value in pairs(RSCache.motbank_resources) do 
+				if is_valid_obj(value) then
+					rando_bank = value
+					found = true
+					break
+				else
+					--re.msg_safe("FOUND BROKEN MOTBANK " .. key, 1231441515)
+					RSCache.motbank_resources[key] = create_resource(key, "via.motion.MotionBankResource", true)
+				end
+			end
+			if found or is_valid_obj(rando_bank) then
 				self.motion:call("set_MotionBankAsset", rando_bank) --set any random motionbank just so it can get started
 				bank = self.motion:call("get_MotionBankAsset")
 			end
@@ -1610,10 +1634,10 @@ GameObject.pre_cache_all_banks = function(self)
 	if self.finished_pre_cache then --Once finished
 		self.finished_pre_cache, pre_cached_banks = nil
 		EMVCache.global_cached_banks = global_cached_banks
-		clear_figures() --total_objects, held_transforms = {}, {} 
-		if forced_mode then --for setting up forced_mode
-			--selected = GameObject:new_AnimObject{xform=forced_mode.xform}
-			activate_forced_mode(forced_mode)
+		local f_mode = forced_mode
+		clear_figures()
+		if f_mode then --for setting up forced_mode
+			activate_forced_mode(f_mode)
 		end
 		if self.name == "dummy_AnimLoaderBody" then 
 			deferred_calls[self.gameobj] = {func="destroy", args=self.gameobj}
@@ -1660,7 +1684,7 @@ end
 GameObject.update_banks = function(self, force)
 	
 	--force = not forced_mode and true
-	--force = true
+	force = true
 	
 	local bank_name = self:get_current_bank_name(true)
 	local cached_bank = global_cached_banks[self.current_bank_name]
@@ -1824,6 +1848,7 @@ GameObject.update_banks = function(self, force)
 	self.motion_names = cached_bank.motion_names
 	self.motion_names_w_frames = get_motion_names_w_frames(cached_bank)
 	self.matched_random_limit = (sd_cb_tbl and sd_cb_tbl.matched_random_limit) or self.matched_random_limit
+	self.cached_banks = self.cached_banks or {}
 	self.cached_banks[self.mbank_idx] = cached_bank
 end
 
@@ -1925,20 +1950,26 @@ end)
 --import settings from file
 local default_settings = deep_copy(EMVSettings) --merge_tables({}, EMVSettings) --deep copies
 local default_cache = merge_tables({}, EMVCache) 
-local try, new_settings = pcall(json.load_file, "EnhancedModelViewer\\EMVSettings.json")
-if try and new_settings and new_settings.load_json then 
-	EMVSettings = jsonify_table(new_settings, true) or default_settings
-	for key, value in pairs(default_settings) do 
-		if EMVSettings[key] == nil then EMVSettings[key] = value end
-	end
-	local try, new_cache = pcall(json.load_file, "EnhancedModelViewer\\EMVCache.json")
-	if try then
-		EMVCache = jsonify_table(new_cache, true) or default_cache
-		for key, value in pairs(default_cache) do 
-			if EMVCache[key] == nil then EMVCache[key] = value end
+init_EMVSettings = function()
+	--local try, new_settings = pcall(json.load_file, "EnhancedModelViewer\\EMVSettings.json")
+	local new_settings = json.load_file("EnhancedModelViewer\\EMVSettings.json")
+	if new_settings and new_settings.load_json then 
+		EMVSettings = jsonify_table(new_settings, true) or default_settings
+		for key, value in pairs(default_settings) do 
+			if EMVSettings[key] == nil then EMVSettings[key] = value end
 		end
+		local new_cache = json.load_file("EnhancedModelViewer\\EMVCache.json")
+		if new_cache then
+			EMVCache = jsonify_table(new_cache, true) or default_cache
+			for key, value in pairs(default_cache) do 
+				if EMVCache[key] == nil then EMVCache[key] = value end
+			end
+			--re.msg_safe("loaded cache", 8888)
+		end
+		--re.msg_safe("loaded new settings", 88818)
+		--collectgarbage()
 	end
-	--collectgarbage()
+	--re.msg_safe("init EMVSettings", 888118)
 end
 
 re.on_script_reset(function()
@@ -2346,6 +2377,10 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 				if changed then 
 					anim_object:change_motion(nil, anim_object.mot_idx)
 				end
+				if figure_mode and not imgui.same_line() and imgui.button("Refresh") then 
+					anim_object = anim_object:update_components({selected=(anim_object==selected) or nil})
+					anim_object.children = get_children(anim_object.xform)
+				end
 			end
 			
 			if embedded_mode or (not is_main and anim_object.motbank_names and imgui.tree_node_str_id(anim_object.name .. "Ctrl", "Controls")) then
@@ -2538,13 +2573,13 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 			end
 			
 			imgui.same_line()
-			if not game_object.same_joints_constraint or game_object.center_obj then
-				local center_obj = game_object.center_obj or game_object
+			if true then --not game_object.same_joints_constraint or game_object.center_obj then
+				local center_obj = game_object --game_object.center_obj or game_object
 				was_changed, center_obj.force_center = imgui.checkbox("Center" .. (center_obj.aggressively_force_center and "*" or ""), center_obj.force_center)
 				if was_changed then
 					if center_obj.force_center and not center_obj.aggressively_force_center then
 						center_obj.aggressively_force_center = true
-						center_obj.packed_init_transform = (center_obj.parent_obj and center_obj.parent_obj.xform:call("get_Position")) or Vector3f.new(0,0,0)
+						center_obj.packed_init_transform = (center_obj.parent_obj and center_obj.parent_obj.xform:call("get_WorldMatrix")) or Matrix4x4f.identity()
 						--log_value(center_obj.packed_init_transform)
 						center_obj:set_parent(center_obj.parent or 0)
 						--deferred_calls[center_obj.xform] = {
@@ -2664,6 +2699,7 @@ local function show_emv_settings()
 		imgui.begin_rect()
 			local EMVSetting_was_changed
 			changed, EMVSettings.load_json = imgui.checkbox("Persistent Settings", EMVSettings.load_json); EMVSetting_was_changed = EMVSetting_was_changed or changed
+			imgui.same_line()
 			if imgui.button("Reset Settings") then 
 				EMVSettings = merge_tables({}, default_settings)
 				EMVSetting_was_changed = true
@@ -2717,18 +2753,18 @@ local function show_emv_settings()
 				end
 			end
 			--imgui.same_line()
-			if imgui.button("Clear Resource Cache") or cm_changed then 
+			if imgui.button("Clear Motbank Resource Cache") or cm_changed then 
 				RSCache.motbank_resources = {}
 				RN.motbank_resource_names = {}
-				EMVCache = merge_tables({}, default_cache)
 				json.dump_file("EMV_Engine\\RSCache.json", jsonify_table(RSCache))
-				json.dump_file("EnhancedModelViewer\\EMVCache.json", jsonify_table(EMVCache))
+				res.reset()
 				EMVSetting_was_changed = true
 			end
 			imgui.same_line() 
 			
-			if imgui.button("Clear Figure Cache") then 
+			if imgui.button("Clear Figure Saved Data") then 
 				EMVCache = merge_tables({}, default_cache)
+				json.dump_file("EnhancedModelViewer\\EMVCache.json", jsonify_table(EMVCache))
 				EMVSetting_was_changed = true
 			end
 			
@@ -2744,16 +2780,9 @@ re.on_draw_ui(function()
 	show_emv_settings()
 end)
 
+--not_loaded = true
+
 re.on_frame(function()
-	
-	if not RN.loaded_resources and res.finished() then --FIRST FRAME STEPS
-		if (isRE2 or isRE3 or isDMC or isRE8) and not next(EMVCache.global_cached_banks) then
-			pre_cached_banks = {}
-		end
-		EMVCache = jsonify_table(EMVCache, true)
-		RN.loaded_resources = true
-		global_cached_banks = merge_tables(global_cached_banks, EMVCache.global_cached_banks)
-	end
 	
 	tics = tics + 1
 	uptime = os.clock()
@@ -2782,14 +2811,12 @@ re.on_frame(function()
 	--if not (isRE8 or isRE2 or isRE3 or isDMC or isMHR) then return end
 	
 	if reframework:is_drawing_ui() then
-		
-		if isRE8 then 
+		figure_mgr = (isRE8 and scene:call("findGameObject(System.String)", "GUIFigureList")) or (isDMC and scene:call("findGameObject(System.String)", "ModelViewerCamera")) or scene:call("findGameObject(System.String)", "FigureManager")	
+		figure_mode = not not figure_mgr
+		--[[if isRE8 then 
 			figure_mode = find(isRE8 and "app.FigureDataHolder")[1]
 			figure_mode = figure_mode and (held_transforms[figure_mode] or GameObject:new{xform=figure_mode}) or nil
-		else
-			figure_mgr = (isRE8 and scene:call("findGameObject(System.String)", "GUIFigureList")) or (isDMC and scene:call("findGameObject(System.String)", "ModelViewerCamera")) or scene:call("findGameObject(System.String)", "FigureManager")	
-			figure_mode = not not figure_mgr
-		end
+		end]]
 		
 		if EMVSettings.cutscene_viewer and not cutscene_mode then --and (uptime - start_time) > 15 
 			local schedule_obj
@@ -2831,8 +2858,8 @@ re.on_frame(function()
 	
 	cutscene_mode = ev_object
 	camera = sdk.get_primary_camera()
+	if not camera or tics < 2 then return end
 	camera = camera and  get_anim_object(camera:call("get_GameObject")) 
-	if not camera then return end
 	
 	--Take a global GameObject dubbed "forced_object" and turn it into forced_mode animation viewer object:
 	if _G.forced_object then
@@ -2841,17 +2868,37 @@ re.on_frame(function()
 	end
 	
 	if not (cutscene_mode or figure_mode or forced_mode) then
-		return 
-	elseif ((figure_mode or forced_mode) and not RN.loaded_resources)	then 
-		imgui.text("Enhanced Model Viewer: No resources found!")
-		--EMVCache.global_cached_banks = {}
-		--RN.loaded_resources = true
 		return
 	end
 	
+	if ((figure_mode or forced_mode) and not RN.loaded_resources) then--and (not (RN.motbank_resource_names or {})[3] or not next(RSCache.motbank_resources or {})))	then 
+		--res.reset()
+		imgui.text("Enhanced Model Viewer: No resources found!")
+		--re.msg_safe("Starting res load", 314155)
+		if (not RN.loaded_resources) and res and res.finished() then
+			EMVCache = jsonify_table(EMVCache, true)
+			RN.loaded_resources = true
+			global_cached_banks = merge_tables(global_cached_banks, EMVCache.global_cached_banks)
+		end
+		if RN.loaded_resources then
+			--not_loaded = nil
+			if (isRE2 or isRE3 or isDMC or isRE8) and not next(global_cached_banks) then
+				pre_cached_banks = {}
+			end 
+			EMV.static_funcs.loaded_json = true
+			--re.msg_safe("Starting init resources", 31455)
+			EMV.static_funcs.init_resources()
+			init_EMVSettings()
+			--re.msg_safe("Finished", 3111455)
+		end
+		return
+	end
+	
+
+	
 	-- Begin EMV stuff ------------------------------------------------------------------------------------
 	--Load + cache motions and build list of motion data:
-	if pre_cached_banks then
+	if pre_cached_banks and RN.motbank_resource_names and RN.motbank_resource_names[3]  then
 		local dummy_obj = get_anim_object(scene:call("findGameObject(System.String)", "dummy_AnimLoaderBody"), {body_part="Body"}) or create_gameobj( "dummy_AnimLoaderBody", nil, nil, {"via.motion.Motion"})
 		if dummy_obj and not dummy_obj.xform then 
 			local motion = lua_find_component(dummy_obj, "via.motion.Motion")
@@ -2924,7 +2971,7 @@ re.on_frame(function()
 		end
 		
 		if fig_mgr_name and not cutscene_mode and scene:call("findGameObject(System.String)", fig_mgr_name) then
-			
+			log.info("step2")
 			--clear_figures()
 			total_objects, imgui_anims, imgui_others = {}, {}, {}
 			local total_args = {}
@@ -3178,10 +3225,10 @@ re.on_frame(function()
 				
 				show_emv_settings()
 				
-				if isRE8 and figure_mode then 
+				--[[if isRE8 and figure_mode then 
 					imgui.text("\nFIGURE SETTINGS")
 					imgui_anim_object_viewer(figure_mode)
-				end
+				end]]
 				
 				if cutscene_mode then
 					if not EMVSettings.detach_cs_viewer then
@@ -3209,17 +3256,6 @@ re.on_frame(function()
 						for i, anim_object in ipairs(reverse_table(imgui_anims)) do 		
 							
 							if not imgui_anims[1] then return end
-							
-							--[[if tics - figure_start_time == 10 then
-								if (isRE2 or isRE3 or isDMC) then 
-									if anim_object.display and anim_object.name:find("figure_base") then selected = anim_object end
-								--elseif i == 1 and anim_object.display and anim_object.running and anim_object.body_part == "Body" then 
-								--	selected = anim_object
-								end
-								if anim_object.body_part == "Body" then
-									selected = base_mesh or selected
-								end
-							end ]]
 							
 							anim_object.selected = (selected == anim_object)
 							

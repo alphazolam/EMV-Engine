@@ -12,18 +12,13 @@ local loaded_resources = false
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
 local alt_names = {
-	--[[["pl20"]= { body=table.pack("pl2[79]%d0"), face=table.pack("pl2[79]%d1"), },
-	["pl27"]= { body=table.pack("pl2[09]%d0"), face=table.pack("pl2[09]%d1"), },
-	["pl29"]= { body=table.pack("pl2[07]%d0"), face=table.pack("pl2[07]%d1"), },
-	["pl00"]= { exclude=table.pack("ACTOR"), }, -- body=table.pack("pl84%d0"), face=table.pack("pl84%d1"),
-	["em84"]= { body=table.pack("em0[01]"), face=table.pack("em0[01]"), },
-	["em10"]= { body=table.pack("em0[01]"), face=table.pack("em0[01]"), },]]
+	--["ch13_01"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") }
 }
 
 re.on_application_entry("BeginRendering", function()
 	
 	if not loaded_resources and game_name == "re7" and EMVSettings and RSCache and (figure_mode or forced_mode) then 
-		global_motbanks = {}
+		global_motbanks = global_motbanks or {}
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
 		
@@ -34,18 +29,16 @@ re.on_application_entry("BeginRendering", function()
 		
 		for i, bank_string in ipairs(all_motbanks) do 
 			local bank
-			local bank_name = bank_string --bank_string:match("^.+/(.+)%.motbank") or bank_string
-			pcall(function()
+			local bank_name = bank_string:lower() --bank_string:match("^.+/(.+)%.motbank") or bank_string
+			--pcall(function()
 				bank = create_resource(bank_string, "via.motion.MotionBankResource")
-			end)
+			--end)
 			if bank then
 				global_motbanks[bank_name] = bank
+				RSCache.motbank_resources[bank_name] = bank
 			end
 		end
 		
-		for bank_name, bank in pairs(global_motbanks) do 
-			RSCache.motbank_resources[bank_name] = bank
-		end
 		for bank_name, bank in pairs(RSCache.motbank_resources) do 
 			global_motbanks[bank_name] = bank
 		end
@@ -78,7 +71,12 @@ local function finished()
 	return loaded_resources
 end
 
+local function reset()
+	loaded_resources = false
+end
+
 return {
 	alt_names = alt_names,
 	finished = finished,
+	reset = reset,
 }

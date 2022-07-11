@@ -39,6 +39,7 @@ SettingsCache = {
 	show_editable_tables = false,
 	add_DMC5_names = isDMC or false,
 	embed_mobj_control_panel = true,
+	cache_orderedPairs = false,
 }
 
 --tmp:call("trigger", )
@@ -171,7 +172,6 @@ local add_pfb_to_cache
 local lua_find_component
 local deferred_call
 local hashing_method
-local init_resources
 
 --Table and lua object Functions ----------------------------------------------------------------------------------------------------------------------------
 --Insert into an ordered list of strings alphabetically
@@ -435,11 +435,15 @@ local function orderedNext(t, state)
     local key = nil
     if state == nil then
 		local do_multitype = type(state) ~= "string" and type(state) ~= "number"
-		if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
-			t.__orderedIndex = __genOrderedIndex(t , do_multitype)
-			G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
+		if SettingsCache.cache_orderedPairs then 
+			if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
+				t.__orderedIndex = __genOrderedIndex(t , do_multitype)
+				G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
+			end
+			t.__orderedIndex = G_ordered[t].ords or __genOrderedIndex( t , do_multitype)
+		else
+			t.__orderedIndex = __genOrderedIndex( t , do_multitype)
 		end
-		t.__orderedIndex = G_ordered[t].ords or __genOrderedIndex( t , do_multitype)
         key = t.__orderedIndex[1]
     elseif t.__orderedIndex then
 		--t.__orderedIndex = G_ordered[t].ords
@@ -544,8 +548,8 @@ end
 --Search the global list of all transforms by gameobject name
 local function search(search_term, case_sensitive)
 	local result = scene and scene:call("findComponents(System.Type)", sdk.typeof("via.Transform"))
+	local search_results = {}
 	if result and result.get_elements then 
-		local search_results = {}
 		local term = not case_sensitive and search_term:lower() or search_term
 		for i, element in ipairs(result:get_elements()) do
 			local name = not case_sensitive and element:call("get_GameObject"):call("get_Name"):lower() or element:call("get_GameObject"):call("get_Name")
@@ -553,8 +557,8 @@ local function search(search_term, case_sensitive)
 				table.insert(search_results, element)
 			end
 		end
-		return search_results
 	end
+	return search_results
 end
 
 --Sort the list of all components
@@ -680,12 +684,14 @@ local function parse_command(command)
 		hex_idx = load_string:find("0x[%x]", num_end)
 		safety = safety + 1
 	end
-	if string.find(command, " = ") then 
-		local left_side = load_string:sub(1, command:find(" =") - 1)
-		local right_side =  load_string:sub(command:find("= ") + 2, -1)
-		load_string = left_side .. " = " .. right_side .. "\nreturn ({" .. left_side .. "})" 
-	elseif not string.find(command, "^for ") and not string.find(command, "^while ") then
-		load_string = "return ({" .. load_string .. "})" --parens and braces allow returning multiple results as a table
+	if not string.find(command, "^for ") and not string.find(command, "^while ")  and not string.find(command, "end$") then
+		if string.find(command, " = ") then 
+			local left_side = load_string:sub(1, command:find(" =") - 1)
+			local right_side =  load_string:sub(command:find("= ") + 2, -1)
+			load_string = left_side .. " = " .. right_side .. "\nreturn ({" .. left_side .. "})" 
+		else
+			load_string = "return ({" .. load_string .. "})" --parens and braces allow returning multiple results as a table
+		end
 	end
 	return load_string
 end
@@ -697,6 +703,7 @@ local function run_command(input)
 	local is_multi_command = input:find(";")
 	for part in input:gsub("\n%s?", " "):gsub("%s?;%s?", ";"):gmatch("[^%;]+") do
 		local command = parse_command(part)
+		log.info("\n" .. command)
 		try, out = pcall(load(command))
 		if try then 
 			if out == nil then 
@@ -709,7 +716,7 @@ local function run_command(input)
 		end
 		table.insert(outputs, (is_multi_command and {name=part, output=out or tostring(out)}) or out or tostring(out))
 	end
-	return (outputs[2]~=nil) and outputs or outputs[1]
+	return ((outputs[2]~=nil) and outputs or outputs[1])
 end
 
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
@@ -1425,8 +1432,9 @@ local function show_hotkey_setter(button_txt, imgui_keyname, deferred_call, dfc_
 			if key_id then
 				--re.msg("re")
 				hk_tbl = Hotkey:new({button_txt=button_txt, imgui_keyname=imgui_keyname, key_id=key_id, key_name=key_name, dfcall=deferred_call, obj=deferred_call.obj, dfcall_json=dfcall_json})
+				--test = deep_copy(hk_tbl)
 				if deferred_call then
-					if deferred_call.args == nil then
+					if dfc_args ~= nil and deferred_call.args == nil then
 						hk_tbl.dfcall = merge_tables({args=((type(dfc_args)~="table") and {dfc_args} or dfc_args)}, deferred_call, true) --make a unique copy of the deferred call with the given args
 					end
 					hk_tbl.dfcall = hk_tbl.dfcall or deferred_call
@@ -1493,18 +1501,20 @@ Hotkey = {
 		o.key_id = args.key_id or o.key_id
 		o.key_name = o.key_id and (args.key_name or o.key_name) or "?"
 		o.imgui_keyname = args.imgui_keyname or o.imgui_keyname
+		if not o.imgui_keyname then return end
 		o.hash = hashing_method(o.imgui_keyname)
 		o.button_txt = args.button_txt or o.button_txt or o.imgui_keyname
 		o.dfcall = args.dfcall or o.dfcall
 		o.dfcall_json = args.dfcall_json or o.dfcall_json
 		if o.dfcall_json then
 			o.down_timer  = o.dfcall_json.down_timer 
-			o.gameobj_name = o.dfcall_json.__gameobj_name
+			o.gameobj_name = o.dfcall_json.__gameobj_name or o.dfcall_json.__cmd_name
 		end
+		o.gameobj_name = o.gameobj_name or o.imgui_keyname:match("^.+/(.-)%.") or o.imgui_keyname
 		if o.dfcall then 
 			o.obj = o.dfcall.obj
 		end
-		o.metadata = {}
+		--o.metadata = {}
 		self.__index = self  
 		return setmetatable(o, self)
 	end,
@@ -1538,19 +1548,21 @@ Hotkey = {
 			dmp_tbl.metadata = nil
 			dump_keys[name] = dmp_tbl
 		end
-		json.dump_file("EMV_Engine\\Hotkeys.json",  jsonify_table(dump_keys))
+		json.dump_file("EMV_Engine\\Hotkeys.json",  jsonify_table(dump_keys) or {})
 	end,
 	
 	update = function(self, force, do_deferred)
 		
-		self.used[self.imgui_keyname] = (self.key_id and self) or nil
+		if not self.key_id then self.used[self.imgui_keyname] = nil end
 		
-		if self.obj and not self.pressed_down and (force or (self.key_id and check_key_released(self.key_id, not force and self.down_timer ))) then
+		if not self.pressed_down and (force or (self.key_id and check_key_released(self.key_id, not force and self.down_timer) )) then
 			
-			if self.dfcall.obj_json and ((not self.obj or type(self.obj)=="table") or (self.obj.get_type_definition and not self.obj:get_type_definition():is_a("via.Component")) or not is_obj_or_vt(self.obj)) then
-				self.obj = jsonify_table(self.dfcall.obj_json, true) --there is no way to know when a non-component is an orphan, so it must be searched for and found in the scene every single keypress
+			local json = self.dfcall and self.dfcall.obj_json or self.dfcall_json or ((type(self.obj)=="table") and self.obj) or nil
+			--re.msg_safe("pressed " .. self.key_name .. " " .. logv(json), 556546)
+			if json and (not is_valid_obj(self.obj)) then --and ((self.obj.get_type_definition and not self.obj:get_type_definition():is_a("via.Component")) or not is_obj_or_vt(self.obj)) then
+				self.obj = jsonify_table(json, true) --there is no way to know when a non-component is an orphan, so it must be searched for and found in the scene every single keypress
+				self.dfcall.obj = self.obj
 			end
-			
 			if self.dfcall.args then 
 				for i, arg in ipairs(self.dfcall.args) do 
 					if type(arg) == "table" then 
@@ -1565,18 +1577,18 @@ Hotkey = {
 					end
 				end
 			end
-			
 			local dfcall = merge_tables({}, self.dfcall) --make a copy
 			if do_deferred then
-				deferred_calls[self.obj] = dfcall
+				deferred_calls[self.obj or scene] = dfcall
 			else
-				deferred_call(self.obj, dfcall)
+				deferred_call(self.obj or scene, dfcall)
 				if self.down_timer then 
 					deferred_call(self.obj, {func="set_PuppetMode", args=true})
 					self.pressed_down = true
 					return
 				end
 			end
+			
 		end
 		
 		if self.down_timer and self.pressed_down and not force and self.key_id and not check_key_released(self.key_id, self.down_timer) then
@@ -1740,12 +1752,19 @@ local get_gameobj_path = function(gameobj)
 end
 
 --Get or create a GameObject or AnimObject class from a gameobj -----------------------------------------------------------------------------
-local function get_anim_object(gameobj, args)
-	local xform = gameobj and gameobj.call and ({pcall(gameobj.call, gameobj, "get_Transform")})
-	xform = xform and xform[1] and xform[2]
+local function get_anim_object(gameobj, args, use_pcall)
+	local xform
+	--use_pcall = true
+	if use_pcall then
+		xform = gameobj and gameobj.call and ({pcall(gameobj.call, gameobj, "get_Transform")})
+		xform = xform and xform[1] and xform[2]
+	else
+		xform = gameobj and gameobj.call and gameobj:call("get_Transform")
+	end
 	if xform then 
 		args = args or {}
 		args.xform = xform
+		args.gameobj = gameobj
 		held_transforms[xform] = held_transforms[xform] or (GameObject.new_AnimObject and GameObject:new_AnimObject(args)) or GameObject:new(args)
 		return held_transforms[xform]
 	end
@@ -1756,13 +1775,13 @@ local function create_resource(resource_path, resource_type, force_create)
 	--if type(resource_path)=="table" then 
 	--	return create_resource(table.unpack(resource_path)) 
 	--end
-	if init_resources then 
-		local fn = init_resources
-		init_resources = nil
-		fn() 
+	if not static_funcs.loaded_json then 
+		static_funcs.loaded_json = true
+		static_funcs.init_resources() 
 	end
+	
 	resource_path = resource_path:lower()
-	log.info("creating resource " .. resource_path)
+	--log.info("creating resource " .. resource_path)
 	local ext = resource_path:match("^.+%.(.+)$")
 	if not ext then return end
 	RSCache[ext .. "_resources"] = RSCache[ext .. "_resources"] or {}
@@ -1783,8 +1802,10 @@ local function create_resource(resource_path, resource_type, force_create)
 			holder:call(".ctor")
 			--deferred_calls[holder] = {lua_object=holder, method=holder.write_qword, args={0x10, new_rs_address}} 
 			holder:write_qword(0x10, new_rs_address)
-			RSCache[ext .. "_resources"][resource_path] = holder
-			return holder
+			if is_valid_obj(holder) then
+				RSCache[ext .. "_resources"][resource_path] = holder
+				return holder
+			end
 		end
 	end
 	return RSCache[ext .. "_resources"][resource_path]
@@ -2039,8 +2060,7 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 			
 			elseif go_back_to_table and not dont_convert and (splittable or (tbl.__component_name or tbl.__address)) then -- or str_prefix == "obj:" 
 				
-				local splitted = splittable and split(value:sub(5,-1), " ")
-				
+				local splitted = splittable and split(value:sub(5,-1), " ") or nil
 				if str_prefix == "res:" then 
 					--if dont_create_resources then
 					--	new_tbl[key] = value
@@ -2070,9 +2090,8 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 								end
 							end
 						elseif tbl.__gameobj_name then 
-							
+						
 							local gameobj = scene:call("findGameObject(System.String)", tbl.__gameobj_name)
-							
 							obj = gameobj and gameobj:call("getComponent(System.Type)", (tbl.__component_name and sdk.typeof(tbl.__component_name)) or sdk.typeof(tbl.__typedef))
 							
 							if gameobj and tbl.__component_name then --need all this to find Layers and field objects
@@ -2100,7 +2119,7 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 							
 							local propdata = get_fields_and_methods(typedef)
 							tbl.__address = nil
-							local converted_tbl = recurse(tbl, key, level + 1)
+							local converted_tbl = recurse(tbl, key, level + 1) or {}
 							
 							for field_name, field in pairs(propdata.fields) do 
 								deferred_calls[obj] = deferred_calls[obj] or {}
@@ -2169,10 +2188,9 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 								deferred_calls[obj] = deferred_calls[obj][1]
 							end
 						end
-						
 						return obj, tbl.__copy_json and tbl
 					end
-				elseif splitted[8] then
+				elseif splitted and splitted[8] then
 					new_tbl[key] = Matrix4x4f.new(
 						Vector4f.new(splitted[1], splitted[2], splitted[3], splitted[4]), 
 						Vector4f.new(splitted[5], splitted[6], splitted[7], splitted[8]), 
@@ -2194,11 +2212,11 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 						end
 						if next(value) == nil then --empty tables
 							new_tbl[key] = value
-						elseif value.update then --lua classes
-							if convert_lua_objs or level==0 then
+						elseif value.update or value.__is_lua then --lua classes
+							if convert_lua_objs or (level==0) then
 								if not loops[value] then
 									loops[value] = true
-									loops[value] = (convert_lua_objs and obj_to_json(value.xform, true, {__is_lua=true})) or (level==0 and recurse(value, key, level + 1)) or nil
+									loops[value] = (convert_lua_objs and (value.xform and obj_to_json(value.xform, true, {__is_lua=true}) or value)) or (level==0 and recurse(value, key, level + 1)) or value
 									new_tbl[key] = loops[value]
 								else
 									new_tbl[key] = loops[value]
@@ -2874,21 +2892,18 @@ deferred_call = function(managed_object, args, index, on_frame)
 				end
 			end
 			
-			if args.lua_object then
+			if args.command then --commands as strings
+				out = run_command(args.command) --pcall(load("return " .. args.command))
+				if args.lua_object and args.command_key ~= nil then 
+					args.lua_object[args.command_key] = out
+				end
+			elseif args.lua_object and args.method then
 				if args.method then 
 					if args.args then
 						try, out = pcall(args.method, args.lua_object, table.unpack(args.args))
 					else
 						try, out = pcall(args.method, args.lua_object)
 					end
-				elseif args.delayed_command then --commands as strings
-					local tmp_object = object
-					object = args.lua_object
-					local try, output = pcall(load("return " .. args.delayed_command))
-					if args.delayed_command_key ~= nil then 
-						object[args.delayed_command_key] = output
-					end
-					object = tmp_object
 				end
 			elseif args.lua_func then --objectless lua functions like draw_line()
 				if args.args then
@@ -2907,7 +2922,7 @@ deferred_call = function(managed_object, args, index, on_frame)
 					end]]
 					try, out = pcall(managed_object.set_field,  managed_object, args.field, value) --fields
 					--managed_object:set_field(args.field, value); try = true
-					out = try and tics or out
+					--out = try and tics or out
 				elseif args.field == nil then
 					if type(value) == "table" then 
 						--[[for i, arg in ipairs(value) do 
@@ -2929,12 +2944,12 @@ deferred_call = function(managed_object, args, index, on_frame)
 				try, out = pcall(managed_object.call, managed_object, args.func) --methods with no args
 			end
 			
-			if not try then 
+			if try == false then 
 				old_deferred_calls[name].Error = tostring(out)
 				old_deferred_calls[name].obj = managed_object
 				log.info("Failed, Deferred Call Error:\n" .. logv(args)) 
 			else--if not args.field and out==nil then
-				old_deferred_calls[name].output = logv(out)
+				old_deferred_calls[name].output = (out~=nil) and logv(out) or tics
 				old_deferred_calls[name].obj = managed_object
 				if args.delayed_global_key ~= nil and _G[args.delayed_global_key] ~= nil  then 
 					_G[args.delayed_global_key] = out
@@ -3570,7 +3585,7 @@ end
 --Get the most appropriate name for a managed object element
 get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	
-	log.info("checking name for " .. logv(m_obj))
+	--log.info("checking name for " .. logv(m_obj))
 	o_tbl = o_tbl or m_obj._ or create_REMgdObj(m_obj)
 	if not o_tbl then return end
 	
@@ -3629,7 +3644,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 		end
 		name = name or m_obj:get_type_definition():get_name()
 	end
-	log.info("Name is " .. tostring(name))
+	--log.info("Name is " .. tostring(name))
 	return name or ""
 end
 
@@ -4299,6 +4314,11 @@ local function show_imgui_resource(value, name, key_name, data_holder)
 	if not data_holder.ext then 
 		imgui.text(name .. ": " .. (value and value:call("ToString()") or "") .. " -- Failed to load file extension")
 		return 
+	end
+	
+	if not static_funcs.loaded_json then 
+		static_funcs.loaded_json = true
+		static_funcs.init_resources() 
 	end
 	
 	imgui.push_id(key_name .. name .. "Rs")
@@ -5498,9 +5518,9 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 								local output_str = "\n"
 								for i, joint in ipairs(anim_object.joints) do 
 									output_str = output_str .. joint:call("get_Name") .. " = " .. joint:call("get_NameHash") .. ",\n"
-									local joint_pos = anim_object.joint_positions[joint][2][3]
+									local joint_pos = anim_object.joint_positions[joint][3]
 									local parent = joint:call("get_Parent")
-									local parent_pos = parent and anim_object.joint_positions[parent][2][3]
+									local parent_pos = parent and anim_object.joint_positions[parent][3]
 									local this_vec2 = draw.world_to_screen(joint_pos)
 									if anim_object.show_joint_names or (parent and (parent_pos-joint_pos):length() > 1) then 
 										draw.world_text(joint:call("get_Name"), joint_pos, 0xFFFFFFFF) 
@@ -5559,7 +5579,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						end
 					end
 					
-					if imgui.tree_node_str_id(anim_object.xform:get_address()-50, "GameObject") then
+					if imgui.tree_node("GameObject") then
 						anim_object.opened = true
 						if imgui.tree_node("[Lua]") then 
 							if imgui.button("Clear Lua Data") then 
@@ -5597,7 +5617,10 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					
 					anim_object.joints = anim_object.joints or lua_get_system_array(anim_object.xform:call("get_Joints"))
 					
-					if (not anim_object.same_joints_constraint or not anim_object.parent or anim_object.body_part == "Face") and anim_object.joints and imgui.tree_node("Poser") then
+					if anim_object.joints and imgui.tree_node("Poser") then --
+						if not (not anim_object.same_joints_constraint or not anim_object.parent or anim_object.body_part == "Face") then 
+							imgui.text("*Object may only move via Parent")
+						end
 						anim_object:imgui_poser()
 						imgui.tree_pop()
 					end
@@ -6291,54 +6314,68 @@ local function show_collection()
 			if (not player or motfsms[result]) or isRE8 then
 				local obj = held_transforms[result] or GameObject:new{xform=result}
 				if not obj.name:find("gimmick") then
-					new_collection[obj.name] = obj or new_collection[obj.name]
+					new_collection[obj.name] = obj--(obj and obj.xform and obj) or new_collection[obj.name]
 				end
 			end
 		end
+		
 		for name, obj in pairs(new_collection) do --remove new objects that are children of other new objects
 			if not Collection[name] then
 				for nm2, obj2 in pairs(new_collection) do 
-					if is_child_of(obj.xform, obj2.xform) then 
+					if obj.name and obj2.name and is_child_of(obj.xform, obj2.xform) then 
 						new_collection[name] = nil
 					end
 				end
 			end
 		end
+		
 		Collection = merge_tables(Collection, new_collection)
 		dump_collection = true
 	end
 	
-	for name, obj in orderedPairs(Collection) do 
-		imgui.text("	")
-		imgui.same_line()
-		if obj.xform and obj.xform:read_qword(0x10) ~= 0 then
-			obj.object_json = obj.object_json or jsonify_table({obj}, false, {convert_lua_objs=true})[1]
-			imgui.push_id(name .. "X")
-				if imgui.button("X") then 
-					Collection[name] = nil 
-					dump_collection = true
-				end
-			imgui.pop_id()
-			imgui.same_line()
-			if imgui.tree_node(name) then 
-				imgui_anim_object_viewer(obj)
-				imgui.tree_pop()
-			end
+	local existing_objs, missing_objs = {}, {}
+	for name, obj in orderedPairs(Collection) do
+		if obj.xform then 
+			table.insert(existing_objs, obj)
 		else
-			if obj.name then
-				Collection[name] = obj.object_json
-				clear_object(obj.xform)
-			else--if imgui.tree_node(name) then 
+			table.insert(missing_objs, obj)
+		end
+	end
+	
+	for j = 1, 2 do 
+		for i, obj in ipairs(j==1 and existing_objs or missing_objs) do 
+			local name = obj.name or obj.__gameobj_name
+			imgui.text("	")
+			imgui.same_line()
+			if obj.xform and obj.xform:read_qword(0x10) ~= 0 then
+				obj.object_json = obj.object_json or jsonify_table({obj}, false, {convert_lua_objs=true})[1]
 				imgui.push_id(name .. "X")
-					if imgui.button("Scan") then 
-						file = json.load_file("EMV_Engine\\Collection.json")
-						if file[name] then
-							Collection[name] = jsonify_table(file[name], true)
-						end
+					if imgui.button("X") then 
+						Collection[name] = nil 
+						dump_collection = true
 					end
 				imgui.pop_id()
 				imgui.same_line()
-				imgui.text(name)
+				if imgui.tree_node(name) then 
+					imgui_anim_object_viewer(obj)
+					imgui.tree_pop()
+				end
+			else
+				if obj.name then
+					Collection[name] = obj.object_json
+					clear_object(obj.xform)
+				else--if imgui.tree_node(name) then 
+					imgui.push_id(name .. "X")
+						if imgui.button("Scan") then 
+							file = json.load_file("EMV_Engine\\Collection.json")
+							if file[name] then
+								Collection[name] = jsonify_table(file[name], true)
+							end
+						end
+					imgui.pop_id()
+					imgui.same_line()
+					imgui.text(name)
+				end
 			end
 		end
 	end
@@ -6391,11 +6428,11 @@ local BHVTNode = {
 				local action_obj = BHVTAction:new{obj=action, node_obj=o} --self:get_action_obj(action, o.owner)
 				o.actions[i] = action_obj
 			end
-			for i, action in ipairs(o.obj:get_unloaded_actions()) do 
+			--[[for i, action in ipairs(o.obj:get_unloaded_actions()) do 
 				o.unl_actions = o.unl_actions or {}
 				local action_obj = BHVTAction:new{obj=action, node_obj=o} --self:get_action_obj(action, o.owner)
 				o.unl_actions[i] = action_obj
-			end
+			end]]
 			--[[for i, transition in ipairs(o.obj:get_transitions()) do 
 				if transition.get_full_name then 
 					o.transitions = o.transitions or {}
@@ -6518,7 +6555,7 @@ BHVT = {
 				if imgui.tree_node_str_id(name.."C", "") then
 					if node.children and imgui.tree_node("Children") then
 						for i, child_node_obj in pairs(node.children) do 
-							self:imgui_bhvt_nodes(child_node_obj, child_node_obj.name, imgui_keyname, dfcall_template)
+							self:imgui_bhvt_nodes(child_node_obj, child_node_obj.name, imgui_keyname, dfcall_template, dfcall_json)
 						end
 						imgui.tree_pop()
 					end
@@ -6532,12 +6569,12 @@ BHVT = {
 						end
 						imgui.tree_pop()
 					end
-					if node.transitions and imgui.tree_node("Transitions") then
+					--[[if node.transitions and imgui.tree_node("Transitions") then
 						for i, transition_node_obj in pairs(node.transitions) do 
-							self:imgui_bhvt_nodes(transition_node_obj, transition_node_obj.name, imgui_keyname, dfcall_template)
+							self:imgui_bhvt_nodes(transition_node_obj, transition_node_obj.name, imgui_keyname, dfcall_template, dfcall_json)
 						end
 						imgui.tree_pop()
-					end
+					end]]
 					imgui.tree_pop()
 				end
 			end
@@ -6631,7 +6668,7 @@ BHVT = {
 						__typedef = "via.motion.MotionFsm2",
 						__copy_json = true, --this makes jsonify_table create a json-table backup of the object when converting back to in-engine
 						--down_timer = 0.0,
-						--__component_name = self.obj:get_type_definition():get_full_name(),
+						__component_name = self.obj:get_type_definition():get_full_name(),
 						--__getter = "getLayer",
 						--__idx = layer.index, --these three^ can locate a field of a component in jsonify_table
 					}
@@ -6779,17 +6816,24 @@ end
 --GameObject lua class, used for everything: -------------------------------------------------------------------------------------------------
 GameObject = {
 	
+	dead_addresses = {},
+	
 	new = function(self, args, o)
-		
 		o = o or {} 
 		o.xform 			= args.xform or o.xform
 		o.gameobj			= args.gameobj
+		if o.xform and self.dead_addresses[o.xform] then 
+			return
+		end
 		local try = true 	
 		if o.xform and not o.gameobj then 
 			try, o.gameobj =  pcall(sdk.call_object_func, o.xform, "get_GameObject") 
 		end
 		o.xform = o.xform or o.gameobj and o.gameobj:call("get_Transform")
 		if not try or not o.gameobj or not is_valid_obj(o.xform) then
+			if o.xform then 
+				self.dead_addresses[o.xform] = true
+			end
 			return 
 		end
 		self.__index = self
@@ -7091,9 +7135,9 @@ GameObject = {
 				
 				if self.joint_positions then 
 					local mat_screen, mat_screen_top
-					local mat = (poser.is_local and self.joint_positions[joint][1]) or self.joint_positions[joint][2]
-					mat[3] = self.joint_positions[joint][2][3]
-					local pos = self.joint_positions[joint][2][3] --:to_vec3() --world pos
+					local mat = self.joint_positions[joint]
+					mat[3] = self.joint_positions[joint][3]
+					local pos = self.joint_positions[joint][3] --:to_vec3() --world pos
 					
 					if var_metadata.freeze ~= nil or j_o_tbl.selected then
 						local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
@@ -7152,7 +7196,7 @@ GameObject = {
 			
 			changed, mat = draw.gizmo(joint:get_address(), mat, (poser.is_pos and imgui.ImGuizmoOperation.TRANSLATE) or imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
 			if poser.is_local and poser.is_pos then 
-				mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][2][3])
+				mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][3])
 			end             
 			
 			if changed then 
@@ -7241,7 +7285,7 @@ GameObject = {
 		self.last_display = self.display
 		if SettingsCache.affect_children and self.children then 
 			for i, child in ipairs(self.children) do
-				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{xform=child}
+				held_transforms[child] = held_transforms[child] or (GameObject.new_AnimObject and GameObject:new_AnimObject{xform=child} or GameObject:new{xform=child})
 				held_transforms[child]:pre_fix_displays()
 			end
 		end
@@ -7262,19 +7306,14 @@ GameObject = {
 	
 	set_parent = function(self, new_parent_xform, do_deferred)
 		if do_deferred then
+			local deferred_calls = (do_deferred==1) and on_frame_calls or deferred_calls
 			deferred_calls[self.xform] = deferred_calls[self.xform] or {}
 			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_parent, args={new_parent_xform}})
 		else 
 			self:pre_fix_displays()
 			pcall(sdk.call_object_func, self.xform, "set_Parent", new_parent_xform)
 			self.parent = self.xform:call("get_Parent")
-			self.parent_obj = self.parent and (held_transforms[self.parent] or GameObject:new{xform=self.parent})
-			if self.parent_obj then
-				local tmp = not not self.parent_obj.same_joints_constraint
-				self.parent_obj.xform:call("set_SameJointsConstraint", not tmp) --refreshes
-				self.parent_obj.xform:call("set_SameJointsConstraint", tmp)
-				self.center_obj = self.same_joints_constraint and not self.parent_obj.same_joints_constraint and self.parent_obj
-			end
+			self.parent_obj = self.parent and (held_transforms[self.parent] or (GameObject.new_AnimObject and GameObject:new_AnimObject{xform=self.parent} or GameObject:new{xform=self.parent}))
 			self:toggle_display()
 		end
 	end,
@@ -7289,15 +7328,18 @@ GameObject = {
 			self.last_display = nil
 		end
 		
-		if self.parent_obj then 
-			local tmp = not not self.parent_obj.same_joints_constraint
+		self.gameobj:write_byte(0x13, bool_to_number[self.display])	--draw
+		if not is_child and not isDMC5 and self.parent_obj then 
+			local tmp = not not self.parent_obj.xform:call("get_SameJointsConstraint")
+			self.parent_obj.same_joints_constraint = tmp
 			self.parent_obj.xform:call("set_SameJointsConstraint", not tmp) --refreshes
 			self.parent_obj.xform:call("set_SameJointsConstraint", tmp)
 		end
+		
 		--self.gameobj:call("set_UpdateSelf", self.display)
 		--self.gameobj:write_byte(0x14, bool_to_number[self.display]) --updateself
 		--self.gameobj:write_byte(0x12, bool_to_number[self.display])	--update	
-		self.gameobj:write_byte(0x13, bool_to_number[self.display])	--draw
+		
 		
 		if changed and not is_child then -- or forced_setting 
 			self.keep_on = nil
@@ -7322,13 +7364,13 @@ GameObject = {
 		--log.info("set " .. self.name .. " to " .. tostring(self.display) .. ", draw is " .. tostring(self.gameobj:call("get_Draw")) .. ", drawself is " .. tostring(self.gameobj:call("get_DrawSelf")))
 	end,
 	
-	update_components = function(self)
+	update_components = function(self, basis_args)
 		--self.components, self.components_named = lua_get_components(self.xform)
 		local make_touched_gameobj = touched_gameobjects[self.xform]
 		held_transforms[self.xform], touched_gameobjects[self.xform] = nil
-		self = GameObject:new_AnimObject({xform=self.xform})
+		self = GameObject:new_AnimObject({xform=self.xform}, basis_args)
 		if make_touched_gameobj then
-			self = GameObject:new_GrabObject({xform=self.xform})
+			self = GameObject:new_GrabObject({xform=self.xform}, basis_args)
 		end
 		return self
 		--[[if self.mot_idx then
@@ -7345,8 +7387,6 @@ GameObject = {
 		end
 		held_transforms[self.xform] = new_obj]]
 	end,
-	
-	
 	
 	update = function(self, is_known_valid)
 		
@@ -7421,10 +7461,20 @@ GameObject = {
 	
 	update_all_joint_positions = function()
 		for xform, obj in pairs(held_transforms) do 
-			if obj.joints and (obj.show_joints or (obj.poser and (uptime - obj.poser.is_open) < 5)) and is_valid_obj(xform) then
-				obj.joint_positions = obj.joint_positions or {}
-				for i, joint in pairs(obj.joints) do 
-					obj.joint_positions[joint] = { joint:call("get_LocalMatrix"), joint:call("get_WorldMatrix") }
+			if obj.joints  then
+				local active_poser = obj.poser and (uptime - obj.poser.is_open) < 5
+				local do_local = active_poser and obj.poser.is_local
+				if (obj.show_joints or active_poser) and is_valid_obj(xform) then
+					obj.joint_positions = obj.joint_positions or {}
+					for i, joint in pairs(obj.joints) do 
+						if do_local then 
+							--obj.joint_positions[joint] = joint:call("get_LocalMatrix")
+							--obj.joint_positions[joint][3] = joint:call("get_Position"):to_vec4()
+							obj.joint_positions[joint] = joint:call("get_WorldMatrix")
+						else
+							obj.joint_positions[joint] = joint:call("get_WorldMatrix")
+						end
+					end
 				end
 			end
 		end
@@ -7437,32 +7487,40 @@ GameObject.new_AnimObject = GameObject.new --overwritten by Enhanced Model Viewe
 GameObject.update_AnimObject = GameObject.update
 
 --Load cache, and create list of names of them for imgui in RN[] -------------------------------------------------------------------------------
-init_resources = function()
+local function init_resources()
 	if SettingsCache.load_json then
-		local try, new_cache = pcall(json.load_file, "EMV_Engine\\RSCache.json")
-		if try and new_cache then 
+		new_cache = json.load_file("EMV_Engine\\RSCache.json")
+		if new_cache then 
 			new_cache = jsonify_table(new_cache, true, {dont_create_resources=true})
 			if new_cache then 
+				for key, value in pairs(new_cache) do 
+					if type(value)=="table" then
+						RSCache[key] = merge_tables(value, RSCache[key] or {}, true)
+					end
+				end
 				if SettingsCache.remember_materials and new_cache.saved_mats and next(new_cache.saved_mats) then 
 					saved_mats = new_cache.saved_mats
-				end
-				for key, value in pairs(new_cache) do
-					local resource_names_key = key:find("_resources$") and key:gsub("_resources$", "_resource_names")
-					if resource_names_key and type(value) == "table" then
-						local new_table = {}
-						RN[resource_names_key] = {" "}
-						for name, resource in orderedPairs(value) do 
-							local converted_name = name:match("^.+%[@?(.+)%]") or name
-							table.insert(RN[resource_names_key], converted_name)
-							new_table[converted_name] = resource
-						end
-						RSCache[key] = new_table
-					end
 				end
 			end
 		end
 	end
+	for key, value in pairs(RSCache or {}) do
+		local resource_names_key = key:find("_resources$") and key:gsub("_resources$", "_resource_names")
+		if resource_names_key and type(value) == "table" then
+			local new_table = {}
+			RN[resource_names_key] = {" "}
+			for name, resource in orderedPairs(value) do 
+				local converted_name = name:match("^.+%[@?(.+)%]") or name
+				table.insert(RN[resource_names_key], converted_name)
+				new_table[converted_name] = resource
+			end
+			RSCache[key] = new_table
+		end
+	end
+	--re.msg_safe("init resources", 123145125)
 end
+static_funcs.init_resources = init_resources
+static_funcs.loaded_json = false
 
 --Load other settings, enums, misc tables:
 local default_SettingsCache = deep_copy(SettingsCache)
@@ -7768,46 +7826,57 @@ re.on_draw_ui(function()
 	
 	if imgui.tree_node("EMV Engine Settings") then
 		special_changed, SettingsCache.load_json = imgui.checkbox("Remember Settings", SettingsCache.load_json); csetting_was_changed = csetting_was_changed or changed
+		changed, SettingsCache.affect_children = imgui.checkbox("Affect Children", SettingsCache.affect_children); EMVSetting_was_changed = EMVSetting_was_changed or changed
+		changed, SettingsCache.cache_orderedPairs = imgui.checkbox("Cache Ordered Lists", SettingsCache.cache_orderedPairs); EMVSetting_was_changed = EMVSetting_was_changed or changed
+		changed, SettingsCache.remember_materials = imgui.checkbox("Remember Material Settings", SettingsCache.remember_materials); EMVSetting_was_changed = EMVSetting_was_changed or changed
 		if imgui.tree_node("Managed Object Control Panel Settings") then
-			local EMVSetting_was_changed
+			--local EMVSetting_was_changed
 			changed, SettingsCache.max_element_size = imgui.drag_int("Max Fields/Properties Per-Grouping", SettingsCache.max_element_size, 1, 1, 2048); EMVSetting_was_changed = EMVSetting_was_changed or changed
-			changed, SettingsCache.affect_children = imgui.checkbox("Affect Children", SettingsCache.affect_children); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, SettingsCache.show_all_fields = imgui.checkbox("Show Extra Fields", SettingsCache.show_all_fields); EMVSetting_was_changed = EMVSetting_was_changed or changed
-			changed, SettingsCache.remember_materials = imgui.checkbox("Remember Material Settings", SettingsCache.remember_materials); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, SettingsCache.embed_mobj_control_panel = imgui.checkbox("Embed Into Object Explorer (Lua)", SettingsCache.embed_mobj_control_panel); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			if SettingsCache.remember_materials and next(saved_mats) and imgui.tree_node("Saved Material Settings") then
 				read_imgui_element(saved_mats)
 				imgui.tree_pop()
 			end
-			if next(Hotkey.used) and imgui.tree_node("Hotkeys") then 
-				if imgui.button("Clear Hotkeys") then 
-					Hotkeys, Hotkey.used = {}, {}
-					json.dump_file("EMV_Engine\\Hotkeys.json", Hotkey.used)
-				end
-				local last_name
-				for key_name, hk_tbl in orderedPairs(Hotkey.used) do
-					if hk_tbl.gameobj_name and  hk_tbl.gameobj_name ~= last_name then 
-						last_name = hk_tbl.gameobj_name
-						imgui.text(last_name)
-					end
-					imgui.text("    ")
-					imgui.same_line()
+			imgui.tree_pop()
+		end
+		if next(Hotkey.used) and imgui.tree_node("Hotkeys") then 
+			if imgui.button("Clear Hotkeys") then 
+				Hotkeys, Hotkey.used = {}, {}
+				json.dump_file("EMV_Engine\\Hotkeys.json", Hotkey.used)
+			end
+			local last_name
+			for key_name, hk_tbl in orderedPairs(Hotkey.used) do
+				if hk_tbl then 
 					if not hk_tbl.display_imgui_button then
 						hk_tbl = Hotkey:new(hk_tbl, hk_tbl)
 						Hotkeys[key_name] = hk_tbl
 					end
+					if not hk_tbl.gameobj_name or hk_tbl.gameobj_name ~= last_name then 
+						imgui.spacing()
+						last_name = hk_tbl.gameobj_name
+						imgui.text(last_name .. ":")
+					end
+					imgui.text("    ")
+					imgui.same_line()
 					hk_tbl:display_imgui_button()
+					imgui.same_line()
+					imgui.push_id(hk_tbl.hash)
+						if imgui.tree_node("") then 
+							read_imgui_element(hk_tbl)
+							imgui.tree_pop()
+						end
+					imgui.pop_id()
 				end
-				imgui.tree_pop()
 			end
-			if next(old_deferred_calls) and imgui.tree_node("Old Deferred Calls") then
-				if imgui.button("Clear") then 
-					old_deferred_calls = {}
-					deferred_calls = {}
-				end
-				read_imgui_element(old_deferred_calls)
-				imgui.tree_pop()
+			imgui.tree_pop()
+		end
+		if next(old_deferred_calls) and imgui.tree_node("Old Deferred Calls") then
+			if imgui.button("Clear") then 
+				old_deferred_calls = {}
+				deferred_calls = {}
 			end
+			read_imgui_element(old_deferred_calls)
 			imgui.tree_pop()
 		end
 		

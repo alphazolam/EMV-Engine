@@ -1,5 +1,6 @@
 --Enhanced Model Viewer DMC5 global resources
 --by alphaZomega
+--if true then return {} end
 local EMV = require("EMV Engine")
 
 local game_name = reframework.get_game_name()
@@ -8,27 +9,15 @@ local create_resource = EMV.create_resource
 local orderedPairs = EMV.orderedPairs
 local loaded_resources = false
 
---a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
+--a dictionary of tables with 2-3 tables each, one for Body and one for Face and sometimes one to exclude
 local alt_names = { 
-	--[[["ch02_00"]= { body=table.pack("ch02_050"), face=table.pack("em1262") }, 		--Bela
-	["ch02_01"]= { body=table.pack("ch02_050"), face=table.pack("em1261") }, 		--Cassandra
-	["ch02_02"]= { body=table.pack("ch02_050"), face=table.pack("em1260") }, 		--Daniela
-	["ch09_40"]= { body=table.pack("ch07_20"), face=table.pack("em133", "em132") },  --Miranda
-	["ch07_20"]= { body=table.pack("ch09_40"), face=table.pack("em132", "em133") },  --Miranda
-	["ch10_33"]= { body=table.pack("ch10_30") },
-	["ch03_06"]= { body=table.pack("ch13_10") },
-	["ch03_02"]= { body=table.pack("ch03_01") }, --Hauler 
-	["ch13_01"]= { body=table.pack("ch13_00"), exclude=table.pack("ch07_20") },									--Lycan
-	["ch09_32"]= { body=table.pack("ch09_30"), face=table.pack("em414", "em115") },	--Chris (Jacket)
-	["ch09_30"]= { body=table.pack("ch09_32"), face=table.pack("em115", "em414") },	--Chris B
-	["ch09_01"]= { face=table.pack("em440") }, --Rosemary (Adult)
-	["ch09_05"]= { exclude=table.pack("ch09_00") }, --Mia]]
+	["ch13_01"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") }
 }
 
-re.on_application_entry("BeginRendering", function()
+re.on_application_entry("UpdateMotion", function()
 	
 	if not ran_once and game_name == "dmc5" and EMVSettings and RSCache and (figure_mode or forced_mode) then 
-		global_motbanks = {}
+		global_motbanks = global_motbanks or {}
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
 		ran_once = true
@@ -223,24 +212,22 @@ re.on_application_entry("BeginRendering", function()
 		
 		for i, bank_string in ipairs(all_motbanks) do 
 			local bank
-			local bank_name = bank_string --bank_string:match("^.+/(.+)%.motbank") or bank_string
-			pcall(function()
+			local bank_name = bank_string:lower() --bank_string:match("^.+/(.+)%.motbank") or bank_string
+			--pcall(function()
 				bank = create_resource(bank_string, "via.motion.MotionBankResource")
-			end)
+			--end)
 			if bank then
 				global_motbanks[bank_name] = bank
+				RSCache.motbank_resources[bank_name] = bank
 			end
 		end
 		
-		for bank_name, bank in pairs(global_motbanks) do 
-			RSCache.motbank_resources[bank_name] = bank
-		end
 		for bank_name, bank in pairs(RSCache.motbank_resources) do 
 			global_motbanks[bank_name] = bank
 		end
 		
 		local bgs = {}
-		if true then			
+		if true then
 			table.insert(bgs, "scene/menu/gallery/viewer/greenscreen.tex")
 			table.insert(bgs, "light/shop/cubemap/ibl_shop_bright.tex")
 			table.insert(bgs, "light/gallery/modelviewer/cubemap/ibl_modelviewer.tex")
@@ -317,7 +304,12 @@ local function finished()
 	return loaded_resources
 end
 
+local function reset()
+	loaded_resources = false
+end
+
 return {
 	alt_names = alt_names,
 	finished = finished,
+	reset = reset,
 }

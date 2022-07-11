@@ -24,6 +24,7 @@ local make_obj = EMV.make_obj
 local to_obj = EMV.to_obj
 local try, out
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
+local reverse_table = EMV.reverse_table
 
 --EMV Global shortcut functions, for use in the Console
 _G.EMV = EMV or package.loaded.EMV_Engine
@@ -168,61 +169,24 @@ local function show_history(do_minimal, new_first_history_idx)
 			if imgui.tree_node(cmd)  then
 				
 				local stringresult = tostring(result)
-				if History.history_metadata[i] ~= nil then
-					
+				History.history_metadata[i] = History.history_metadata[i] or {}
+				--if History.history_metadata[i] ~= nil then
+					local clean_cmd = cmd:gsub(" +$", "")
 					is_calling_hooked_function = true
-					local do_run_again = (imgui.button("Run Again") or History.history_metadata[i].keep_running)
+					local do_run_again = imgui.button_w_hotkey("Run Again", clean_cmd, {command=clean_cmd}, nil, {__cmd_name=clean_cmd}) or History.history_metadata[i].keep_running 
+					--local do_run_again = (imgui.button("Run Again") or History.history_metadata[i].keep_running)
 					
 					imgui.same_line()
 					changed, History.history_metadata[i].keep_running  = imgui.checkbox("Keep Running", History.history_metadata[i].keep_running )
 					
 					if changed or do_run_again then 
 						local out = run_command(cmd)
-						--[[local no_spc_cmd = cmd:gsub(" ", "")
-						if no_spc_cmd == "transforms"  then 
-							out = get_transforms()
-						elseif no_spc_cmd == "folders" then
-							out = get_all_folders()
-						end]]
 						History.history[cmd] = table.pack(out or tostring(out), tostring(out):find("::vector") and vector_to_table(out))
 					end
 					
 					update_lists_once = do_run_again and cmd or nil 
-					
-					--[[if History.history_metadata[i].hook_data ~= nil then --hook maker
-						imgui.same_line()
-						changed, History.history_metadata[i].hook_data.exclusive_hook = imgui.checkbox("Exclusive Hook", History.history_metadata[i].hook_data.exclusive_hook)
-						if History.history_metadata[i].hook_data.exclusive_hook then 
-							imgui.same_line()
-							imgui.text("Call count: " .. History.history_metadata[i].hook_data.count)
-						end
-						if changed then 
-							if History.history_metadata[i].hook_data.obj and not hooked_funcs[History.history_metadata[i].hook_data.obj] then --[History.history_metadata[i][2].fn_name]
-								--{ exclusive_hook=false, hook_str=hook_string, count=0, addr=test, fn_name=func_name }
-								--local noexcept, hooker = pcall(load(History.history_metadata[i].hook_data.hook_str))
-								local hd = History.history_metadata[i].hook_data 
-								local custom_hook_func = function(args)
-									if is_calling_hooked_function == false then 
-										local obj = hooked_funcs[sdk.to_managed_object(args[2])]
-										if not obj or not obj.exclusive_hook then 
-											return sdk.PreHookResult.SKIP_ORIGINAL
-										else
-											obj.count = obj.count + 1
-											obj.args = args
-										end
-									end
-								end
-								log_value(hd.obj)
-								local try, noexcept = pcall(sdk.hook, hd.obj:get_type_definition():get_method(hd.func_name), custom_hook_func, on_post_generic_hook)
-								if noexcept then re.msg("hooked!") else re.msg("Failed to hook") end
-								History.history_metadata[i].hook_data.count = 0
-								hooked_funcs[History.history_metadata[i].hook_data.obj] = History.history_metadata[i].hook_data --[History.history_metadata[i][2].fn_name] 
-							end
-						end
-					end]]
-					
 					is_calling_hooked_function = false
-				end
+				--end
 				read_imgui_element(result, nil, nil, cmd)
 				imgui.tree_pop()
 			end
@@ -488,13 +452,22 @@ end
 local function dump_history()
 	if SettingsCache.load_json then 
 		local history_cmds_only = {}
-		for i, cmd in ipairs(History.history_idx) do history_cmds_only[cmd] = " " end
-		local history_metadata_no_hooks = {}
-		for i, mtdata in ipairs(History.history_metadata) do 
-			history_metadata_no_hooks[i] = merge_tables({}, mtdata)
-			history_metadata_no_hooks[i].hook_data = nil
-		end	
-		local History = {history=history_cmds_only, history_idx=History.history_idx, history_metadata=history_metadata_no_hooks, current_history_idx=current_history_idx, first_history_idx=first_history_idx} 
+		local new_history_idx = {}
+		local used_cmds = {}
+		local diff = 0
+		for i, cmd in ipairs(reverse_table(History.history_idx)) do 
+			local clean_cmd = cmd:gsub(" +$", "")
+			if not used_cmds[clean_cmd] then
+				used_cmds[clean_cmd] = true
+				table.insert(new_history_idx, 1, clean_cmd)
+				history_cmds_only[clean_cmd] = " "
+			else
+				diff = diff + 1
+			end
+		end
+		local new_first_history_idx = History.first_history_idx - diff
+		if new_first_history_idx < 1 then new_first_history_idx = 1 end
+		local History = {history=history_cmds_only, history_idx=new_history_idx, current_history_idx=History.current_history_idx - diff, first_history_idx=History.first_history_idx - diff} 
 		json.dump_file("Console\\History.json",  EMV.jsonify_table(History))
 	end
 end
@@ -519,8 +492,9 @@ local function show_console_window()
 				History.history_metadata[#History.history_idx] = { keep_running=false }
 				goto finish
 			end]]
-		
+			
 			out = run_command(command)
+			--out = out.output or 
 			if noexcept == false then 
 				out = "ERROR: " .. out
 			end
@@ -544,7 +518,7 @@ local function show_console_window()
 					History.history_metadata[#History.history_idx] = { keep_running=false }
 					local call_offs = command:find(":call")
 					
-					if call_offs then  --hook maker
+					--[[if call_offs then  --hook maker
 						local func_name = command:sub(call_offs + 7, command:find("\"", call_offs + 7)-1)
 						local object_str = command:sub(1, call_offs - 1); 
 						if object_str:find("%s[^%s]*$") then 
@@ -559,7 +533,7 @@ local function show_console_window()
 								History.history_metadata[#History.history_idx].hook_data = { exclusive_hook=false, hook_str=hook_string, count=0, addr=test, fn_name=func_name, obj=obj }
 							end
 						end
-					end
+					end]]
 				end
 				dump_history()
 			end
