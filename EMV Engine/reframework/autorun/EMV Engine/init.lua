@@ -40,6 +40,8 @@ SettingsCache = {
 	add_DMC5_names = isDMC or false,
 	embed_mobj_control_panel = true,
 	cache_orderedPairs = false,
+	use_pcall = true,
+	increments = {},
 	Collection_data = {
 		search_enemies = true,
 		enable_component_search = true, 
@@ -1602,7 +1604,7 @@ Hotkey = {
 			--re.msg_safe("pressed " .. self.key_name .. " " .. logv(json), 556546)
 			if json and (not is_valid_obj(self.obj)) then --and ((self.obj.get_type_definition and not self.obj:get_type_definition():is_a("via.Component")) or not is_obj_or_vt(self.obj)) then
 				self.obj = jsonify_table(json, true) --there is no way to know when a non-component is an orphan, so it must be searched for and found in the scene every single keypress
-				self.dfcall.obj = self.obj
+				self.dfcall.obj = sdk.is_valid_object(self.obj) and self.obj or nil
 			end
 			if self.dfcall.args then 
 				for i, arg in ipairs(self.dfcall.args) do 
@@ -2179,7 +2181,7 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 										local to_set = converted_tbl[method_name]
 										if (type(to_set) == "table") or method:get_num_params() == 2 then 
 											if to_set.__typedef == "via.Transform" then
-												to_set = scene:call("findGameObject(System.String)", tbl.__gameobj_name)
+												to_set = scene:call("findGameObject(System.String)", tbl.__gameobj_name:gsub(" %(%d%d?%)$", ""))
 												to_set = to_set and to_set:call("get_Transform")
 												if to_set then table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set } ) end
 											else
@@ -2700,6 +2702,7 @@ end
 --Creates a new named GameObject+transform and gives it components from a list of component names:
 local function create_gameobj(name, component_names, args)
 	if not name then return end
+	args = args or {}
 	local parent_gameobj = (args.parent or args.parent_joint) and (args.parent and scene:call("findGameObject(System.String)", args.parent) or ((selected or go or player) and (selected or go or player).gameobj))
 	local parent_joint = args.parent_joint
 	local folder = (args.folder and scene:call("findFolder", args.folder)) or (parent_gameobj and parent_gameobj:call("get_Folder")) or static_objs.spawned_prefabs_folder or nil --or (player and player.gameobj:call("get_Folder"))
@@ -2710,7 +2713,7 @@ local function create_gameobj(name, component_names, args)
 		ctr = ctr + 1
 		new_name = name .. (ctr < 10 and "0" or "") .. ctr
 	end
-	name, args.parent, args.parent_joint, args.folder = new_name
+	name, args.parent, args.parent_joint, args.folder = new_name, nil
 	local new_gameobj = folder and static_funcs.mk_gameobj_w_fld(nil, name, folder) or static_funcs.mk_gameobj(nil, name)
 	if new_gameobj and new_gameobj:add_ref() and new_gameobj:call(".ctor") then
 		local xform = new_gameobj:call("get_Transform")
@@ -2735,6 +2738,15 @@ local function create_gameobj(name, component_names, args)
 							end
 							args.mesh, args.mdf = nil
 						end
+					end
+					if name == "via.motion.Motion" then 
+						new_component:call("setLayerCount", 1)
+						--[[local layer = sdk.create_instance("via.motion.TreeLayer"):add_ref()
+						if layer then
+							layer:call(".ctor()")
+							
+							new_component:call("setLayer", 0, layer)
+						end]]
 					end
 				end
 			end
@@ -3760,6 +3772,7 @@ local VarData = {
 		local try, out, example
 		o.mysize = (o.get and (o.get:get_num_params() == 1)) and (((o.count and o.count:call(obj)) or (o_tbl.counts and o_tbl.counts.method and o_tbl.counts.method:call(obj))) or 0) or nil
 		o.mysize = (type(o.mysize)=="number") and o.mysize or nil
+		
 		--[[local cnt_mthod = (o.get and (o.get:get_num_params() == 1)) and o.count or (o_tbl.counts and o_tbl.counts.method)
 		o.mysize = cnt_mthod and ({pcall(cnt_mthod.call, cnt_mthod, obj)})
 		o.mysize = (o.mysize and o.mysize[1] and o.mysize[2]) or (cnt_mthod and 0) or nil]]
@@ -3767,7 +3780,11 @@ local VarData = {
 		if o.mysize then --this whole thing gets so so much more complicated from counting list props as props
 			o.value_org = {}
 			for i=0, o.mysize-1 do
-				try, out = pcall(sdk.call_object_func, obj, o.full_name, i)
+				if SettingsCache.use_pcall then 
+					try, out = pcall(obj.call, obj, o.full_name, i)
+				else
+					try, out = true, obj:call(o.full_name, i)
+				end
 				if try and (out ~=nil) then
 					example = example or out
 					o.is_obj = o.is_obj or (not o.is_lua_type and (not o.is_vt and sdk.is_managed_object(example))) or nil
@@ -3775,10 +3792,17 @@ local VarData = {
 				end
 			end
 		elseif o.field then 
-			try, out = true, o.field:get_data(obj)
+			if SettingsCache.use_pcall then
+				try, out = pcall(o.field.get_data, o.field, obj)
+			else
+				try, out = true, o.field:get_data(obj)
+			end
 		else
-			try, out = true, obj:call(o.full_name)
-			--try, out = pcall(obj.call, obj, o.full_name)
+			if SettingsCache.use_pcall then
+				try, out = pcall(obj.call, obj, o.full_name)
+			else
+				try, out = true, obj:call(o.full_name)
+			end
 		end
 		
 		if example == nil then 
@@ -3807,8 +3831,9 @@ local VarData = {
 		o.is_vt = (o.is_vt and o.ret_type:get_method("Parse(System.String)") and "parse") or o.is_vt
 		
 		if o.ret_type:is_a("System.Single") or o.ret_type:is_a("via.vec3") or o.ret_type:is_a("via.vec4") or o.ret_type:is_a("via.Quaternion") or o.ret_type:is_a("via.mat4") then
-			o.increment = metadata_methods[rt_name].increment or 0.1
-			metadata_methods[rt_name].increment = o.increment
+			SettingsCache.increments[rt_name] = SettingsCache.increments[rt_name] or {}
+			o.increment = SettingsCache.increments[rt_name].increment or 0.1
+			SettingsCache.increments[rt_name].increment = o.increment
 		end
 		
 		if (type(o.value_org)=="table") and o_tbl.counts and o_tbl.counts.method and o_tbl.xform and o_tbl.counts.method:get_name():find("Joint") then
@@ -3855,17 +3880,29 @@ local VarData = {
 		local obj = o_tbl.obj
 		local excepted = not self.field and (not not (SettingsCache.exception_methods[o_tbl.name_full] and SettingsCache.exception_methods[o_tbl.name_full][self.name]))
 		
-		if self.field then
-			try, out = pcall(self.field.get_data, self.field, obj)
-		elseif excepted and EMVSettings.show_all_fields then
-			try, out = pcall(obj.call, obj, self.full_name, index or 0)
-		elseif index then
-			try, out = pcall(obj.call, obj, self.full_name, index)
+		if SettingsCache.use_pcall then
+			if self.field then
+				try, out = pcall(self.field.get_data, self.field, obj)
+			elseif excepted and EMVSettings.show_all_fields then
+				try, out = pcall(obj.call, obj, self.full_name, index or 0)
+			elseif index then
+				try, out = pcall(obj.call, obj, self.full_name, index)
+			else
+				try, out = pcall(obj.call, obj, self.full_name)
+			end
 		else
-			try, out = pcall(obj.call, obj, self.full_name)
+			if self.field then
+				out = self.field:get_data(obj)
+			elseif excepted and EMVSettings.show_all_fields then
+				out = obj:call(self.full_name, 0)
+			elseif index then
+				out = obj:call(self.full_name, index)
+			else
+				out = obj:call(self.full_name)
+			end
 		end
 		
-		if try then 
+		if try or not SettingsCache.use_pcall then 
 			if out ~= nil then
 				--self.is_lua_type = self.is_lua_type or type(out)=="number" or nil
 				if self.is_obj or self.is_vt then
@@ -6418,10 +6455,21 @@ local function show_collection()
 						for j, excluded_name in ipairs(cd.excluded) do 
 							if excluded_name ~= "[New]" and name:find(excluded_name) then
 								is_excluded = true
+								break
 							end
 						end
 					end
-					new_collection[name] = not is_excluded and (held_transforms[result_xf] or GameObject:new{xform=result_xf}) or nil
+					if not is_excluded then
+						local new_obj = held_transforms[result_xf] or GameObject:new{xform=result_xf}
+						local new_name = new_obj:set_name_w_parent()
+						local ctr = 0
+						while new_collection[new_name] do 
+							ctr = ctr + 1
+							new_name = new_obj.name_w_parent .. " (" .. ctr .. ")"
+						end
+						new_obj.Collection_name = new_name
+						new_collection[new_name] = new_obj
+					end
 				end
 			end
 			for name, obj in pairs(new_collection) do --remove new objects that are children of other new objects
@@ -6452,7 +6500,7 @@ local function show_collection()
 			if imgui.button("Reset to Default Terms") then
 				cd = deep_copy(default_SettingsCache.Collection_data)
 			end
-			changed, cd.must_have.checked = imgui.checkbox("Must Have:", cd.must_have.checked)
+			changed, cd.must_have.checked = imgui.checkbox("Must have this Component:", cd.must_have.checked)
 			if cd.must_have.checked then 
 				local temp = cd.must_have.Component
 				if (editable_table_field("Component", cd.must_have.Component, cd.must_have)==1) and not sdk.find_type_definition(cd.must_have.Component) then
@@ -6460,6 +6508,7 @@ local function show_collection()
 				end
 			else
 				imgui.new_line()
+				imgui.spacing()
 			end
 			cd.search_for = cd.search_for or {}
 			if imgui.button("+") and (not cd.search_for[1] or sdk.find_type_definition(cd.search_for[#cd.search_for])) then 
@@ -6470,7 +6519,7 @@ local function show_collection()
 				changed, cd.enable_component_search = imgui.checkbox("", cd.enable_component_search)
 			imgui.pop_id()
 			imgui.same_line()
-			imgui.text("Search for Components:")
+			imgui.text("Must have one of these Components:")
 			if cd.enable_component_search then
 				for i, component_name in ipairs(cd.search_for or {}) do 
 					if component_name:gsub(" ", "") == "" then
@@ -6487,16 +6536,20 @@ local function show_collection()
 			end
 			for j = 1, 2 do
 				imgui.push_id(j)
+					local add_pressed
 					local tbl_name = ({"excluded", "included"})[j]
 					local bool_name = ({"enable_exclude_search", "enable_include_search"})[j]
 					cd[tbl_name] = cd[tbl_name] or {}
-					if imgui.button("+") and cd[tbl_name][ #cd[tbl_name] ] ~= "[New]" then 
-						table.insert(cd[tbl_name], "[New]")
+					if imgui.button("+") then 
+						add_pressed = true
+						if cd[tbl_name][ #cd[tbl_name] ] ~= "[New]" then
+							table.insert(cd[tbl_name], "[New]")
+						end
 					end
 					imgui.same_line()
-					changed, cd[bool_name] = imgui.checkbox("", cd[bool_name])
+					changed, cd[bool_name] = imgui.checkbox("", cd[bool_name] or add_pressed)
 					imgui.same_line()
-					imgui.text((j == 1 and "Exclude" or "Include") .. " from Names:")
+					imgui.text((j == 1 and "Exclude these names from results:" or "Search for objects with any of these keywords:"))
 					if cd[bool_name] then
 						for i, term in ipairs(cd[tbl_name] or {}) do 
 							if term:gsub(" ", "") == "" then
@@ -6531,7 +6584,7 @@ local function show_collection()
 	for j = 1, 2 do 
 		for i, coll_name in ipairs(j==1 and existing_objs or missing_objs) do 
 			local obj = Collection[coll_name]
-			name = obj.name or obj.__gameobj_name
+			name = obj.Collection_name or obj.name or obj.__gameobj_name
 			imgui.text("	")
 			imgui.same_line()
 			if obj.xform and obj.xform:read_qword(0x10) ~= 0 then
@@ -6543,7 +6596,7 @@ local function show_collection()
 					end
 				imgui.pop_id()
 				imgui.same_line()
-				if imgui.tree_node(name) then 
+				if imgui.tree_node_str_id(tostring(obj), name) then 
 					imgui.text("	    ")
 					imgui.same_line()
 					imgui.begin_rect()
@@ -6551,6 +6604,7 @@ local function show_collection()
 					imgui.end_rect(2)
 					imgui.tree_pop()
 				end
+				obj.Collection_name = name
 			elseif name then
 				if obj.name then
 					Collection[coll_name] = obj.object_json
@@ -6567,9 +6621,11 @@ local function show_collection()
 					imgui.same_line()
 					imgui.text(name)
 				end
+				obj.__gameobj_name = name
 			else
 				Collection[coll_name] = nil
 			end
+			
 		end
 	end
 	if dump_collection then 
@@ -7185,6 +7241,7 @@ GameObject = {
 		local poser = self.poser
 		
 		local function clear_joint(joint)
+			
 			old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
 			deferred_calls[joint] = {}
 			table.insert(deferred_calls[joint], {func=joint[poser.prop_name].set:get_name(), args=joint[poser.prop_name].value_org}) --reset
@@ -7304,19 +7361,27 @@ GameObject = {
 		end
 		
 		SettingsCache.exception_methods["via.Joint"] = nil
-		imgui.text("Hotkeys:\n	[Z] - Undo\n	[Shift] - Freeze hovered joint, Stop changing gizmos\n	[Alt] - Unfreeze hovered joint")
+		imgui.text("Hotkeys:\n	[Z] - Undo\n	[Shift] - Freeze hovered joint\n	[Alt] - Unfreeze hovered joint\n	[Ctrl] - Stop changing gizmos")
 		local text_pos = {statics.width/4*3, statics.height/4*3}
 		local closest_to_mouse =  {}
 		local prop_changed
+		local pressed_undo = imgui.button("Undo")
+		local alt_pressed =  check_key_released(via.hid.KeyboardKey.Menu, 0.0)
+		local shift_pressed = check_key_released(via.hid.KeyboardKey.Shift, 0.0)
+		local ctrl_pressed = check_key_released(via.hid.KeyboardKey.Control, 0.0)
+		poser.freeze_total = 0
 		
 		for i, joint in ipairs(self.joints or {}) do 
 			local j_o_tbl = joint._ or create_REMgdObj(joint)
 			j_o_tbl.last_opened = uptime
 			local var_metadata = joint[poser.prop_name]
 			var_metadata.display_name = j_o_tbl.Name
-			imgui.push_id(joint)
+			if var_metadata.freeze then 
+				poser.freeze_total = poser.freeze_total + 1
+			end
+			imgui.push_id(i)
 				local selected_changed
-				selected_changed, j_o_tbl.selected = imgui.checkbox("", (poser.undo.last and ((#poser.undo.last > 0) and (poser.undo.last[#poser.undo.last] == joint))) or ((not poser.undo.last or #poser.undo.last==0) and j_o_tbl.selected))
+				selected_changed, j_o_tbl.selected = imgui.checkbox("", poser.freeze_total > 0 and (poser.undo.last and ((#poser.undo.last > 0) and (poser.undo.last[#poser.undo.last] == joint))) ) -- or ((not poser.undo.last or #poser.undo.last==0) and j_o_tbl.selected))
 				local hovered = imgui.is_item_hovered()
 				
 				imgui.same_line()
@@ -7333,7 +7398,7 @@ GameObject = {
 					mat[3] = self.joint_positions[joint][3]
 					local pos = self.joint_positions[joint][3] --:to_vec3() --world pos
 					
-					if var_metadata.freeze ~= nil or j_o_tbl.selected then
+					if shift_pressed or var_metadata.freeze ~= nil or j_o_tbl.selected then
 						local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
 						mat_screen = draw.world_to_screen(pos)
 						mat_screen_top = draw.world_to_screen(pos + Vector3f.new(0, 0.08 * cam_dist, 0))
@@ -7353,7 +7418,7 @@ GameObject = {
 				end
 				
 				hovered = hovered or imgui.is_item_hovered()
-				if selected_changed or (not var_metadata.freeze and hovered and check_key_released(via.hid.KeyboardKey.Shift, 0.0))  then 
+				if selected_changed or (not var_metadata.freeze and hovered and shift_pressed)  then 
 					if selected_changed then
 						poser.undo[joint] = poser.undo[joint] or { prev_rot={} }
 						poser.undo[joint].start = uptime
@@ -7365,18 +7430,23 @@ GameObject = {
 					deferred_calls[joint] = {func="set" .. poser.prop_name, args=var_metadata.cvalue, vardata=var_metadata}
 				end
 				
-				if var_metadata.freeze and (not imgui.same_line() and imgui.button((poser.undo[joint] and #poser.undo[joint].prev_rot > 0 and #poser.undo[joint].prev_rot) or "X") or (hovered and check_key_released(via.hid.KeyboardKey.Menu, 0.0))) then
-					poser.undo[joint] = nil
-					clear_joint(joint)
+				if var_metadata.freeze then 
+					imgui.same_line() 
+					pressed_undo = (poser.undo[joint] and #poser.undo[joint].prev_rot > 0 and (imgui.button((#poser.undo[joint].prev_rot) or "X")) ) or pressed_undo
+					imgui.same_line()
+					if imgui.button("X") or (hovered and alt_pressed) then
+						poser.undo[joint] = nil
+						clear_joint(joint)
+					end
 				end
 				
 			imgui.pop_id()
 			var_metadata.display_name = nil
 		end
-
-		if not closest_to_mouse[1] and poser.selected then 
+		
+		if not closest_to_mouse[1] and poser.selected and (poser.undo.last and #poser.undo.last > 0) then 
 			closest_to_mouse = poser.selected
-		elseif check_key_released(via.hid.KeyboardKey.Shift, 0.0) and not poser.is_changing_gizmo then 
+		elseif ctrl_pressed and not poser.is_changing_gizmo then 
 			closest_to_mouse = poser.last_closest_to_mouse
 		else
 			poser.last_closest_to_mouse = closest_to_mouse
@@ -7389,20 +7459,28 @@ GameObject = {
 			local mat = Matrix4x4f.identity()
 			for i = 0, 3 do  mat[i] = closest_to_mouse[3][i] end
 			--imgui.text(mat4_to_string(mat))
-			changed, mat = draw.gizmo(joint:get_address(), mat, (poser.is_pos and imgui.ImGuizmoOperation.TRANSLATE) or imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
+			if poser.freeze_total > 0 then
+				changed, mat = draw.gizmo(joint:get_address(), mat, (poser.is_pos and imgui.ImGuizmoOperation.TRANSLATE) or imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
+			end
 			--imgui.text(mat4_to_string(mat))
 			if poser.is_local and poser.is_pos then 
 			--	mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][3])
 			end             
 			
-			if changed then 
+			if changed or (not joint[poser.prop_name].freeze and shift_pressed) then 
 				deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.is_pos and (mat[3]:to_vec3()) or mat:to_quat():to_euler(), vardata=joint[poser.prop_name]} --joint:call("get_BaseLocalPosition")*2 - 
 				joint[poser.prop_name].freeze = 1
 				prop_changed = joint
 				poser.is_changing_gizmo = true
 			end
-			draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
-			draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
+			if poser.freeze_total > 0 then
+				draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
+				draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
+			end
+			if alt_pressed then
+				poser.undo[joint] = nil
+				clear_joint(joint)
+			end
 		end
 
 		if prop_changed then
@@ -7417,7 +7495,7 @@ GameObject = {
 		end
 		
 		::goback::
-		if poser.undo.last and check_key_released(via.hid.KeyboardKey.Z) then 
+		if poser.undo.last and (pressed_undo or check_key_released(via.hid.KeyboardKey.Z)) then 
 			local joint = poser.undo.last[#poser.undo.last]
 			poser.undo.last[#poser.undo.last] = nil
 			if poser.undo.last[1] and (not joint or not poser.undo[joint] or not poser.undo[joint].prev_rot[1]) then
@@ -7465,9 +7543,9 @@ GameObject = {
 		end
 	end,
 	
-	set_name_w_parent = function(self)
+	set_name_w_parent = function(self, parent)
 		self.name_w_parent = self.name
-		local tmp_xform = self.xform:call("get_Parent")
+		local tmp_xform = parent or self.xform:call("get_Parent")
 		while tmp_xform do
 			local parent_gameobj = tmp_xform:call("get_GameObject")
 			if figure_mode and not lua_find_component(parent_gameobj, "via.motion.Motion") then
@@ -7476,6 +7554,7 @@ GameObject = {
 			self.name_w_parent = tmp_xform:call("get_GameObject"):call("get_Name") .. " -> " .. self.name_w_parent
 			tmp_xform = tmp_xform:call("get_Parent")
 		end
+		return self.name_w_parent
 	end,
 	
 	pre_fix_displays = function(self)
@@ -7606,7 +7685,7 @@ GameObject = {
 			self.center_obj = self.same_joints_constraint and self.parent_obj and not self.parent_obj.same_joints_constraint and self.parent_obj
 			
 			if parent ~= self.parent then --recreate name_w_parent
-				self:set_name_w_parent()
+				self:set_name_w_parent(parent)
 			end
 			
 			self.parent = parent
@@ -8031,6 +8110,7 @@ re.on_draw_ui(function()
 			changed, SettingsCache.max_element_size = imgui.drag_int("Max Fields/Properties Per-Grouping", SettingsCache.max_element_size, 1, 1, 2048); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, SettingsCache.show_all_fields = imgui.checkbox("Show Extra Fields", SettingsCache.show_all_fields); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, SettingsCache.embed_mobj_control_panel = imgui.checkbox("Embed Into Object Explorer (Lua)", SettingsCache.embed_mobj_control_panel); EMVSetting_was_changed = EMVSetting_was_changed or changed
+			changed, SettingsCache.use_pcall = imgui.checkbox("Exception Handling", SettingsCache.use_pcall); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			if SettingsCache.remember_materials and next(saved_mats) and imgui.tree_node("Saved Material Settings") then
 				read_imgui_element(saved_mats)
 				imgui.tree_pop()
@@ -8073,8 +8153,8 @@ re.on_draw_ui(function()
 			end
 			imgui.tree_pop()
 		end
-		if next(old_deferred_calls) and imgui.tree_node("Old Deferred Calls") then
-			if imgui.button("Clear") then 
+		if next(old_deferred_calls) and imgui.tree_node("Deferred Method Calls") then
+			if imgui.button("Clear") then
 				old_deferred_calls = {}
 				deferred_calls = {}
 			end

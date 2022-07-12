@@ -499,7 +499,6 @@ local function show_console_window()
 				out = "ERROR: " .. out
 			end
 			History.command_output = out or tostring(out)
-			force_command = nil
 			if History.first_history_idx < #History.history_idx - 100 then --limit of 100 command history shown
 				if SettingsCache.load_json then 
 					table.remove(History.history_idx, 1)
@@ -612,6 +611,7 @@ re.on_frame(function()
 	
 	if reframework:is_drawing_ui() and SettingsCache.show_console then
 		show_console_window()
+		force_command = nil
 	end
 end)
 
