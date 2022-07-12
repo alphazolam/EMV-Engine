@@ -33,7 +33,7 @@ re.on_pre_application_entry("LockScene", function()
 		RSCache.tex_resources = RSCache.tex_resources or {}
 		local all_motbanks = {}
 		local bgs = {}
-		
+		EMVSettings.init_EMVSettings()
 		if true then			
 			table.insert(bgs, "sectionroot/light/ibl/ibl_morning00.tex")
 			table.insert(bgs, "sectionroot/light/ibl/ibl_20160419_0700_06.tex")

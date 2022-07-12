@@ -58,7 +58,7 @@ _G.read_bytes = EMV.read_bytes
 _G.obj_to_json = EMV.obj_to_json
 _G.is_valid_obj = EMV.is_valid_obj
 _G.searchf = EMV.searchf
-
+_G.create_gameobj = EMV.create_gameobj
 SettingsCache.deferred_console = true
 
 --[[

@@ -1,8 +1,6 @@
 --Enhanced Model Viewer MHrise global resources
 --by alphaZomega
 
---This file a placeholder for Monster Hunter Rise resources
-
 local EMV = require("EMV Engine")
 
 local game_name = reframework.get_game_name()
@@ -21,7 +19,7 @@ re.on_application_entry("BeginRendering", function()
 		global_motbanks = global_motbanks or {}
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
-		
+		EMVSettings.init_EMVSettings()
 		local all_motbanks = {}
 		if true then 
 			--[[table.insert(all_motbanks, "enemy/em001/00/mot/em001_00_bank.motbank")

@@ -21,7 +21,7 @@ re.on_application_entry("UpdateMotion", function()
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
 		ran_once = true
-		
+		EMVSettings.init_EMVSettings()
 		local all_motbanks = {}
 		if true then 
 			table.insert(all_motbanks, "animation/enemy/em6000/em6000.motbank")

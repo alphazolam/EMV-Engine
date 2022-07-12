@@ -19,6 +19,7 @@ re.on_application_entry("UpdateMotion", function()
 		--if dlc_folder and dlc_folder:call("get_Active") == false then 
 		--	dlc_folder:call("activate")
 		--end
+		EMVSettings.init_EMVSettings()
 		global_motbanks = global_motbanks or {}
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
@@ -29,11 +30,11 @@ re.on_application_entry("UpdateMotion", function()
 		if EMVSettings.special_mode == 2 then 
 			table.insert(all_motbanks, "sectionroot/animation/player/pl10/Face.motbank")
 			table.insert(all_motbanks, "sectionroot/animation/player/pl10/bank/pl10body.motbank")
-			--re.msg("Loaded Claire Assets")
+			re.msg("Loaded Claire Assets")
 		elseif EMVSettings.special_mode == 3 then
 			table.insert(all_motbanks, "sectionroot/animation/player/alphaz/pl2000_cutscene_body.motbank")
 			table.insert(all_motbanks, "sectionroot/animation/player/alphaz/pl2050_cutscene_face.motbank")
-			--re.msg("Loaded Ada Assets")
+			re.msg("Loaded Ada Assets")
 		else	
 			--table.insert(all_motbanks, "sectionroot/animation/player/pl00/bank/pl0000_cutscene_body.motbank")
 			--table.insert(all_motbanks, "sectionroot/animation/player/pl00/pl0050_cutscene_face.motbank")
@@ -514,14 +515,14 @@ re.on_application_entry("UpdateMotion", function()
 			table.insert(all_motbanks, "sectionroot/animation/player/alphaz/pl6050_cutscene_face.motbank")
 			--]]
 
-			--re.msg("Loaded Other Assets")
+			re.msg("Loaded Other Assets")
 		end
 		
 		for i, bank_string in ipairs(all_motbanks) do 
 			local bank
 			local bank_name = bank_string:lower() --bank_string:match("^.+/(.+)%.motbank") or bank_string
 			if pcall(function()
-				bank = create_resource(bank_string, "via.motion.MotionBankResource")
+				bank = create_resource(bank_string, "via.motion.MotionBankResource", (EMVSettings.special_mode > 1) )
 			end) and bank then
 				global_motbanks[bank_name] = bank
 				RSCache.motbank_resources[bank_name] = bank
@@ -592,7 +593,7 @@ re.on_application_entry("UpdateMotion", function()
 				RSCache.tex_resources[bg_name] = tex_resource
 			end
 		end
-		re.msg("Loaded resources from script")
+		--re.msg("Loaded resources from script")
 		loaded_resources = true
 	end
 end)

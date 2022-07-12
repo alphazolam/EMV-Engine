@@ -1,6 +1,6 @@
 --EMV_Engine.lua by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---v1.0, June 26 2022
+--July 12 2022
 --if true then return end
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -20,7 +20,7 @@ RN = {} 					--Resource names (filenames)
 History = {}				--Previous console commands and their results	
 
 --Default Settings:
-default_SettingsCache = {}
+local default_SettingsCache = {}
 SettingsCache = {
 	load_json = true,
 	exception_methods = {},
@@ -40,7 +40,30 @@ SettingsCache = {
 	add_DMC5_names = isDMC or false,
 	embed_mobj_control_panel = true,
 	cache_orderedPairs = false,
+	Collection_data = {
+		search_enemies = true,
+		enable_component_search = true, 
+		enable_exclude_search = true,
+		enable_include_search = false,
+		case_sensitive = false,
+		must_have = {
+			checked = true, 
+			Component="via.motion.MotionFsm2"
+		},
+		search_for = {
+			"via.physics.CharacterController",
+			"via.motion.ActorMotion",
+			"via.motion.DummySkeleton",
+		},
+		included = {
+			"[New]"
+		},
+		excluded = {
+			"gimmick",
+		},
+	}
 }
+
 
 --tmp:call("trigger", )
 
@@ -82,6 +105,13 @@ local static_objs = {
 	via_hid_mouse = sdk.get_native_singleton("via.hid.Mouse"),
 	via_hid_keyboard = sdk.get_native_singleton("via.hid.Keyboard"),
 	setn = ValueType.new(sdk.find_type_definition("via.behaviortree.SetNodeInfo")),
+	spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", 
+		(isRE2 and "GUI_Rogue") or 
+		(isRE3 and "RopewayGrandSceneDevelop") or 
+		(isDMC and "Develop") or 
+		(isMHR and "Item_b_000") or 
+		(isRE8 and "Debug") or "")
+	),
 }
 static_objs.setn:call(".ctor")
 static_objs.setn:call("set_Fullname", true)
@@ -341,7 +371,7 @@ end
 
 local function deep_copy(tbl)
 	local new_tbl = {}
-	for key, value in pairs(tbl) do
+	for key, value in pairs(tbl or {}) do
 		if type(value) == "table" then
 			new_tbl[key] = deep_copy(value)
 		else
@@ -510,18 +540,29 @@ local function Split(s, delimiter)
 end
 
 --Search transforms utilities and console functions -------------------------------------------------------------------------------------------------------------
-local function find(typedef_name, non_transforms) --find components by type, returned as via.Transforms
+local function find(typedef_name, as_components) --find components by type, returned as via.Transforms
+	--as_components = nil means return array of xforms
+	--as_components = true means return array of components
+	--as_components = 1 means return xform-dict of xforms
+	--as_components = 2 means return xform-dict of components
 	local typeof = sdk.typeof(typedef_name)
 	local result
 	if typeof then 
 		result = scene:call("findComponents(System.Type)", typeof)
 		result = result and result.get_elements and result:get_elements() or {}
-		if not non_transforms then
+		if not as_components or as_components==1 or as_components==2 then
 			local xforms = {}
 			for i, item in ipairs(result) do 
-				table.insert(xforms, item:call("get_GameObject"):call("get_Transform"))
+				local xform = item:call("get_GameObject"):call("get_Transform")
+				if as_components == 1 then 
+					xforms[xform] = xform
+				elseif as_components==2 then
+					xforms[xform] = result
+				else
+					table.insert(xforms, xform)
+				end
 			end
-			return xforms
+			result = xforms
 		end
 	end
 	return result or {}
@@ -546,7 +587,7 @@ local function to_obj(object, is_known_obj)
 end
 
 --Search the global list of all transforms by gameobject name
-local function search(search_term, case_sensitive)
+local function search(search_term, case_sensitive, as_dict)
 	local result = scene and scene:call("findComponents(System.Type)", sdk.typeof("via.Transform"))
 	local search_results = {}
 	if result and result.get_elements then 
@@ -554,7 +595,11 @@ local function search(search_term, case_sensitive)
 		for i, element in ipairs(result:get_elements()) do
 			local name = not case_sensitive and element:call("get_GameObject"):call("get_Name"):lower() or element:call("get_GameObject"):call("get_Name")
 			if name:find(term) then 
-				table.insert(search_results, element)
+				if as_dict then 
+					search_results[element] = element
+				else
+					table.insert(search_results, element)
+				end
 			end
 		end
 	end
@@ -703,7 +748,7 @@ local function run_command(input)
 	local is_multi_command = input:find(";")
 	for part in input:gsub("\n%s?", " "):gsub("%s?;%s?", ";"):gmatch("[^%;]+") do
 		local command = parse_command(part)
-		log.info("\n" .. command)
+		--log.info("\n" .. command)
 		try, out = pcall(load(command))
 		if try then 
 			if out == nil then 
@@ -1425,14 +1470,10 @@ local function show_hotkey_setter(button_txt, imgui_keyname, deferred_call, dfc_
 	imgui.same_line()
 	local hk_tbl = Hotkeys[imgui_keyname]
 	imgui.push_id(imgui_keyname.."K")
-		
 		if hk_tbl and (hk_tbl.key_name == "[Press a Key]") then
-			--imgui.text("checking")
 			local key_id, key_name = check_any_key_released()
 			if key_id then
-				--re.msg("re")
 				hk_tbl = Hotkey:new({button_txt=button_txt, imgui_keyname=imgui_keyname, key_id=key_id, key_name=key_name, dfcall=deferred_call, obj=deferred_call.obj, dfcall_json=dfcall_json})
-				--test = deep_copy(hk_tbl)
 				if deferred_call then
 					if dfc_args ~= nil and deferred_call.args == nil then
 						hk_tbl.dfcall = merge_tables({args=((type(dfc_args)~="table") and {dfc_args} or dfc_args)}, deferred_call, true) --make a unique copy of the deferred call with the given args
@@ -1783,7 +1824,9 @@ local function create_resource(resource_path, resource_type, force_create)
 	resource_path = resource_path:lower()
 	--log.info("creating resource " .. resource_path)
 	local ext = resource_path:match("^.+%.(.+)$")
-	if not ext then return end
+	if not ext or (not force_create and (ext=="motbank") and EMVSettings and (EMVSettings.special_mode > 1)) then 
+		return
+	end
 	RSCache[ext .. "_resources"] = RSCache[ext .. "_resources"] or {}
 	force_create = force_create or (type(RSCache[ext .. "_resources"][resource_path])=="string") or force_create
 	
@@ -2651,10 +2694,24 @@ local function searchf(search_term)
 	return results
 end
 
+--Gun = create_gameobj("Gun", {"via.render.Mesh", "via.motion.Motion"}, {mesh="character/it/it02/008/it02_008_handgun_houndwolf02.mesh", mdf="character/it/it02/008/it02_008_handgun_houndwolf02.mdf2", parent="ch09_3000", parent_joint="R_Wep"})
+--Sword = create_gameobj("Sword", {"via.render.Mesh"}, {mesh="character/it/it01/012/it01_012_blade_longsword.mesh", parent_joint="R_Wep", rot=Quaternion.new(0,0,0.681639,0.731689)})
+
 --Creates a new named GameObject+transform and gives it components from a list of component names:
-local function create_gameobj(name, worldmatrix, target_folder, component_names)
+local function create_gameobj(name, component_names, args)
 	if not name then return end
-	local new_gameobj = target_folder and static_funcs.mk_gameobj_w_fld(nil, name, target_folder) or static_funcs.mk_gameobj(nil, name)
+	local parent_gameobj = (args.parent or args.parent_joint) and (args.parent and scene:call("findGameObject(System.String)", args.parent) or ((selected or go or player) and (selected or go or player).gameobj))
+	local parent_joint = args.parent_joint
+	local folder = (args.folder and scene:call("findFolder", args.folder)) or (parent_gameobj and parent_gameobj:call("get_Folder")) or static_objs.spawned_prefabs_folder or nil --or (player and player.gameobj:call("get_Folder"))
+	local worldmatrix = args.worldmatrix
+	local new_name = name
+	local ctr = 0
+	while scene:call("findGameObject(System.String)", new_name) do 
+		ctr = ctr + 1
+		new_name = name .. (ctr < 10 and "0" or "") .. ctr
+	end
+	name, args.parent, args.parent_joint, args.folder = new_name
+	local new_gameobj = folder and static_funcs.mk_gameobj_w_fld(nil, name, folder) or static_funcs.mk_gameobj(nil, name)
 	if new_gameobj and new_gameobj:add_ref() and new_gameobj:call(".ctor") then
 		local xform = new_gameobj:call("get_Transform")
 		write_mat4(xform, worldmatrix)
@@ -2664,10 +2721,38 @@ local function create_gameobj(name, worldmatrix, target_folder, component_names)
 				local new_component = td and new_gameobj:call("createComponent(System.Type)", td:get_runtime_type())
 				if new_component and new_component:add_ref() then 
 					new_component:call(".ctor()")
+					if new_component:get_type_definition():is_a("via.Behavior") then
+						new_component:call("awake()")
+						new_component:call("start()")
+					end
+					if name == "via.render.Mesh" and args.mesh then 
+						local mesh_res = create_resource(args.mesh, "via.render.MeshResource")
+						if mesh_res then
+							local mdf_res = create_resource(args.mdf or args.mesh:gsub("%.mesh", ".mdf2"), "via.render.MeshMaterialResource")
+							new_component:call("setMesh", mesh_res)
+							if mdf_res then
+								new_component:call("set_Material", mdf_res)
+							end
+							args.mesh, args.mdf = nil
+						end
+					end
 				end
 			end
 		end
-		return new_gameobj
+		local new_obj = GameObject:new({xform=xform, gameobj=new_gameobj}, args)
+		if parent_gameobj then
+			local parent = parent_gameobj:call("get_Transform")
+			new_obj:set_parent(parent)
+			local parent_joint_obj = parent_joint and parent:call("getJointByName", parent_joint)
+			if parent_joint_obj then
+				xform:call("set_ParentJoint", parent_joint)
+				xform:call("set_LocalPosition",  parent_joint_obj:call("get_BaseLocalPosition") or Vector3f.new(0,0,0))
+				local rot = args.rot or parent_joint_obj:call("get_BaseLocalRotation") or Quaternion.new(0,0,0.681639,0.731689) --Vector4f.new(0,0,0,1) --
+				xform:call("set_LocalRotation", rot)
+			end
+		end
+		Collection[name] = new_obj
+		return new_obj
 	end
 end
 
@@ -3792,7 +3877,6 @@ local VarData = {
 					if (old_value~=nil) and (old_value ~= out) and old_value._  then --and not self.array_count and is_obj_or_vt(out) then
 						--[[local old_obj = old_value.cvalue or old_value.value
 						if self.is_vt and not self.is_lua_type and old_obj and not self.mysize then 
-							testes = {old_value, old_obj, out}
 							--update old cached valuetype with info from the new one:
 							local new_tbl = out._ or create_REMgdObj(out)
 							for i, fdata in ipairs(new_tbl.field_data or {}) do 
@@ -4329,7 +4413,7 @@ local function show_imgui_resource(value, name, key_name, data_holder)
 		
 		imgui.same_line()
 		was_changed, data_holder.rs_index = imgui.combo(name, data_holder.rs_index, RN[data_holder.ext .. "_resource_names"] or {})
-		if was_changed and ext ~= " " then 
+		if was_changed and data_holder.ext ~= " " then 
 			data_holder.path = RN[data_holder.ext .. "_resource_names"][data_holder.rs_index]
 			data_holder.cached_text = data_holder.show_manual and data_holder.path
 			value = RSCache[data_holder.ext .. "_resources"][data_holder.path] or "__nil" --or create_resource("not_set." .. data_holder.ext, data_holder.ret_type) or "__nil"
@@ -4350,7 +4434,7 @@ local function show_imgui_resource(value, name, key_name, data_holder)
 				imgui.same_line()
 			elseif data_holder.cached_text ~= "" and data_holder.cached_text ~= data_holder.path and data_holder.cached_text:find("%." .. data_holder.ext) then
 				if imgui.button("OK") then
-					data_holder.cached_text = (data_holder.cached_text:match("natives\\%w%w%w\\(.+%." .. ext ..")") or data_holder.cached_text):gsub("\\", "/")
+					data_holder.cached_text = (data_holder.cached_text:match("natives\\%w%w%w\\(.+%." .. data_holder.ext ..")") or data_holder.cached_text):gsub("\\", "/")
 					local new_resource = create_resource(data_holder.cached_text, value:get_type_definition())
 					if new_resource then
 						data_holder.rs_index, data_holder.path = add_resource_to_cache(new_resource)
@@ -4423,13 +4507,13 @@ local function show_imgui_text_box(display_name, value, o_tbl, can_set, tkey, is
 					if is_field then 
 						--value = sdk.create_managed_string(value):add_ref() --not sure
 					end
-					o_tbl.cached_text[tkey] = nil
+					--o_tbl.cached_text[tkey] = nil
 					changed = true
 				end
 				imgui.same_line()
 				if imgui.button("Cancel") then
 					o_tbl.cached_text[tkey] = str_name
-					collectgarbage()
+					--collectgarbage()
 				end
 			imgui.pop_id()
 		end
@@ -4888,7 +4972,10 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						end
 					end
 					if var_metadata.set then 
-						editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value")
+						if editable_table_field("cvalue", var_metadata.cvalue, var_metadata, "Value") == 1 then 
+							value = var_metadata.cvalue
+							changed = true
+						end
 					end
 					if var_metadata.value_org then 
 						editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
@@ -4907,7 +4994,6 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						changed = true
 						value = var_metadata.value
 					end
-				
 					if return_type:is_a("via.Prefab") then
 						local obj_changed
 						var_metadata.pfb_path = var_metadata.pfb_path or value:call("get_Path")
@@ -6119,6 +6205,7 @@ show_imgui_mat = function(anim_object)
 	end
 	
 	if RN.mesh_resource_names then
+		anim_object.mpaths = anim_object.mpaths or {}
 		changed, anim_object.current_mesh_idx = imgui.combo("Change Mesh: " .. anim_object.name, find_index(RN.mesh_resource_names, anim_object.mpaths.mesh_path) or anim_object.current_mesh_idx, RN.mesh_resource_names)
 		if changed then 
 			if type(RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ][1]=="string") then 
@@ -6280,7 +6367,9 @@ end
 
 --Displays the "Collection" menu in imgui
 local function show_collection()
+	
 	local dump_collection
+	local cd = SettingsCache.Collection_data
 	
 	if imgui.button("Empty Collection") then 
 		Collection = {}
@@ -6296,86 +6385,190 @@ local function show_collection()
 		dump_collection = true
 	end
 	
-	--imgui.same_line()
-	if imgui.button("Scan All") then 
-		Collection = merge_tables(Collection, jsonify_table(json.load_file("EMV_Engine\\Collection.json") or {}, true))
-		dump_collection = true
-	end
-
-	imgui.same_line()
-	if imgui.button("Find Characters") then
-		local motfsms = {}
-		for i, result in ipairs(find("via.motion.MotionFsm2")) do 
-			motfsms[result] = true
-		end
-		local merged = merge_tables(find("via.motion.ActorMotion"), find("via.physics.CharacterController"))
-		local new_collection = merge_tables({}, Collection)
-		for i, result in ipairs(merge_tables(merged, find("via.motion.DummySkeleton"))) do 
-			if (not player or motfsms[result]) or isRE8 then
-				local obj = held_transforms[result] or GameObject:new{xform=result}
-				if not obj.name:find("gimmick") then
-					new_collection[obj.name] = obj--(obj and obj.xform and obj) or new_collection[obj.name]
+	if imgui.button("Search") then
+		if cd.search_for[1] then
+			local must_have = {}
+			if cd.must_have.checked then
+				for i, result in ipairs(find(cd.must_have.Component)) do 
+					must_have[result] = result
 				end
 			end
-		end
-		
-		for name, obj in pairs(new_collection) do --remove new objects that are children of other new objects
-			if not Collection[name] then
-				for nm2, obj2 in pairs(new_collection) do 
-					if obj.name and obj2.name and is_child_of(obj.xform, obj2.xform) then 
-						new_collection[name] = nil
+			local new_collection = merge_tables({}, Collection)
+			merged = cd.search_enemies and search("^[ep][ml]%d%d%d%d$", cd.case_sensitive, true) or {}
+			if cd.enable_component_search then
+				for i, component_name in ipairs(cd.search_for) do
+					if sdk.find_type_definition(component_name) then
+						merged = merge_tables(merged, find(component_name, 1))
+					end
+				end
+			else
+				merged = merge_tables(merged, must_have)
+			end
+			if cd.enable_include_search then 
+				for j, included_name in ipairs(cd.included) do 
+					if included_name ~= "[New]" then
+						merged = merge_tables({}, search(included_name, cd.case_sensitive, true))
 					end
 				end
 			end
+			for xform, result_xf in pairs(merged) do 
+				if not cd.must_have.checked or must_have[result_xf] then
+					local name, is_excluded = result_xf:call("get_GameObject"):call("get_Name")
+					if cd.enable_exclude_search then 
+						for j, excluded_name in ipairs(cd.excluded) do 
+							if excluded_name ~= "[New]" and name:find(excluded_name) then
+								is_excluded = true
+							end
+						end
+					end
+					new_collection[name] = not is_excluded and (held_transforms[result_xf] or GameObject:new{xform=result_xf}) or nil
+				end
+			end
+			for name, obj in pairs(new_collection) do --remove new objects that are children of other new objects
+				if not Collection[name] then
+					for nm2, obj2 in pairs(new_collection) do 
+						if obj.name and obj2.name and is_child_of(obj.xform, obj2.xform) then 
+							new_collection[name] = nil
+						end
+					end
+				end
+			end
+			Collection = merge_tables(Collection, new_collection)
+			dump_collection = true
 		end
-		
-		Collection = merge_tables(Collection, new_collection)
+	end
+	
+	imgui.same_line()
+	if imgui.button("Re-Scan All") then 
+		Collection = merge_tables(Collection, jsonify_table(json.load_file("EMV_Engine\\Collection.json") or {}, true))
 		dump_collection = true
 	end
+	
+	imgui.same_line()
+	if imgui.tree_node("Search Settings...") then
+		imgui.text("	")
+		imgui.same_line()
+		imgui.begin_rect()
+			if imgui.button("Reset to Default Terms") then
+				cd = deep_copy(default_SettingsCache.Collection_data)
+			end
+			changed, cd.must_have.checked = imgui.checkbox("Must Have:", cd.must_have.checked)
+			if cd.must_have.checked then 
+				local temp = cd.must_have.Component
+				if (editable_table_field("Component", cd.must_have.Component, cd.must_have)==1) and not sdk.find_type_definition(cd.must_have.Component) then
+					cd.must_have.Component = temp --change the value back to what it was if the input is not a type def
+				end
+			else
+				imgui.new_line()
+			end
+			cd.search_for = cd.search_for or {}
+			if imgui.button("+") and (not cd.search_for[1] or sdk.find_type_definition(cd.search_for[#cd.search_for])) then 
+				table.insert(cd.search_for, "[New]")
+			end
+			imgui.same_line()
+			imgui.push_id(0)
+				changed, cd.enable_component_search = imgui.checkbox("", cd.enable_component_search)
+			imgui.pop_id()
+			imgui.same_line()
+			imgui.text("Search for Components:")
+			if cd.enable_component_search then
+				for i, component_name in ipairs(cd.search_for or {}) do 
+					if component_name:gsub(" ", "") == "" then
+						table.remove(cd.search_for, i)
+						break
+					else
+						imgui.text("	")
+						imgui.same_line()
+						if editable_table_field(i, component_name, cd.search_for)==1 and not sdk.find_type_definition(cd.search_for[i]) then
+							cd.search_for[i] = component_name
+						end
+					end
+				end
+			end
+			for j = 1, 2 do
+				imgui.push_id(j)
+					local tbl_name = ({"excluded", "included"})[j]
+					local bool_name = ({"enable_exclude_search", "enable_include_search"})[j]
+					cd[tbl_name] = cd[tbl_name] or {}
+					if imgui.button("+") and cd[tbl_name][ #cd[tbl_name] ] ~= "[New]" then 
+						table.insert(cd[tbl_name], "[New]")
+					end
+					imgui.same_line()
+					changed, cd[bool_name] = imgui.checkbox("", cd[bool_name])
+					imgui.same_line()
+					imgui.text((j == 1 and "Exclude" or "Include") .. " from Names:")
+					if cd[bool_name] then
+						for i, term in ipairs(cd[tbl_name] or {}) do 
+							if term:gsub(" ", "") == "" then
+								table.remove(cd[tbl_name], i)
+								break
+							else
+								imgui.text("	")
+								imgui.same_line()
+								editable_table_field(i, term, cd[tbl_name])
+							end
+						end
+					end
+				imgui.pop_id()
+			end
+			changed, cd.search_enemies = imgui.checkbox("Find 'emXXXX' or 'plXXXX' names", cd.search_enemies)
+			changed, cd.case_sensitive = imgui.checkbox("Case Sensitive Names Search", cd.case_sensitive)
+			
+		imgui.end_rect(2)
+		imgui.tree_pop()
+	end
+	SettingsCache.Collection_data = cd
 	
 	local existing_objs, missing_objs = {}, {}
 	for name, obj in orderedPairs(Collection) do
 		if obj.xform then 
-			table.insert(existing_objs, obj)
+			table.insert(existing_objs, name)
 		else
-			table.insert(missing_objs, obj)
+			table.insert(missing_objs, name)
 		end
 	end
 	
 	for j = 1, 2 do 
-		for i, obj in ipairs(j==1 and existing_objs or missing_objs) do 
-			local name = obj.name or obj.__gameobj_name
+		for i, coll_name in ipairs(j==1 and existing_objs or missing_objs) do 
+			local obj = Collection[coll_name]
+			name = obj.name or obj.__gameobj_name
 			imgui.text("	")
 			imgui.same_line()
 			if obj.xform and obj.xform:read_qword(0x10) ~= 0 then
 				obj.object_json = obj.object_json or jsonify_table({obj}, false, {convert_lua_objs=true})[1]
 				imgui.push_id(name .. "X")
 					if imgui.button("X") then 
-						Collection[name] = nil 
+						Collection[coll_name] = nil 
 						dump_collection = true
 					end
 				imgui.pop_id()
 				imgui.same_line()
 				if imgui.tree_node(name) then 
-					imgui_anim_object_viewer(obj)
+					imgui.text("	    ")
+					imgui.same_line()
+					imgui.begin_rect()
+						imgui_anim_object_viewer(obj)
+					imgui.end_rect(2)
 					imgui.tree_pop()
 				end
-			else
+			elseif name then
 				if obj.name then
-					Collection[name] = obj.object_json
+					Collection[coll_name] = obj.object_json
 					clear_object(obj.xform)
-				else--if imgui.tree_node(name) then 
+				else
 					imgui.push_id(name .. "X")
 						if imgui.button("Scan") then 
 							file = json.load_file("EMV_Engine\\Collection.json")
-							if file[name] then
-								Collection[name] = jsonify_table(file[name], true)
+							if file and file[coll_name] then
+								Collection[coll_name] = jsonify_table(file[coll_name], true)
 							end
 						end
 					imgui.pop_id()
 					imgui.same_line()
 					imgui.text(name)
 				end
+			else
+				Collection[coll_name] = nil
 			end
 		end
 	end
@@ -6993,7 +7186,8 @@ GameObject = {
 		
 		local function clear_joint(joint)
 			old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
-			deferred_calls[joint] = nil
+			deferred_calls[joint] = {}
+			table.insert(deferred_calls[joint], {func=joint[poser.prop_name].set:get_name(), args=joint[poser.prop_name].value_org}) --reset
 			joint[poser.prop_name].freeze = nil
 		end
 		
@@ -7182,27 +7376,30 @@ GameObject = {
 
 		if not closest_to_mouse[1] and poser.selected then 
 			closest_to_mouse = poser.selected
-		elseif check_key_released(via.hid.KeyboardKey.Shift, 0.0) then 
+		elseif check_key_released(via.hid.KeyboardKey.Shift, 0.0) and not poser.is_changing_gizmo then 
 			closest_to_mouse = poser.last_closest_to_mouse
 		else
 			poser.last_closest_to_mouse = closest_to_mouse
 		end
 		
+		poser.is_changing_gizmo = nil
 		if poser.use_gizmos and (closest_to_mouse[1]) then 
 			
 			local joint = closest_to_mouse[1]
 			local mat = Matrix4x4f.identity()
 			for i = 0, 3 do  mat[i] = closest_to_mouse[3][i] end
-			
+			--imgui.text(mat4_to_string(mat))
 			changed, mat = draw.gizmo(joint:get_address(), mat, (poser.is_pos and imgui.ImGuizmoOperation.TRANSLATE) or imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
+			--imgui.text(mat4_to_string(mat))
 			if poser.is_local and poser.is_pos then 
-				mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][3])
+			--	mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][3])
 			end             
 			
 			if changed then 
 				deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.is_pos and (mat[3]:to_vec3()) or mat:to_quat():to_euler(), vardata=joint[poser.prop_name]} --joint:call("get_BaseLocalPosition")*2 - 
 				joint[poser.prop_name].freeze = 1
 				prop_changed = joint
+				poser.is_changing_gizmo = true
 			end
 			draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
 			draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
@@ -7329,7 +7526,7 @@ GameObject = {
 		end
 		
 		self.gameobj:write_byte(0x13, bool_to_number[self.display])	--draw
-		if not is_child and not isDMC5 and self.parent_obj then 
+		if not is_child and not isDMC and self.parent_obj then 
 			local tmp = not not self.parent_obj.xform:call("get_SameJointsConstraint")
 			self.parent_obj.same_joints_constraint = tmp
 			self.parent_obj.xform:call("set_SameJointsConstraint", not tmp) --refreshes
@@ -7468,9 +7665,9 @@ GameObject = {
 					obj.joint_positions = obj.joint_positions or {}
 					for i, joint in pairs(obj.joints) do 
 						if do_local then 
-							--obj.joint_positions[joint] = joint:call("get_LocalMatrix")
-							--obj.joint_positions[joint][3] = joint:call("get_Position"):to_vec4()
-							obj.joint_positions[joint] = joint:call("get_WorldMatrix")
+							obj.joint_positions[joint] = joint:call("get_LocalMatrix")
+							obj.joint_positions[joint][3] = joint:call("get_WorldMatrix")[3]--:to_vec4()
+							--obj.joint_positions[joint] = joint:call("get_WorldMatrix")
 						else
 							obj.joint_positions[joint] = joint:call("get_WorldMatrix")
 						end
@@ -7523,7 +7720,7 @@ static_funcs.init_resources = init_resources
 static_funcs.loaded_json = false
 
 --Load other settings, enums, misc tables:
-local default_SettingsCache = deep_copy(SettingsCache)
+default_SettingsCache = deep_copy(SettingsCache)
 local function init_settings()
 	
 	local try, new_cache = pcall(json.load_file, "EMV_Engine\\SettingsCache.json")
@@ -7852,6 +8049,10 @@ re.on_draw_ui(function()
 						hk_tbl = Hotkey:new(hk_tbl, hk_tbl)
 						Hotkeys[key_name] = hk_tbl
 					end
+					if not hk_tbl then 
+						Hotkey.used[key_name] = nil
+						goto continue
+					end
 					if not hk_tbl.gameobj_name or hk_tbl.gameobj_name ~= last_name then 
 						imgui.spacing()
 						last_name = hk_tbl.gameobj_name
@@ -7867,6 +8068,7 @@ re.on_draw_ui(function()
 							imgui.tree_pop()
 						end
 					imgui.pop_id()
+					::continue::
 				end
 			end
 			imgui.tree_pop()

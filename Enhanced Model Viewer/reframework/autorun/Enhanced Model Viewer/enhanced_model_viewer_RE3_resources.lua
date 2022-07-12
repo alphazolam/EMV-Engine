@@ -19,7 +19,7 @@ re.on_application_entry("BeginRendering", function()
 		global_motbanks = global_motbanks or {}
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
-		
+		EMVSettings.init_EMVSettings()
 		local all_motbanks = {}
 		if true then 
 			table.insert(all_motbanks, "escape/character/enemy/em0000/animation/bank/em0000.motbank")
