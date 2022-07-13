@@ -202,26 +202,7 @@ local get_anim_object = EMV.get_anim_object
 local clear_object = EMV.clear_object
 local create_gameobj = EMV.create_gameobj
 
---[[local function clear_object(xform)
-	EMV.clear_object(xform)
-	lights[xform] = nil
-	non_lights[xform] = nil
-	lightsets[xform] = nil
-end]]
-
 function clear_figures()
-	--[[if figure_mode then
-		for key, light in pairs(merge_tables(lightsets, lights)) do --clean up reparented lights
-			if light.xform then --is_valid_obj(light.xform) then
-				if (light.parent_org == nil) or is_valid_obj(light.parent_org) then
-					light.gameobj:add_ref()
-					light.xform:call("set_Parent", light.parent_org or 0)
-				elseif light.parent == camera.xform then 
-					deferred_calls[light.gameobj] = { func="destroy", args={light.gameobj} } --leftovers from "Unlock All Lights"
-				end
-			end
-		end
-	end]]
 	paused = true
 	total_objects, lightsets, lights, imgui_others, imgui_anims = {}, {}, {}, {}, {}, {} --clear all
 	do_move_light_set, do_unlock_all_lights = false
@@ -317,7 +298,7 @@ local function find_matching_mot(orig_object, tested_object, frame_count, orig_n
 		return table.unpack(matches[random_range(1, #matches)])
 	end
 end
---[[
+
 local function convert_mot_ids(cached_bank, mlist_idx, mot_idx)
 	mlist_idx = mlist_idx or 1
 	mot_idx = mot_idx or 1
@@ -340,7 +321,7 @@ local function convert_mot_ids(cached_bank, mlist_idx, mot_idx)
 		mot_idx = random_range(1, #cached_bank.motion_names[ mlist_idx ])
 	end
 	return mlist_idx or 1, mot_idx or 1
-end]]
+end
 
 local function draw_world_xform(object) 
 	shown_transforms[object.xform or object] = object
@@ -562,7 +543,7 @@ function get_motion_names_w_frames(cached_bank)
 end
 
 GameObject.new_AnimObject = function(self, args, o)
-	
+	args = args or {}
 	o = o or {}
 	--self = (args.xform and touched_gameobjects[args.xform] and merge_tables(touched_gameobjects[args.xform], o, true)) or GameObject:new(args, o)
 	--self =  GameObject:new(args, o)
@@ -865,7 +846,7 @@ GameObject.new_AnimObject = function(self, args, o)
 	if self.total_objects_idx and total_objects[self.total_objects_idx] and self.xform == total_objects[self.total_objects_idx].xform then 
 		total_objects[self.total_objects_idx] = self
 	end
-	
+	self.is_AnimObject = true
 	return self
 end
 
@@ -1000,9 +981,6 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 								--if self.name == "pl1000" then log.info("C") end
 								self.mlist_idx = mlist_idx_new
 								self.mot_idx = mot_idx_new
-								--if self.name == "pl1000" then
-								--	testy = {mlist_idx_new, mot_idx_new, motlist_name, mot_name, tics, mbank, motion_node, self, self.layer:call("get_HighestWeightMotionNode")}
-								--end
 							end
 						end
 					end
@@ -1274,17 +1252,17 @@ end
 GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync, interp_frames) --sync is started in here automatically, only when a mot change is done manually
 	if not self.cached_banks then return end
 	local cached_bank = self.cached_banks[self.mbank_idx] --self:customize_cached_bank(global_cached_banks[ self.motbank_names[self.mbank_idx] ])
-	--mlist_idx, mot_idx = convert_mot_ids(cached_bank, mlist_idx or self.mlist_idx, mot_idx or self.mot_idx)
-	self.mlist_idx, self.mot_idx = mlist_idx, mot_idx
+	mlist_idx, mot_idx = convert_mot_ids(cached_bank, mlist_idx or self.mlist_idx, mot_idx or self.mot_idx)
+	self.mlist_idx, self.mot_idx = mlist_idx or 1, mot_idx or 1
 	
 	if (figure_mode or forced_mode) and self.motion and not self.changed_bank and self.mots_ids then
 		
 		log.info("CM: Setting " .. self.name .. " motion to idxes " .. tostring(self.mbank_idx) .. " " .. tostring(self.mlist_idx) .. " " .. tostring(self.mot_idx))
 		
 		interp_frames = interp_frames or 10
-		--if not (self.mots_ids[mlist_idx] and self.mots_ids[mlist_idx][mot_idx] and self.mots_ids[mlist_idx][mot_idx][2]) then 
-		--	mlist_idx, mot_idx = convert_mot_ids(cached_bank, -1, -1)
-		--end
+		if not (self.mots_ids[mlist_idx] and self.mots_ids[mlist_idx][mot_idx] and self.mots_ids[mlist_idx][mot_idx][2]) then 
+			mlist_idx, mot_idx = convert_mot_ids(cached_bank, -1, -1)
+		end
 		
 		if cached_bank and cached_bank.mots_ids[mlist_idx] and cached_bank.mots_ids[mlist_idx][mot_idx] then
 			self.motion:call("set_TargetBankType(System.UInt32)",  cached_bank.mots_ids[mlist_idx][mot_idx][3])
@@ -1612,9 +1590,9 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 			if forced_mode and player and (self.xform == player.xform) and self.mfsm2 then 
 				self.mfsm2:call("set_PuppetMode", true)
 			end
-			--if mlist_idx or mot_idx then 
-			--	self.mlist_idx, self.mot_idx = convert_mot_ids(global_cached_banks[self.motbank_names[mbank_idx]], mlist_idx, mot_idx)
-			--end
+			if mlist_idx or mot_idx then 
+				self.mlist_idx, self.mot_idx = convert_mot_ids(global_cached_banks[self.motbank_names[mbank_idx]], mlist_idx, mot_idx)
+			end
 			self.mbank_idx = find_index(self.motbank_names, motbank_name) or mbank_idx
 			if static_funcs.setup_mbank_method then 
 				self:change_motion(self.mlist_idx, self.mot_idx)--, true) --thanks to setupMotionBank(), it can change immediately
@@ -1629,6 +1607,9 @@ end
 GameObject.pre_cache_all_banks = function(self) 
 	log.info("Precache all banks: " .. self.name)
 	if not RN.motbank_resource_names then return end
+	--if not self.motion then 
+	--	self = GameObject:new_AnimObject({xform=self.xform}, self)
+	--end
 	if self.finished_pre_cache then --Once finished
 		self.finished_pre_cache, pre_cached_banks = nil
 		EMVCache.global_cached_banks = global_cached_banks
@@ -2787,6 +2768,10 @@ re.on_frame(function()
 	toks = math.floor(uptime * 100)
 	EMVSetting_was_changed = nil
 	
+	if tics == 1 then 
+		EMVSettings.init_EMVSettings()
+	end
+	
 	--[[
 	results = {}; 
 	for i, result in ipairs(search("event")) do 
@@ -2888,7 +2873,7 @@ re.on_frame(function()
 		return
 	end
 	
-	if not RSCache.motbank_resources then 
+	if figure_mode and not RSCache.motbank_resources then 
 		imgui.text("Enhanced Model Viewer: No resources found!")
 		return
 	end
@@ -2897,14 +2882,14 @@ re.on_frame(function()
 	--Load + cache motions and build list of motion data:
 	if pre_cached_banks and RN.motbank_resource_names and RN.motbank_resource_names[3]  then
 		local dummy_obj = get_anim_object(scene:call("findGameObject(System.String)", "dummy_AnimLoaderBody"), {body_part="Body"}) or create_gameobj( "dummy_AnimLoaderBody", {"via.motion.Motion"})
-		if dummy_obj and not dummy_obj.xform then 
-			local motion = lua_find_component(dummy_obj, "via.motion.Motion")
+		if dummy_obj and not dummy_obj.motion then 
+			local motion = lua_find_component(dummy_obj.gameobj, "via.motion.Motion")
 			if motion then 
 				local new_layer = motion and sdk.create_instance("via.motion.TreeLayer")
 				if new_layer and new_layer:add_ref() and new_layer:call(".ctor") then
 					motion:call("setLayerCount", 1)
 					motion:call("setLayer", 0, new_layer)
-					dummy_obj = New_AnimObject({gameobj=dummy_obj, body_part="Body"})
+					dummy_obj = New_AnimObject({xform=dummy_obj.xform, body_part="Body"})
 				end
 			end
 		end
@@ -3090,7 +3075,6 @@ re.on_frame(function()
 		imgui_others = {}
 		lights = {}
 		non_lights = {}
-		
 		temp_anims, temp_others, unique_names = {}, {}, {}
 		for i, anim_object in ipairs(total_objects) do
 			anim_object.total_objects_idx = i
@@ -3100,6 +3084,11 @@ re.on_frame(function()
 				name = idx and (name:sub(1, idx-1) .. "_" .. name:sub(idx, -1)) or (name .. "_")
 			end
 			unique_names[name] = true
+			
+			if not anim_object.is_AnimObject then 
+				anim_object = New_AnimObject({xform=anim_object.xform}, anim_object)
+			end
+			
 			if anim_object.layer and (anim_object.body_part ~= "Hair") then --or anim_object == re2_figure_container_obj then 
 			--if (anim_object.layer and (anim_object.body_part ~= "Hair")) or (figure_mode and (num_anims == 0) and anim_object.mesh and (tics - figure_start_time > 100)) then --or anim_object == re2_figure_container_obj then 
 				temp_anims[name] = anim_object
@@ -3561,36 +3550,38 @@ re.on_frame(function()
 								
 								local target_obj = selected --re2_figure_container_obj or selected
 								local pos_obj = target_obj.cog_joint or target_obj.xform
-								local pos = pos_obj:call("get_Position")-- target_obj.last_cog_pos
+								local pos = is_valid_obj(pos_obj) and pos_obj:call("get_Position")-- target_obj.last_cog_pos
 								--if not pos then 
 									--pos = pos_obj:call("get_Position")
 									--pos.y = pos.y + 0.75
 									--draw_world_pos(pos)
 								--end
-								local def_call = {} --RE3 must be done here and now, other games must be done as deferred calls...
-								local p = light_obj.xform:call("get_Parent")
-								
-								if light_obj.pressed_move_button then
-									if isRE3 then
-										light_obj:set_transform(({mat4_to_trs(camera.xform:call("get_WorldMatrix"))}))
-									else
-										light_obj:set_transform(({mat4_to_trs(camera.xform:call("get_WorldMatrix"))}), true)
-									end
-									light_obj:toggle_display()
-									light_obj.pressed_move_button = nil
-								elseif follow_figure then
-									if isRE3 then
-										if light_obj.lightset then  
-											light_obj.lightset.xform:call("set_Position", target_obj.cog_joint and (pos - pos_obj:call("get_BaseLocalPosition")) or pos)
+								if pos then 
+									local def_call = {} --RE3 must be done here and now, other games must be done as deferred calls...
+									local p = light_obj.xform:call("get_Parent")
+									
+									if light_obj.pressed_move_button then
+										if isRE3 then
+											light_obj:set_transform(({mat4_to_trs(camera.xform:call("get_WorldMatrix"))}))
+										else
+											light_obj:set_transform(({mat4_to_trs(camera.xform:call("get_WorldMatrix"))}), true)
+										end
+										light_obj:toggle_display()
+										light_obj.pressed_move_button = nil
+									elseif follow_figure then
+										if isRE3 then
+											if light_obj.lightset then  
+												light_obj.lightset.xform:call("set_Position", target_obj.cog_joint and (pos - pos_obj:call("get_BaseLocalPosition")) or pos)
+											end
 										end
 									end
-								end
-								
-								if isRE3 then
-									light_obj.xform:call("lookAt(via.vec3, via.vec3)", pos, Vector3f.new(0,1,0))
-								else
-									deferred_calls[light_obj.xform] = deferred_calls[light_obj.xform] or {}
-									table.insert(deferred_calls[light_obj.xform], { func="lookAt(via.vec3, via.vec3)", args={pos, Vector3f.new(0,1,0)} } )
+									
+									if isRE3 then
+										light_obj.xform:call("lookAt(via.vec3, via.vec3)", pos, Vector3f.new(0,1,0))
+									else
+										deferred_calls[light_obj.xform] = deferred_calls[light_obj.xform] or {}
+										table.insert(deferred_calls[light_obj.xform], { func="lookAt(via.vec3, via.vec3)", args={pos, Vector3f.new(0,1,0)} } )
+									end
 								end
 							end	
 							

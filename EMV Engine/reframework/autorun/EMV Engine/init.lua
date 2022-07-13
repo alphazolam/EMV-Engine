@@ -66,7 +66,6 @@ SettingsCache = {
 	}
 }
 
-
 --tmp:call("trigger", )
 
 --Local copies for performance --------------------------------------------------------------------------------------------------------------
@@ -81,12 +80,12 @@ local changed, was_changed, try, out, value
 local game_name = reframework.get_game_name()
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
 local msg_ids = {}
-local saved_mats = {} --Collection of auto-applied altered material settings for GameObjects (by name)
+saved_mats = {files=fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]]), names_map={}, names_indexed={}} --Collection of auto-applied altered material settings for GameObjects (by name)
 local created_resources = {}
 local chain_bone_names = {}
 local CachedActions = {}
 local CachedGlobals  = {}
-Hotkeys = {}
+local Hotkeys = {}
 local re3_keys = {}		
 local cached_chain_settings = {}
 local cached_chain_settings_names = {}
@@ -193,7 +192,7 @@ local BHVT
 local Hotkey
 local MoveSequencer
 local read_imgui_element
-local show_imgui_mat
+local show_imgui_mats
 local get_mgd_obj_name
 local create_REMgdObj
 local add_to_REMgdObj
@@ -624,7 +623,7 @@ end
 --Sort a list transforms by distance to a position:
 local function sort(tbl, position, optional_max_dist, only_important)
 	
-	position = position or static_objs.cam:call("get_WorldMatrix")[3]
+	position = position or last_camera_matrix[3] --static_objs.cam:call("get_WorldMatrix")[3]
 	if not tbl or type(tbl) == "string" then 
 		tbl = search(tbl)
 	end
@@ -1166,6 +1165,14 @@ local function read_mat4(managed_object, offset, is_known_managed_object)
 	end
 end
 
+--Convert matrix4 to Translation, Rotation and Scale
+local function mat4_to_trs(mat4)
+	local pos = mat4[3]
+	local rot = mat4:to_quat()
+	local scale = mat4_scale(mat4)
+	return pos, rot, scale
+end
+
 --Manually write a matrix4, or not manually if no offset is provided
 local function write_mat4(managed_object, mat4, offset, is_known_valid)
 	is_known_valid = is_known_valid or tostring(managed_object):find("ValueType")
@@ -1186,25 +1193,19 @@ end
 
 --Convert Translation, Rotation and Scale to matrix4
 local function trs_to_mat4(translation, rotation, scale)
-	if not translation or not rotation or not scale then return Matrix4x4f.new() end
+	if type(translation)=="table" then 
+		translation, rotation, scale = table.unpack(translation)
+	end
 	local scale_mat = Matrix4x4f.new(
-		Vector4f.new(scale.x,	 0, 		0, 		 0),
-		Vector4f.new(0, 		 scale.y, 	0, 		 0),
-		Vector4f.new(0, 		 0, 		scale.z, 0),
-		Vector4f.new(0, 		 0, 		0, 		 1)
+		Vector4f.new(scale.x or 1, 0, 0, 0),
+		Vector4f.new(0, scale.y or 1, 0, 0),
+		Vector4f.new(0, 0, scale.z or 1, 0),
+		Vector4f.new(0, 0, 0, 1)
 	)
-	local new_mat = rotation:to_mat4() 
+	local new_mat = rotation:to_mat4() or Matrix4x4f.identity()
 	new_mat = new_mat * scale_mat
-	new_mat[3] = translation
+	new_mat[3] = translation or new_mat[3]
 	return new_mat
-end
-
---Convert matrix4 to Translation, Rotation and Scale
-local function mat4_to_trs(mat4)
-	local pos = mat4[3]
-	local rot = mat4:to_quat()
-	local scale = mat4_scale(mat4)
-	return pos, rot, scale
 end
 
 --Get Translation, Rotation and Scale from an GameObject or GameObject
@@ -1604,7 +1605,7 @@ Hotkey = {
 			--re.msg_safe("pressed " .. self.key_name .. " " .. logv(json), 556546)
 			if json and (not is_valid_obj(self.obj)) then --and ((self.obj.get_type_definition and not self.obj:get_type_definition():is_a("via.Component")) or not is_obj_or_vt(self.obj)) then
 				self.obj = jsonify_table(json, true) --there is no way to know when a non-component is an orphan, so it must be searched for and found in the scene every single keypress
-				self.dfcall.obj = sdk.is_valid_object(self.obj) and self.obj or nil
+				self.dfcall.obj = sdk.is_managed_object(self.obj) and self.obj or nil
 			end
 			if self.dfcall.args then 
 				for i, arg in ipairs(self.dfcall.args) do 
@@ -2498,7 +2499,7 @@ end
 
 --Get a component from a gameobject (less error prone)
 lua_find_component = function(gameobj, component_name, do_use_pcall)
-	if sdk.find_type_definition(component_name) then
+	if gameobj and sdk.find_type_definition(component_name) then
 		if do_use_pcall then 
 			local try, out = pcall(sdk.call_object_func, gameobj, "getComponent(System.Type)", sdk.typeof(component_name))
 			return try and out
@@ -2696,9 +2697,6 @@ local function searchf(search_term)
 	return results
 end
 
---Gun = create_gameobj("Gun", {"via.render.Mesh", "via.motion.Motion"}, {mesh="character/it/it02/008/it02_008_handgun_houndwolf02.mesh", mdf="character/it/it02/008/it02_008_handgun_houndwolf02.mdf2", parent="ch09_3000", parent_joint="R_Wep"})
---Sword = create_gameobj("Sword", {"via.render.Mesh"}, {mesh="character/it/it01/012/it01_012_blade_longsword.mesh", parent_joint="R_Wep", rot=Quaternion.new(0,0,0.681639,0.731689)})
-
 --Creates a new named GameObject+transform and gives it components from a list of component names:
 local function create_gameobj(name, component_names, args)
 	if not name then return end
@@ -2717,7 +2715,13 @@ local function create_gameobj(name, component_names, args)
 	local new_gameobj = folder and static_funcs.mk_gameobj_w_fld(nil, name, folder) or static_funcs.mk_gameobj(nil, name)
 	if new_gameobj and new_gameobj:add_ref() and new_gameobj:call(".ctor") then
 		local xform = new_gameobj:call("get_Transform")
-		write_mat4(xform, worldmatrix)
+		if worldmatrix then 
+			local t, r, s = mat4_to_trs(worldmatrix or {})
+			xform:call("set_Position", t)
+			xform:call("set_Rotation", r)
+			xform:call("set_Scale", s)
+		end
+		--write_mat4(xform, worldmatrix)
 		if component_names then 
 			for i, name in ipairs(component_names) do 
 				local td = sdk.find_type_definition(name)
@@ -2740,13 +2744,11 @@ local function create_gameobj(name, component_names, args)
 						end
 					end
 					if name == "via.motion.Motion" then 
-						new_component:call("setLayerCount", 1)
-						--[[local layer = sdk.create_instance("via.motion.TreeLayer"):add_ref()
-						if layer then
-							layer:call(".ctor()")
-							
-							new_component:call("setLayer", 0, layer)
-						end]]
+						local new_layer = sdk.create_instance("via.motion.TreeLayer")
+						if new_layer and new_layer:add_ref() and new_layer:call(".ctor") then
+							new_component:call("setLayerCount", 1)
+							new_component:call("setLayer", 0, new_layer)
+						end
 					end
 				end
 			end
@@ -3818,6 +3820,9 @@ local VarData = {
 			o.is_obj = (not o.is_lua_type and (not o.is_vt and sdk.is_managed_object(example))) or nil
 			o.array_count = o.is_obj and example:call("get_Count")
 			o.item_type = o.array_count and evaluate_array_typedef_name(example:get_type_definition())
+			if o.item_type and o.item_type:get_full_name() == "System.Object" then 
+				o.item_type = nil
+			end
 			if o.is_obj then 
 				example:add_ref()
 			end
@@ -4601,7 +4606,7 @@ local function offer_show_world_pos(value, name, key_name, obj, field_or_method)
 end
 
 --Displays a vector2, 3 or 4 with editable fields in imgui:
-local function show_imgui_vec4(value, name, is_int, increment)
+local function show_imgui_vec4(value, name, is_int, increment, normalize)
 	if not value then return end
 	local changed = false
 	local increment = increment or 0.1
@@ -4611,9 +4616,9 @@ local function show_imgui_vec4(value, name, is_int, increment)
 				changed, value = imgui.color_edit4(name, value, 17301504)
 			else
 				changed, value = imgui.drag_float4(name, value, increment, -10000.0, 10000.0)
-				--if changed and (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
-					--value:normalize() 
-				--end
+				if changed and normalize then -- (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
+					value:normalize() 
+				end
 			end
 		elseif value.z then
 			if is_int then
@@ -5481,7 +5486,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 			
 			if is_xform then
 				--huge fukn thing mostly to get/set parents:
-				held_transforms[m_obj] = held_transforms[m_obj] or o_tbl.go or GameObject:new_AnimObject{xform=m_obj}
+				held_transforms[m_obj] = held_transforms[m_obj] or o_tbl.go or GameObject:new{xform=m_obj}
 				local anim_object = o_tbl.go
 				if anim_object and anim_object.xform then 
 					
@@ -5498,6 +5503,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					
 					if EMVSettings and not figure_mode and not cutscene_mode and not anim_object.same_joints_constraint 
 					and anim_object.layer and not anim_object.total_objects_idx and not imgui.same_line() and imgui.button(forced_mode and "Add to Animation Viewer" or "Enable Animation Viewer") then
+						anim_object = GameObject:new_AnimObject({xform=m_obj}, anim_object)
 						total_objects = total_objects or {}
 						if not forced_mode then
 							forced_mode = GameObject:new{xform=o_tbl.xform}
@@ -5749,7 +5755,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					end
 					--[[
 					if anim_object and anim_object.materials and anim_object.materials[1] and imgui.tree_node_ptr_id(anim_object.materials[1].mesh:get_address() - 1235, "Materials") then
-						show_imgui_mat(anim_object) 
+						show_imgui_mats(anim_object) 
 						imgui.tree_pop()
 					end
 					
@@ -5759,7 +5765,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 				
 			elseif o_tbl.name == "Mesh" then
 				if o_tbl.go and o_tbl.go.materials and imgui.tree_node_ptr_id(o_tbl.go.mesh:get_address() - 1234, "Materials") then
-					show_imgui_mat(o_tbl.go) 
+					show_imgui_mats(o_tbl.go) 
 					imgui.tree_pop()
 				end
 			elseif o_tbl.name == "Chain" then
@@ -5964,10 +5970,10 @@ local Material = {
 		o = o or {}
 		self.__index = self
 		o.id = args.id
-		o.on = args.on or false
 		o.anim_object = args.anim_object
 		o.anim_object.update_materials = true
 		o.mesh = args.mesh or o.anim_object.mesh
+		o.on = true
 		o.name = args.name or o.mesh:call("getMaterialName", o.id)
 		o.flags = args.flags or {}
 		o.variable_names = args.variable_names or {}
@@ -5979,39 +5985,40 @@ local Material = {
 		o.multi = {}
 		o.tex_num = o.mesh:call("getMaterialTextureNum", o.id)
 		o.textures = args.textures or {}
+		o.saved_variables = saved_mats[o.anim_object.name_w_parent] and saved_mats[o.anim_object.name_w_parent].m[o.anim_object.mesh_name] 
+			and saved_mats[o.anim_object.name_w_parent].m[o.anim_object.mesh_name][o.name] or {texs={},vars={},toggled=self.on}
 		
 		if o.name then 
-			o.on = o.mesh:call("getMaterialsEnable", o.id) or true
+			--o.on = o.mesh:call("getMaterialsEnable", o.id) --this method doesnt exist. Why is there no method to get if a mat is enabled (but there is to set)?
 			o.var_num = o.mesh:call("getMaterialVariableNum", o.id)
-			if SettingsCache.remember_materials and saved_mats[o.anim_object.name] and saved_mats[o.anim_object.name][o.anim_object.mesh_name] then
-				saved_mats[o.anim_object.name][o.anim_object.mesh_name][o.name] = saved_mats[o.anim_object.name][o.anim_object.mesh_name][o.name] or {}
+			if o.tex_num > 0 and not o.textures[1] then 
+				o.tex_idxes = {}
+				for i=1, o.tex_num do
+					local texture = o.mesh:call("getMaterialTexture", o.id, i-1)
+					if not texture then 
+						o.tex_num = i-1
+						break 
+					end
+					add_resource_to_cache(texture:add_ref())
+					table.insert(o.textures, texture)
+				end
+				--if o.saved_variables then
+				--	o.saved_variables.texs = o.textures
+				--end
 			end
-			local saved_variables = args.saved_variables or (SettingsCache.remember_materials and saved_mats[o.anim_object.name] and saved_mats[o.anim_object.name][o.anim_object.mesh_name] and saved_mats[o.anim_object.name][o.anim_object.mesh_name])
 			for i=1, o.var_num do
 				var_name = o.mesh:call("getMaterialVariableName", o.id, i-1)
 				table.insert(o.variable_names, var_name)
 				o.var_names_dict[var_name] = i
 				local type_of = o.mesh:call("getMaterialVariableType", o.id, i-1)
 				table.insert(o.variable_types, type_of)
-				local saved_variable = saved_variables and saved_variables[o.name][i]
-				if not SettingsCache.remember_materials or (args.do_change_defaults or (not saved_variable or (type_of == 4 and type(saved_variable) == "number"))) then
-					if type_of == 1 then 
-						table.insert(o.variables, o.mesh:call("getMaterialFloat", o.id, i-1))
-					elseif type_of == 4 then 
-						table.insert(o.variables, o.mesh:call("getMaterialFloat4", o.id, i-1))
-					else
-						table.insert(o.variables, o.mesh:call("getMaterialBool", o.id, i-1))
-					end
-					if SettingsCache.remember_materials and saved_mats[o.anim_object.name] and saved_mats[o.anim_object.name][o.anim_object.mesh_name] then 
-						saved_mats[o.anim_object.name][o.anim_object.mesh_name][o.name][i] = o.variables[i]
-					end
+				--local saved_variable = o.saved_variables and o.saved_variables.vars[i]
+				if type_of == 1 then 
+					table.insert(o.variables, o.mesh:call("getMaterialFloat", o.id, i-1))
+				elseif type_of == 4 then 
+					table.insert(o.variables, o.mesh:call("getMaterialFloat4", o.id, i-1))
 				else
-					if type_of == 4 then
-						table.insert(o.variables, Vector4f.new(saved_variable.x, saved_variable.y, saved_variable.z, saved_variable.w))
-					else
-						table.insert(o.variables, saved_variable)
-					end
-					table.insert(o.deferred_vars, i)
+					table.insert(o.variables, o.mesh:call("getMaterialBool", o.id, i-1))
 				end
 			end
 			for i, var in ipairs(o.variables) do 
@@ -6020,7 +6027,6 @@ local Material = {
 				else
 					table.insert(o.orig_vars, var)
 				end
-				
 			end
 		end
         return setmetatable(o, self)
@@ -6156,33 +6162,38 @@ local Material = {
 	end,
 	
 	--Draw the whole material menu in imgui
-	draw_imgui = function(self)
+	draw_imgui_mat = function(self)
 		imgui.push_id(self.name)
 			changed, self.on = imgui.checkbox("", self.on)
 			if changed then
 				self.mesh:call("setMaterialsEnable", self.id, self.on)
 			end
 			imgui.same_line()
-			if imgui.tree_node_str_id(self.name, self.name) then
+			if imgui.tree_node(self.name) then
+				if imgui.tree_node("[Lua]") then 
+					read_imgui_element(self)
+					imgui.tree_pop()
+				end
 				if self.textures[1] and imgui.tree_node("Textures") then
 					self.tex_idxes = self.tex_idxes or {}
 					for t, texture in ipairs(self.textures) do 
 						local tex_path
 						self.tex_idxes[t], tex_path = add_resource_to_cache(texture)
-						--texture = RSCache.tex_resources[tex_path]
-						--if type(texture)=="userdata" then
-							local tex_name = texture:call("ToString()"):match("^.+%[@?(.+)%]")
-							local mat_name = self.mesh:call("getMaterialTextureName", self.id, t-1) or t
-							--local mat_name = ({pcall(self.mesh.call, self.mesh, "getMaterialTextureName", self.id, t-1)})
-							--mat_name = mat_name[1] and mat_name[2] or t
-							changed, self.tex_idxes[t] = imgui.combo((mat_name or t), self.tex_idxes[t], RN.tex_resource_names) --self.tex_idxes[t] or find_index(RN.tex_resource_names, tex_name) or 1
-							if changed then 
-								local mat_var_idx = self.mesh:call("getMaterialVariableIndex", self.id, hashing_method(mat_name)) 
-								add_resource_to_cache(RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ])
-								deferred_calls[self.mesh] = { func="setMaterialTexture", args={self.id, (mat_var_idx ~= 255) and mat_var_idx or t-1, RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ] } }
-								self.textures[t] = RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ]
+						local tex_name = texture:call("ToString()"):match("^.+%[@?(.+)%]")
+						local mat_name = self.mesh:call("getMaterialTextureName", self.id, t-1) or t
+						--local mat_name = ({pcall(self.mesh.call, self.mesh, "getMaterialTextureName", self.id, t-1)})
+						--mat_name = mat_name[1] and mat_name[2] or t
+						changed, self.tex_idxes[t] = imgui.combo((mat_name or t), self.tex_idxes[t], RN.tex_resource_names) --self.tex_idxes[t] or find_index(RN.tex_resource_names, tex_name) or 1
+						if changed then 
+							local mat_var_idx = self.mesh:call("getMaterialVariableIndex", self.id, hashing_method(mat_name)) 
+							add_resource_to_cache(RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ])
+							deferred_calls[self.mesh] = { func="setMaterialTexture", args={self.id, (mat_var_idx ~= 255) and mat_var_idx or t-1, RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ] } }
+							self.textures[t] = RSCache.tex_resources[ RN.tex_resource_names[ self.tex_idxes[t] ] ]
+							
+							if SettingsCache.remember_materials and self.saved_variables then
+								self.saved_variables.texs[t] = self.textures[t]
 							end
-						--end
+						end
 					end
 					imgui.tree_pop()
 				end
@@ -6196,13 +6207,85 @@ local Material = {
 		imgui.pop_id()
 	end,
 	
+	load_all_mats_from_json = function(self)
+		local new_saved_mats = {files={}, names_map={}, names_indexed={}}
+		local files = fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]])
+		for i, path in ipairs(files) do
+			local loaded_json_tbl = json.load_file(path) or {}
+			if next(loaded_json_tbl) then
+				local name = path:match("^.+\\(.+)%.")
+				table.insert(new_saved_mats.files, path)
+				table.insert(new_saved_mats.names_indexed, name)
+				new_saved_mats.names_map[name] = #new_saved_mats.files
+				new_saved_mats[name] = jsonify_table(loaded_json_tbl, true)
+			end
+		end
+		return new_saved_mats
+	end,
+	
+	load_json_material = function(self)
+		if SettingsCache.remember_materials then
+			saved_mats[self.anim_object.name_w_parent] = saved_mats[self.anim_object.name_w_parent] or {m={}, mesh=self.anim_object.mpaths.mesh_path, mdf=self.anim_object.mpaths.mdf2_path, active=true}
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name] = saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name] or {}
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name] = saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name] or {texs={}, vars={}, toggled=self.on}
+			self.saved_variables = saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name]
+			local sv_container = saved_mats[self.anim_object.name_w_parent]
+			if sv_container.active and self.saved_variables then 
+				local new_def_call = deferred_calls[self.mesh] or {}
+				self.variables = {}
+				self.deferred_vars = {}
+				for i=1, self.var_num do
+					local saved_variable = self.saved_variables.vars[i]
+					if saved_variable then
+						local type_of = self.mesh:call("getMaterialVariableType", self.id, i-1)
+						local var_name = self.mesh:call("getMaterialVariableName", self.id, i-1)
+						if type_of == 4 then
+							table.insert(self.variables, Vector4f.new(saved_variable.x, saved_variable.y, saved_variable.z, saved_variable.w))
+						else
+							table.insert(self.variables, saved_variable)
+						end
+						table.insert(self.deferred_vars, i)
+					end
+				end
+				if next(self.saved_variables.texs or {}) then
+					for i=1, self.tex_num do 
+						local tex_typename = self.mesh:call("getMaterialTextureName", self.id, i-1)
+						if (self.textures[i]:call("ToString()"):lower() ~= self.saved_variables.texs[i]:call("ToString()"):lower()) then  --self.saved_variables.texs[i] and self.textures[i] and 
+							local mat_var_idx = self.mesh:call("getMaterialVariableIndex", self.id, hashing_method(tex_typename)) 
+							table.insert(new_def_call, { func="setMaterialTexture", args={self.id, (mat_var_idx ~= 255) and mat_var_idx or i-1, self.saved_variables.texs[i] } } )
+							self.textures[i] = self.saved_variables.texs[i]
+						end
+					end
+				end
+				if self.saved_variables.toggled ~= nil then 
+					self.on = self.saved_variables.toggled
+					self.mesh:call("setMaterialsEnable", self.id, self.on)
+				end
+				deferred_calls[self.mesh] = new_def_call[1] and new_def_call
+			end
+			--saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name] = self.saved_variables
+		end
+	end,
+	
+	save_json_material = function(self)
+		if SettingsCache.remember_materials then 
+			saved_mats[self.anim_object.name_w_parent] = saved_mats[self.anim_object.name_w_parent] or {m={}, mesh=self.anim_object.mpaths.mesh_path, mdf=self.anim_object.mpaths.mdf2_path}
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name] = saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name] or {}
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name] = saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name] or {texs={}, vars={}, toggled=self.on}
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name].vars = self.variables
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name].texs = self.textures
+			saved_mats[self.anim_object.name_w_parent].m[self.anim_object.mesh_name][self.name].toggled = self.on
+			saved_mats[self.anim_object.name_w_parent].active = true
+		end
+	end,
+	
 	update = function(self)
 		if self.var_num then 
 			for v=1, self.var_num do
 				self.mesh:call("get" .. mat_types[self.variable_types[v]], self.id, v-1)
 			end
 		end
-		if self.tex_num > 0 and not self.textures[1] then 
+		--[[if self.tex_num > 0 and not self.textures[1] then 
 			self.tex_idxes = {}
 			for i=1, self.tex_num do
 				local texture = self.mesh:call("getMaterialTexture", self.id, i-1)
@@ -6213,12 +6296,32 @@ local Material = {
 				add_resource_to_cache(texture:add_ref())
 				table.insert(self.textures, texture)
 			end
-		end
+			if self.saved_variables then
+				self.saved_variables.texs = self.textures
+			end
+		end]]
 	end,
 }
 
+--Resets saved material settings:
+local function reset_material_settings(object)	
+	if object.mesh_name and saved_mats[object.name_w_parent] then
+		saved_mats[object.name_w_parent].active = false
+		if saved_mats[object.name_w_parent] and saved_mats[object.name_w_parent].m[object.mesh_name] then 
+			saved_mats[object.name_w_parent].m[object.mesh_name] = nil 
+			json.dump_file("EMV_Engine\\Saved_Materials\\" .. object.name_w_parent .. ".json", {})
+		end
+		if SettingsCache.affect_children and object.children then 
+			for i, child in ipairs(object.children) do
+				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
+				reset_material_settings(held_transforms[child])
+			end
+		end
+	end
+end
+
 --Displays one full material from the Material class in imgui:
-show_imgui_mat = function(anim_object)
+show_imgui_mats = function(anim_object)
 	
 	if anim_object.pairing and (not anim_object.mesh or not anim_object.mesh:call("getMesh")) then
 		anim_object = anim_object.pairing
@@ -6227,17 +6330,65 @@ show_imgui_mat = function(anim_object)
 	if SettingsCache.remember_materials then
 		imgui.begin_rect()
 			if imgui.button("Save New Defaults") then 
-				for xform, obj in pairs(anim_object.shared_material_objects) do
-					saved_mats[obj.name] = saved_mats[obj.name] or {}
-					saved_mats[obj.name][obj.mesh_name] = saved_mats[obj.name][obj.mesh_name] or {} --enable material saving
-					obj:set_materials(true) 
+				for i, mat in ipairs(anim_object.materials) do
+					mat:save_json_material()
 				end
-				EMVSettings.saved_mats = jsonify_table(saved_mats)
-				json.dump_file("EnhancedModelViewer\\EMVSettings.json", jsonify_table(EMVSettings))
+				json.dump_file("EMV_Engine\\Saved_Materials\\" .. anim_object.name_w_parent .. ".json", jsonify_table(saved_mats[anim_object.name_w_parent]))
 			end
 		imgui.end_rect(3)
-		if saved_mats[anim_object.name] and not imgui.same_line() and imgui.button(next(saved_mats[anim_object.name]) and "Clear New Defaults" or "[Cleared]") then 
+		if anim_object.mesh_name and saved_mats[anim_object.name_w_parent] and not imgui.same_line() and imgui.button(next(saved_mats[anim_object.name_w_parent].m) and "Clear New Defaults" or "[Cleared]") then 
 			reset_material_settings(anim_object)
+			saved_mats = Material.load_all_mats_from_json()
+		end
+		if saved_mats[anim_object.name_w_parent] then 
+			imgui.same_line()
+			changed, saved_mats[anim_object.name_w_parent].swap_mesh = imgui.checkbox("Load Swapped Mesh", saved_mats[anim_object.name_w_parent].swap_mesh)
+			anim_object.mat_data = anim_object.mat_data or {}
+			if changed or not anim_object.mat_data.swappables then 
+				local current_file =  json.load_file(saved_mats.files[ saved_mats.names_map[anim_object.name_w_parent] ])
+				if current_file then 
+					current_file.swap_mesh = saved_mats[anim_object.name_w_parent].swap_mesh
+					json.dump_file("EMV_Engine\\Saved_Materials\\" .. anim_object.name_w_parent .. ".json", current_file)
+					anim_object.mat_data.swappables = {}
+					anim_object.mat_data.current_swap_name = saved_mats[anim_object.name_w_parent].mesh
+					for mesh_path, sub_tbl in orderedPairs(current_file.m) do 
+						table.insert(anim_object.mat_data.swappables, mesh_path)
+					end
+				end
+			end
+			if imgui.button("Load") then
+				local tmp = saved_mats[anim_object.name_w_parent].swap_mesh
+				saved_mats = Material.load_all_mats_from_json()
+				saved_mats[anim_object.name_w_parent].swap_mesh = tmp
+				if not anim_object:load_json_mesh() then
+					anim_object:set_materials()
+				end
+				for i, mat in ipairs(anim_object.materials) do
+					mat:load_json_material()
+				end
+				anim_object.materials = nil
+				anim_object:set_materials()
+			end
+			if saved_mats[anim_object.name_w_parent].swap_mesh and not imgui.same_line() then
+				anim_object.mat_data.swap_idx = anim_object.mat_data.swap_idx or find_index(anim_object.mat_data.swappables, anim_object.mat_data.current_swap_name)
+				changed, anim_object.mat_data.swap_idx = imgui.combo("Mesh Swap", anim_object.mat_data.swap_idx, anim_object.mat_data.swappables)
+				if changed then 
+					local current_file =  json.load_file(saved_mats.files[ saved_mats.names_map[anim_object.name_w_parent] ])
+					current_file.mesh = anim_object.mat_data.swappables[ anim_object.mat_data.swap_idx ]
+					local new_mdf = (RSCache.mesh_resources[current_file.mesh:lower()] and RSCache.mesh_resources[current_file.mesh:lower()][2])
+					current_file.mdf = new_mdf and new_mdf:call("ToString()"):match("^.+%[@?(.+)%]") or current_file.mdf
+					json.dump_file("EMV_Engine\\Saved_Materials\\" .. anim_object.name_w_parent .. ".json", current_file)
+				end
+			end
+			--[[anim_object.mat_data.file_idx = find_index(saved_mats.names_indexed, anim_object.name_w_parent)
+			if anim_object.mat_data.file_idx then 
+				changed, anim_object.mat_data.file_idx = imgui.combo("Select File", anim_object.mat_data.file_idx, saved_mats.names_indexed)
+				if changed then 
+					anim_object.mat_data = {}
+				end
+			end]]
+			--imgui.same_line()
+
 		end
 	end
 	
@@ -6249,7 +6400,10 @@ show_imgui_mat = function(anim_object)
 				add_resource_to_cache(RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ][1], RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ][2])
 			end
 			local msh_tbl = RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ]
+			local old_parent = anim_object.parent
+			anim_object:set_parent(0)
 			anim_object.mesh:call("setMesh", msh_tbl[1])
+			if old_parent then anim_object:set_parent(anim_object.parent) end
 			if RSCache.mesh_resources[ RN.mesh_resource_names[ anim_object.current_mesh_idx] ][2] then 
 				anim_object.mesh:call("set_Material", msh_tbl[2])
 				anim_object.mpaths.mdf2_path = msh_tbl[2] and msh_tbl[2].call and msh_tbl[2]:call("ToString()"):match("^.+%[@?(.+)%]")
@@ -6268,32 +6422,19 @@ show_imgui_mat = function(anim_object)
 	end
 	
 	for i, mat in ipairs(anim_object.materials) do
-		mat:draw_imgui()
-	end
-end
-
---Resets saved material settings:
-local function reset_material_settings(object)	
-	if object.mesh_name then 
-		if saved_mats[object.name] and saved_mats[object.name][object.mesh_name] then saved_mats[object.name][object.mesh_name] = {} end
-		if SettingsCache.affect_children and object.children then 
-			for i, child in ipairs(object.children) do
-				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
-				reset_material_settings(held_transforms[child])
-			end
-		end
+		mat:draw_imgui_mat()
 	end
 end
 
 --Function to manage saved materials:
-local function imgui_saved_materials_menu() 
+--[[local function imgui_saved_materials_menu() 
 	local idx = 0
 	if imgui.button("Clear Saved Materials") then 
 		_G.saved_mats = {}
 	end
 	for key, sub_tbl in orderedPairs(_G.saved_mats) do
 		idx = idx + 1
-		local xform, obj = next(sub_tbl._objects or {})
+		local xform, obj = next(sub_tbl.__objects or {})
 		if obj then 
 			if imgui.tree_node_str_id(key .. idx, key) then 
 				obj.materials.open = 2
@@ -6307,7 +6448,7 @@ local function imgui_saved_materials_menu()
 			imgui.tree_pop()
 		end
 	end
-end
+end]]
 
 --Handler for full GameObject/GameObject/GameObject type classes:
 local function imgui_anim_object_viewer(anim_object, obj_name, index)
@@ -6379,7 +6520,7 @@ local function imgui_anim_object_viewer(anim_object, obj_name, index)
 	--end
 	
 	if anim_object.materials and imgui.tree_node_ptr_id(anim_object.mesh, "Materials") then
-		show_imgui_mat(anim_object) 
+		show_imgui_mats(anim_object) 
 		imgui.tree_pop()
 	end
 end
@@ -6400,6 +6541,10 @@ local function handle_obj(managed_object, title)
 	else
 		imgui.managed_object_control_panel(managed_object, title)
 	end
+end
+
+local function show_imgui_create_gameobj()
+	changed, data_holder.cached_text = imgui.input_text("Add " .. data_holder.ext, data_holder.cached_text)
 end
 
 --Displays the "Collection" menu in imgui
@@ -6432,6 +6577,9 @@ local function show_collection()
 			end
 			local new_collection = merge_tables({}, Collection)
 			merged = cd.search_enemies and search("^[ep][ml]%d%d%d%d$", cd.case_sensitive, true) or {}
+			if isRE8 and cd.search_enemies then 
+				merged = merge_tables(merged,  search("^ch%d%d_%d%d%d%d$", cd.case_sensitive, true) or {})
+			end
 			if cd.enable_component_search then
 				for i, component_name in ipairs(cd.search_for) do
 					if sdk.find_type_definition(component_name) then
@@ -6565,12 +6713,12 @@ local function show_collection()
 				imgui.pop_id()
 			end
 			changed, cd.search_enemies = imgui.checkbox("Find 'emXXXX' or 'plXXXX' names", cd.search_enemies)
-			changed, cd.case_sensitive = imgui.checkbox("Case Sensitive Names Search", cd.case_sensitive)
+			changed, cd.case_sensitive = imgui.checkbox("Case-sensitive names search", cd.case_sensitive)
 			
 		imgui.end_rect(2)
 		imgui.tree_pop()
 	end
-	SettingsCache.Collection_data = cd
+	
 	
 	local existing_objs, missing_objs = {}, {}
 	for name, obj in orderedPairs(Collection) do
@@ -6591,6 +6739,11 @@ local function show_collection()
 				obj.object_json = obj.object_json or jsonify_table({obj}, false, {convert_lua_objs=true})[1]
 				imgui.push_id(name .. "X")
 					if imgui.button("X") then 
+						Collection[coll_name] = nil 
+						dump_collection = true
+					end
+					if obj.created and not imgui.same_line() and imgui.button("D") then 
+						deferred_calls[obj.gameobj] = { func="destroy", args=obj.gameobj }
 						Collection[coll_name] = nil 
 						dump_collection = true
 					end
@@ -6628,9 +6781,114 @@ local function show_collection()
 			
 		end
 	end
+	
+	imgui.new_line()
+	if imgui.button("Create GameObject Menu") then
+		cd.g_menu_open = not cd.g_menu_open
+	end
+	
+	if cd.g_menu_open then 
+		imgui.begin_rect()
+		imgui.push_id(-1)
+			cd.new_args = cd.new_args or {}
+			cd.new_components = cd.new_components or {"via.render.Mesh", "via.motion.Motion"}
+			changed, cd.new_g_name = imgui.input_text("Name", cd.new_g_name or "NewObject")
+			changed, cd.new_g_parent_name = imgui.input_text("Parent Name", cd.new_g_parent_name or "selected")
+			local try, loaded_parent = pcall(load("return " .. cd.new_g_parent_name))
+			loaded_parent = try and loaded_parent and ((sdk.is_managed_object(loaded_parent) or (can_index(loaded_parent) and loaded_parent.set_parent)) and loaded_parent) or nil
+			cd.new_args.parent = (loaded_parent and loaded_parent.xform) or loaded_parent
+			local gameobj_parent = (cd.new_g_parent_name and scene:call("findGameObject(System.String)", cd.new_g_parent_name))
+			cd.new_args.parent = cd.new_args.parent or gameobj_parent and gameobj_parent:call("get_Transform")
+			local parent_joint
+			cd.new_args.worldmatrix = cd.new_args.worldmatrix or (last_impact_pos and last_impact_pos:length()>1 and last_impact_pos) or last_camera_matrix or Matrix4x4f.new()
+			if tostring(cd.new_args.parent):find("RETransform%*") then 
+				changed, cd.new_args.parent_joint = imgui.input_text("Attach to Parent Joint", cd.new_args.parent_joint)
+				parent_joint = cd.new_args.parent:call("getJointByName", cd.new_args.parent_joint)
+				if parent_joint then 
+					cd.has_parent_joint = true
+					local wm = parent_joint:call("get_WorldMatrix")
+					cd.new_args.rot = cd.new_args.worldmatrix:to_quat():to_euler()--cd.new_args.rot or Vector3f.new(0,0,1.5)
+					cd.new_args.worldmatrix[3] = wm[3]
+					imgui.begin_rect()
+						changed, cd.new_args.rot  = imgui.drag_float3("Parent Joint Rotation", cd.new_args.rot, 0.01, -360.0, 360.0) --show_imgui_vec4(cd.new_args.rot or Vector3f.new(0,0,1.5), "Parent Joint Rotation", nil, 0.01, true)
+					imgui.end_rect(2)
+				else
+					cd.has_parent_joint = nil
+				end
+			end
+			
+			changed, cd.new_args.worldmatrix = draw.gizmo(1234567890, cd.new_args.worldmatrix, parent_joint and imgui.ImGuizmoOperation.ROTATE, parent_joint and imgui.ImGuizmoMode.LOCAL)
+			
+			if imgui.button("+") and (not cd.new_components[1] or sdk.find_type_definition(cd.new_components[#cd.new_components])) then 
+				table.insert(cd.new_components, "[New]")
+			end
+			
+			imgui.same_line()
+			imgui.text("Components:")
+			for i, component_name in ipairs(cd.new_components) do 
+				if component_name:gsub(" ", "") == "" then
+					table.remove(cd.new_components, i)
+					break
+				else
+					imgui.text("	")
+					imgui.same_line()
+					if editable_table_field(i, component_name, cd.new_components)==1 and not sdk.find_type_definition(cd.new_components[i]) then
+						cd.new_components[i] = component_name
+					end
+					if component_name == "via.render.Mesh" then 
+						imgui.text("	  *")
+						imgui.same_line()
+						imgui.begin_rect()
+							local tmp = cd.new_args.mesh
+							if RN.mesh_resource_names then
+								changed, cd.current_mesh_idx = imgui.combo("Select Mesh", cd.current_mesh_idx or find_index(RN.mesh_resource_names, cd.new_args.mesh or "") or 1, RN.mesh_resource_names)
+								if changed then 
+									cd.new_args.mesh = RN.mesh_resource_names[cd.current_mesh_idx]
+									local mdf = RSCache.mesh_resources and RSCache.mesh_resources[RN.mesh_resource_names[cd.current_mesh_idx]]
+									cd.new_args.mdf = (mdf and mdf[2] and mdf[2]:call("ToString()"):match("^.+%[@?(.+)%]")) or cd.new_args.mdf
+								end
+							end
+							if editable_table_field("mesh", (cd.new_args.mesh or (RN.mesh_resource_names and RN.mesh_resource_names[cd.current_mesh_idx]) or ""), cd.new_args, "Mesh")==1 and not cd.new_args.mesh:find("%.mesh$") then 
+								cd.new_args.mesh = "" 
+							end
+							if editable_table_field("mdf", (cd.new_args.mdf or ""), cd.new_args, "Material (MDF)")==1 
+							and not cd.new_args.mdf:find("%.mdf2$")  then 
+								cd.new_args.mdf = "" 
+							end
+						imgui.end_rect(2)
+					end
+				end
+			end
+			if name ~= "" and not imgui.text("	") and not imgui.same_line() and imgui.button("Create!") then
+				local copy_args = deep_copy(cd.new_args)
+				copy_args.parent = copy_args.parent and (copy_args.parent:get_type_definition():is_a("via.GameObject") and copy_args.parent:call("get_Transform")) or copy_args.parent
+				copy_args.rot = cd.has_parent_joint and copy_args.worldmatrix:to_quat()
+				copy_args.worldmatrix = not cd.has_parent_joint and copy_args.worldmatrix
+				copy_args.created = true
+				local out = create_gameobj(cd.new_g_name, cd.new_components, copy_args)
+				if figure_mode then 
+					table.insert(total_objects, out)
+				end
+			end
+			--Gun = create_gameobj("Gun", {"via.render.Mesh", "via.motion.Motion"}, {mesh="character/it/it02/008/it02_008_handgun_houndwolf02.mesh", mdf="character/it/it02/008/it02_008_handgun_houndwolf02.mdf2", parent="ch09_3000", parent_joint="R_Wep"})
+			--Sword = create_gameobj("Sword", {"via.render.Mesh"}, {mesh="character/it/it01/012/it01_012_blade_longsword.mesh", parent_joint="R_Wep", rot=Quaternion.new(0,0,0.681639,0.731689)})
+			--Sword = create_gameobj("Sword", {"via.render.Mesh"}, {mesh="Character/Weapon/wp01_000/wp01_000.mesh", parent="pl0100_ev01", parent_joint="L_WeaponHand", rot=Quaternion.new(0,0,0.681639,0.731689)})			
+			imgui.same_line()
+			if SettingsCache.Collection_data and imgui.tree_node("[args]") then
+				read_imgui_element(SettingsCache.Collection_data.new_args, nil, true)
+				imgui.tree_pop()
+			end
+		imgui.end_rect(2)
+		imgui.pop_id()
+	elseif cd.new_args then
+		cd.new_args.worldmatrix = nil
+		cd.new_args.rot = nil
+	end
+	
 	if dump_collection then 
 		json.dump_file("EMV_Engine\\Collection.json",  jsonify_table(Collection, false, {convert_lua_objs=true}))
 	end
+	SettingsCache.Collection_data = cd
 end
 
 local BHVTAction = {
@@ -7155,7 +7413,7 @@ GameObject = {
 				o.mesh_name_short = o.mesh_name_short:lower()
 				GameObject.set_materials(o) 
 			end
-			o.mesh_name = o.mesh_name or ""
+			o.mesh_name = (o.mesh_name and o.mesh_name:lower()) or ""
 		end
 		o.key_name = get_gameobj_path(o.gameobj)
 		o.key_hash = o.key_name and hashing_method(o.key_name)
@@ -7166,7 +7424,7 @@ GameObject = {
 				for i, part in ipairs(split(possible_name, "/")) do 
 					local sub_tbl = split(part, "_")
 					for j, sub_part in ipairs(sub_tbl or {}) do
-						if sub_part:find("[ep][ml]%d%d")==1 and #sub_tbl > 1 and sub_tbl[#sub_tbl] ~= "ev" then
+						if sub_part:find("[ep][ml]%d%d")==1 and #sub_tbl > 1 and not sub_tbl[#sub_tbl]:find("%.") and not (sub_tbl[#sub_tbl]:find("ev")==1) then --and sub_tbl[#sub_tbl]~="ev" and sub_tbl[#sub_tbl]~="ev01"
 							o.char_name = sub_tbl[#sub_tbl]
 							goto exit
 						end
@@ -7505,8 +7763,10 @@ GameObject = {
 				goto goback
 			elseif joint then
 				joint[poser.prop_name].freeze = 1
-				deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
-				poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
+				if poser.undo[joint] and poser.undo[joint].prev_rot then
+					deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
+					poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
+				end
 				if not poser.undo[joint].prev_rot[1] then
 					clear_joint(joint)
 				end
@@ -7514,19 +7774,52 @@ GameObject = {
 		end
 	end,
 	
-	reset_physics = function(self)
-		if self.physicscloth then self.physicscloth:call("restart") end
-		if self.chain then self.chain:call("restart") end
+	load_json_mesh = function(self)
+		saved_mats[self.name_w_parent] = saved_mats[self.name_w_parent] or {m={}, mesh=self.mpaths.mesh_path, mdf=self.mpaths.mdf2_path, active=true, swap_mesh=false}
+		local sv_container = saved_mats[self.name_w_parent]
+		if sv_container.active then 
+			if sv_container.swap_mesh then
+				if self.mpaths.mesh_path ~= sv_container.mesh then 
+					local rs = create_resource(sv_container.mesh, "via.render.MeshResource")
+					if rs then
+						self.mpaths.mesh_path = sv_container.mesh
+						local old_parent = self.parent
+						if old_parent then 
+							self:set_parent(0)
+						end
+						self.mesh:call("setMesh", rs)
+						if old_parent then 
+							deferred_calls[self.xform] = {lua_object=self, method=self.set_parent, args={old_parent}}
+						end
+					end
+				end
+				if self.mpaths.mdf2_path ~= sv_container.mdf then 
+					local rs = create_resource(sv_container.mdf, "via.render.MeshMaterialResource")
+					if rs then
+						self.mpaths.mdf2_path = sv_container.mdf
+						self.mesh:call("set_Material", rs)
+					end
+					self:set_materials()
+					return true
+				end
+			end
+		end
 	end,
 	
-	set_materials = function(self, do_change_defaults, args)
-		local mesh = args and args.mesh or self.mesh
+	reset_physics = function(self)
+		if self.components_named.physicscloth then self.components_named.physicscloth:call("restart") end
+		if self.components_named.chain then self.components_named.chain:call("restart") end
+	end,
+	
+	set_materials = function(self, do_change_defaults, args) --use this with "do_change_defaults" to save all materials current settings to JSON
+		args = args or {}
+		local mesh = args.mesh or self.mesh
+		args.on = self.on
 		local materials_count = mesh and mesh:call("get_MaterialNum") or 0
 		if materials_count == 0 then return end
 		self.materials = {}
-		--saved_mats[self.mesh_name] = saved_mats[self.mesh_name] or {}
-		if SettingsCache.remember_materials and saved_mats[self.name] then
-			saved_mats[self.name].active = saved_mats[self.name].active or do_change_defaults
+		if SettingsCache.remember_materials and saved_mats[self.name_w_parent] then
+			saved_mats[self.name_w_parent].active = saved_mats[self.name_w_parent].active or do_change_defaults
 		end
 		for i=1, materials_count do 
 			local new_args = {anim_object=self, id=i-1, do_change_defaults=do_change_defaults}
@@ -7544,14 +7837,14 @@ GameObject = {
 	end,
 	
 	set_name_w_parent = function(self, parent)
-		self.name_w_parent = self.name
+		self.name_w_parent = self.name:match("^(.+) %(") or self.name
 		local tmp_xform = parent or self.xform:call("get_Parent")
 		while tmp_xform do
 			local parent_gameobj = tmp_xform:call("get_GameObject")
 			if figure_mode and not lua_find_component(parent_gameobj, "via.motion.Motion") then
 				break
 			end
-			self.name_w_parent = tmp_xform:call("get_GameObject"):call("get_Name") .. " -> " .. self.name_w_parent
+			self.name_w_parent = tmp_xform:call("get_GameObject"):call("get_Name") .. "." .. self.name_w_parent
 			tmp_xform = tmp_xform:call("get_Parent")
 		end
 		return self.name_w_parent
@@ -7632,10 +7925,10 @@ GameObject = {
 				end
 			end
 		end
-		if changed and figure_mode and self.mesh_name_short then
+		--[[if changed and figure_mode and self.mesh_name_short then
 			EMVCache.custom_lists[self.mesh_name_short] = EMVCache.custom_lists[self.mesh_name_short] or {}
 			EMVCache.custom_lists[self.mesh_name_short].Display = self.display
-		end
+		end]]
 		self.toggled_display = self.display
 		--log.info("set " .. self.name .. " to " .. tostring(self.display) .. ", draw is " .. tostring(self.gameobj:call("get_Draw")) .. ", drawself is " .. tostring(self.gameobj:call("get_DrawSelf")))
 	end,
@@ -7765,7 +8058,7 @@ GameObject.update_AnimObject = GameObject.update
 --Load cache, and create list of names of them for imgui in RN[] -------------------------------------------------------------------------------
 local function init_resources()
 	if SettingsCache.load_json then
-		new_cache = json.load_file("EMV_Engine\\RSCache.json")
+		local new_cache = json.load_file("EMV_Engine\\RSCache.json")
 		if new_cache then 
 			new_cache = jsonify_table(new_cache, true, {dont_create_resources=true})
 			if new_cache then 
@@ -7774,10 +8067,10 @@ local function init_resources()
 						RSCache[key] = merge_tables(value, RSCache[key] or {}, true)
 					end
 				end
-				if SettingsCache.remember_materials and new_cache.saved_mats and next(new_cache.saved_mats) then 
-					saved_mats = new_cache.saved_mats
-				end
 			end
+		end
+		if SettingsCache.remember_materials then 
+			saved_mats = Material.load_all_mats_from_json()
 		end
 	end
 	for key, value in pairs(RSCache or {}) do
@@ -7831,7 +8124,6 @@ end
 
 local function dump_settings()
 	if SettingsCache.load_json then 
-		RSCache.saved_mats = saved_mats
 		json.dump_file("EMV_Engine\\RSCache.json", jsonify_table(RSCache))
 		json.dump_file("EMV_Engine\\SettingsCache.json", jsonify_table(SettingsCache))
 		json.dump_file("EMV_Engine\\CachedActions.json", jsonify_table(CachedActions))
@@ -7955,6 +8247,7 @@ re.on_frame(function()
 	
 	re.msgs_this_frame = 0
 	static_objs.cam = sdk.get_primary_camera()
+	last_camera_matrix = static_objs.cam and static_objs.cam:call("get_WorldMatrix") or last_camera_matrix
 	
 	tics = tics + 1
 	uptime = os.clock()
@@ -8016,57 +8309,57 @@ re.on_frame(function()
 	if saved_mats then --for managing saved material settings etc
 		local meshes
 		for name, args in pairs(saved_mats) do
-			if args.active then 
-				local gameobj = scene:call("findGameObject(System.String)", name)
+			if args.active then
+				local obj_name, parent_name = name
+				if name:find("%.") then 
+					parent_name = name:match("^(.-)%.")
+					obj_name = name:match("^.+%.(.-)$")
+				end
+				local gameobj = scene:call("findGameObject(System.String)", parent_name or obj_name)
 				if gameobj then 
-					if not saved_mats[name]._objects then --create the original objects list once by doing a full search:
+					local xform = gameobj:call("get_Transform")
+					--detect that one example of the object exists and then refresh the whole list if it's not already cached:
+					if not saved_mats[name].__objects or not saved_mats[name].__objects[xform] then 
 						local searchresults = scene and lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof("via.render.Mesh")))
-						saved_mats[name]._objects = searchresults and {}
 						for i, result in ipairs(searchresults or {}) do
-							local gameobj = result:call("get_GameObject")
-							if gameobj and gameobj:call("get_Name") == name then 
-								local mesh_name = result:call("getMesh")
-								mesh_name = mesh_name and mesh_name:call("ToString()")
-								if args[mesh_name] and is_valid_obj(gameobj) then 
-									local xform = gameobj:call("get_Transform")
-									saved_mats[name]._objects[xform] = saved_mats[name]._objects[xform] or GameObject:new{xform=xform}
-								end
-							end
-						end
-					else
-						local xform = gameobj:call("get_Transform")
-						if not saved_mats[name]._objects[xform] then --...or find+add any newcomers to the list one-by-one as they are spawned:
-							local via_render_mesh = lua_find_component(gameobj, "via.render.Mesh")
-							local mesh_name = via_render_mesh and via_render_mesh:call("getMesh")
-							mesh_name = mesh_name and mesh_name:call("ToString()"):match("^.+%[@?(.+)%]") or mesh_name
-							
-							if mesh_name and args[mesh_name] and not saved_mats[name]._objects[xform] then 
-								held_transforms[xform] = held_transforms[xform] or GameObject:new{ gameobj=gameobj, xform=xform }
-								saved_mats[name]._objects[xform] = held_transforms[xform]
-								meshes = lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof("via.render.Mesh"))) --refresh the whole list when the newest xform isnt known
-								for i, mesh in ipairs(meshes or {}) do 
-									local other_mesh_name = mesh:call("getMesh")
-									other_mesh_name = other_mesh_name and other_mesh_name:call("ToString()")
-									if other_mesh_name == held_transforms[xform].mesh_name then
-										local other_xform = mesh:call("get_GameObject"); other_xform = other_xform and other_xform:call("get_Transform")
-										if other_xform then
-											held_transforms[other_xform] = held_transforms[other_xform] or GameObject:new{ xform=other_xform }
-											saved_mats[name]._objects[other_xform] = held_transforms[other_xform]
+							local r_gameobj = result:call("get_GameObject")
+							if r_gameobj and (r_gameobj:call("get_Name") == (parent_name or obj_name)) then 
+								local r_xform = r_gameobj:call("get_Transform")
+								local to_search = parent_name and get_children(r_xform) or {r_xform}
+								for i, xf in ipairs(to_search) do
+									local mesh = (not parent_name and result) or lua_find_component(xf:call("get_GameObject"), "via.render.Mesh")
+									if mesh then
+										local mesh_name = mesh:call("getMesh")
+										mesh_name = mesh_name and mesh_name:call("ToString()"):match("^.+%[@?(.+)%]"):lower()
+										if (args.swap_mesh or (args.m[mesh_name] and (not args.mesh or (mesh_name==args.mesh)))) then
+											local go = held_transforms[xf] or GameObject:new_AnimObject{xform=xf}
+											if not go:load_json_mesh() then
+												go:set_materials()
+											end
+											for i, mat in ipairs(go.materials) do
+												mat:load_json_material()
+											end
+											saved_mats[name].__objects = saved_mats[name].__objects or {}
+											saved_mats[name].__objects[xf] = go
+										--else
 										end
 									end
 								end
 							end
 						end
+						--cache the first one even if it wasnt a match just to keep it from searching again:
+						saved_mats[name].__objects = saved_mats[name].__objects or {}
+						saved_mats[name].__objects[xform] = saved_mats[name].__objects[xform] or held_transforms[xform] or GameObject:new_AnimObject{xform=xform} 
 					end
 				end
-				if saved_mats[name]._objects then 
-					for xform, object in pairs(saved_mats[name]._objects) do 
+				if saved_mats[name].__objects then 
+					for xform, object in pairs(saved_mats[name].__objects) do 
 						if not is_valid_obj(object.xform) then 
-							saved_mats[name]._objects[object.xform] = nil
+							saved_mats[name].__objects[object.xform] = nil
 							clear_object(object.xform)
 						end
 					end
-					--if #saved_mats[name]._objects == 0 then saved_mats[name]._objects = nil end
+					if get_table_size(saved_mats[name].__objects) == 0 then saved_mats[name].__objects = nil end
 				end
 			end
 		end
@@ -8112,12 +8405,15 @@ re.on_draw_ui(function()
 			changed, SettingsCache.embed_mobj_control_panel = imgui.checkbox("Embed Into Object Explorer (Lua)", SettingsCache.embed_mobj_control_panel); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, SettingsCache.use_pcall = imgui.checkbox("Exception Handling", SettingsCache.use_pcall); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			if SettingsCache.remember_materials and next(saved_mats) and imgui.tree_node("Saved Material Settings") then
+				--if imgui.button("Clear") then 
+				--	saved_mats = {}
+				--end
 				read_imgui_element(saved_mats)
 				imgui.tree_pop()
 			end
 			imgui.tree_pop()
 		end
-		if next(Hotkey.used) and imgui.tree_node("Hotkeys") then 
+		if imgui.tree_node("Hotkeys") then 
 			if imgui.button("Clear Hotkeys") then 
 				Hotkeys, Hotkey.used = {}, {}
 				json.dump_file("EMV_Engine\\Hotkeys.json", Hotkey.used)
@@ -8153,7 +8449,7 @@ re.on_draw_ui(function()
 			end
 			imgui.tree_pop()
 		end
-		if next(old_deferred_calls) and imgui.tree_node("Deferred Method Calls") then
+		if imgui.tree_node("Deferred Method Calls") then
 			if imgui.button("Clear") then
 				old_deferred_calls = {}
 				deferred_calls = {}
@@ -8309,7 +8605,7 @@ EMV = {
 	imgui_saved_materials_menu = imgui_saved_materials_menu,
 	draw_material_variable = draw_material_variable,
 	change_multi = change_multi,
-	show_imgui_mat = show_imgui_mat,
+	show_imgui_mats = show_imgui_mats,
 	is_unique_name = is_unique_name,
 	is_unique_xform = is_unique_xform,
 	look_at = look_at,

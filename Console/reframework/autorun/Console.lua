@@ -455,7 +455,7 @@ local function dump_history()
 		local new_history_idx = {}
 		local used_cmds = {}
 		local diff = 0
-		for i, cmd in ipairs(reverse_table(History.history_idx)) do 
+		for i, cmd in ipairs(reverse_table(History.history_idx or {})) do 
 			local clean_cmd = cmd:gsub(" +$", "")
 			if not used_cmds[clean_cmd] then
 				used_cmds[clean_cmd] = true

@@ -88,6 +88,7 @@ GGSettings.prefer_rigid_bodies = (isRE2 or isRE3) and true
 GGSettings.wanted_layer = -1
 GGSettings.wanted_mask_bits = (isMHR and 10) or 2 --1?
 GGSettings.forced_funcs_data = {}
+GGSettings.load_type = {"via.render.Mesh", "via.render.Mesh"}
 
 local wants_rigid_bodies = false
 local loaded_EMV = false
@@ -117,7 +118,7 @@ local d_current_contact_points = 0
 local sort_closest_optional_limit
 local sort_closest_optional_max_distance
 
-local saved_xforms = {}
+saved_xforms = {}
 local saved_lights = {}
 local spawned_lights = {}
 local collected_objects = {}
@@ -529,6 +530,7 @@ GameObject.new_GrabObject = function(self, args, o)
 	if go and (self.xform == go.xform) then go = self end --update other vars
 	if grav_objs[1] and (self.xform == grav_objs[1].xform) then grav_objs[1] = self end
 	if last_grabbed_object and (self.xform == last_grabbed_object.xform) then last_grabbed_object = self end
+	self.is_GrabObject = true
 	
 	return self
 end
@@ -827,7 +829,7 @@ end
 local function reset_object(game_object, parent)
 	if not resetted_objects[game_object.xform] then 
 		if is_valid_obj(game_object.xform) then 
-			if parent or game_object.multiplier < 1.0 and (player == nil or player.xform ~= game_object.xform) then
+			if parent or (game_object.multiplier and game_object.multiplier < 1.0) and (player == nil or player.xform ~= game_object.xform) then
 				resetted_objects[game_object.xform] = game_object
 				active_objects[game_object.xform] = game_object
 				game_object.multiplier = 1.0
@@ -1708,15 +1710,13 @@ re.on_draw_ui(function()
 		
 		if jsonify_table then --save/load positions from a file, using the object's original position as its key
 			imgui.same_line()
-			if imgui.button("Save Transforms") then 
+			if imgui.button("Save Positions") then 
 				saved_xforms = {}
-				for xform, object in pairs(touched_gameobjects) do 
-					if object.components_named.Mesh and (object.init_worldmat ~= new_mat4) and not object.xform:call("getJointByName", "COG") and not object.xform:call("getJointByName", "Hip") then 
-						--local getmesh = object.components_named.Mesh:call("getMesh")
-						--if getmesh then 
+				local short_name = GGSettings.load_type[1]:match("^.+%.(.-)$")
+				for xform, object in pairs(held_transforms) do 
+					if object.components_named[short_name] and not object.xform:call("getJointByName", "COG") and not object.xform:call("getJointByName", "Hip") then --and (object.init_worldmat ~= new_mat4) 
 						if object.key_hash then
-							--local key = jsonify_table({object.init_worldmat})[1]
-							saved_xforms[object.key_hash] = { matrix=object.xform:call("get_WorldMatrix") } --mesh=getmesh:call("ToString()"),
+							saved_xforms[object.key_hash] = object.xform:call("get_WorldMatrix")
 						end
 					end
 				end
@@ -1724,26 +1724,34 @@ re.on_draw_ui(function()
 			end
 			
 			imgui.same_line()
-			if imgui.button("Load Transforms") then 
-				local meshes = find("via.render.Mesh")
+			if imgui.button("Load Positions") then 
+				items = find(GGSettings.load_type[2])
 				saved_xforms = jsonify_table(json.load_file("GravityGunAndConsole\\GGCSavedXforms.json") or {}, true)
-				for key_hash, sub_tbl in pairs(saved_xforms) do 
-					--local mat_key = jsonify_table({init_worldmat}, true)[1]
-					for i, mesh_xform in ipairs(meshes) do 
-						--local this_mesh_xform = (touched_gameobjects[mesh] and touched_gameobjects[mesh].init_worldmat) or mesh:call("get_WorldMatrix")
-						--if this_mesh_xform == mat_key then
-						local obj = touched_gameobjects[mesh_xform] --and touched_gameobjects[mesh_xform].init_worldmat
-						local obj_key_hash = (obj and obj.key_hash) or hashing_method(EMV.get_gameobj_path(mesh_xform:call("get_GameObject")))
-						if obj_key_hash == key_hash then
-							touched_gameobjects[mesh_xform] = touched_gameobjects[mesh_xform] or GameObject:new_GrabObject{xform=mesh_xform}
-							obj = touched_gameobjects[mesh_xform]
-							obj.packed_xform =  table.pack(mat4_to_trs(sub_tbl.matrix))
-							write_transform(obj, table.unpack(obj.packed_xform))
-							break
-						end
+				for i, xform in ipairs(items) do 
+					local obj = held_transforms[xform]
+					local obj_key_hash = (obj and obj.key_hash) or hashing_method(EMV.get_gameobj_path(xform:call("get_GameObject")))
+					
+					if saved_xforms[obj_key_hash] then
+						log.info(tostring(obj_key_hash) .. ", " .. tostring(saved_xforms[obj_key_hash]))
+						obj = held_transforms[xform] or GameObject:new_GrabObject{xform=xform}
+						obj.packed_xform =  table.pack(mat4_to_trs( saved_xforms[obj_key_hash] ))
+						--write_transform(obj, table.unpack(obj.packed_xform))
+						break
 					end
 				end
 			end
+			
+			if GGSettings.load_type[2] ~= GGSettings.load_type[1] then 
+				if imgui.button("Enter") then 
+					if sdk.find_type_definition(GGSettings.load_type[2]) then
+						GGSettings.load_type[1] = GGSettings.load_type[2]
+					else
+						GGSettings.load_type[2] = GGSettings.load_type[1]
+					end
+				end
+				imgui.same_line()
+			end
+			changed, GGSettings.load_type[2] = imgui.input_text("Load Transforms by Component", GGSettings.load_type[2])
 		end
 		
 		imgui.text("Hotkeys:\n[F] - Scale Objects with Mouse Wheel\n[R] - Force Move Physics Objects without Physics\n[Z] - Reset Object to Original\n[Alt] - Unlock Rotation\n[V] - Toggle between Physics/Normal mode")
