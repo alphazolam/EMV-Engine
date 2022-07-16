@@ -572,8 +572,8 @@ GameObject.new_AnimObject = function(self, args, o)
 	self.motion = args.motion or self.components_named.Motion or self.motion
 	self.layer = args.layer or (self.motion and self.motion:call("getLayer", 0)) or self.layer
 	self.materials = args.materials or self.materials
-	self.force_center = args.force_center or (figure_mode and not not (self.body_part == "Body" or self.name:find("base")))
-	self.packed_init_transform = args.packed_init_transform or self.xform:call("get_WorldMatrix")
+	self.force_center = args.force_center or o.force_center or (figure_mode and not not (self.body_part == "Body" or self.name:find("base")))
+	self.init_worldmat = args.init_worldmat or self.xform:call("get_WorldMatrix")
 	self.alt_names = args.alt_names
 	self.excluded_names = args.excluded_names 
 	self.physicscloth = self.components_named.PhysicsCloth
@@ -718,7 +718,7 @@ GameObject.new_AnimObject = function(self, args, o)
 		self.running = self.running or (not self.layer:call("get_TreeEmpty"))
 		--self.dynamic_bank = args.dynamic_bank or self.dynamic_bank or self.motion:call("getDynamicMotionBank", 0)
 		self.sync = EMVSettings.sync_face_mots or nil
-		self.cog_init_transform = (self.cog_joint and self.cog_joint:call("get_WorldMatrix")) or self.packed_init_transform		
+		self.cog_init_transform = (self.cog_joint and self.cog_joint:call("get_WorldMatrix")) or self.init_worldmat		
 		--self.cached_banks = {}
 		--self.all_mots = {}
 		
@@ -846,6 +846,7 @@ GameObject.new_AnimObject = function(self, args, o)
 	if self.total_objects_idx and total_objects[self.total_objects_idx] and self.xform == total_objects[self.total_objects_idx].xform then 
 		total_objects[self.total_objects_idx] = self
 	end
+	
 	self.is_AnimObject = true
 	return self
 end
@@ -996,10 +997,6 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 					self:change_motion(self:next_motion())
 				end
 				
-				if self.force_center and (pre_cached_banks == nil) then
-					self:center_object()
-				end
-				
 				--[[if self.joints and (self.show_joints or (self.poser and self.poser.is_open)) then
 					self.joint_positions = {}
 					for i, joint in pairs(self.joints) do 
@@ -1030,6 +1027,9 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 					self:toggle_display()
 				end
 			end
+		end
+		if self.force_center and (pre_cached_banks == nil) then
+			self:center_object()
 		end
 	else
 	--	log.info("Removed held transform: " .. self.name .. " " .. self.xform:get_address())
@@ -1171,18 +1171,18 @@ GameObject.center_object = function(self)
 	if self.cog_joint and self.cog_joint.call and is_valid_obj(self.xform) then 
 		
 		self.center = self.center or self.cog_joint:call("get_BaseLocalPosition")
-		local org_cog_pos = (forced_mode and self.cog_joint:call("get_LocalPosition")) or self.cog_joint:call("get_LocalPosition")
+		local org_cog_pos = self.cog_joint:call("get_LocalPosition")
 		self.last_cog_pos = org_cog_pos or self.last_cog_pos
 		
 		if self.active and forced_mode then 
 			self.forced_mode_center = self.xform:call("get_WorldMatrix")
-			self.packed_init_transform = self.xform:call("get_WorldMatrix")
+			self.init_worldmat = self.xform:call("get_WorldMatrix")
 			--self.cog_init_transform = self.cog_joint:call("get_WorldMatrix")
 		end
 		
 		if self.start_time  then
 			if self.cog_joint then 
-				--log.info("centering " .. self.name)
+				log.info("centering " .. self.name)
 				local do_reset_pos = self.do_next or self.do_prev or ((uptime - self.start_time < 0.01) and self.running and self.layer:call("get_Running")) or (self.anim_maybe_finished and self.end_frame > 10)
 				do_reset_pos = do_reset_pos and ((player ~= self) or self.puppetmode)
 				if not self.init_cog_offset or (do_reset_pos and (not (self.loop_a or self.loop_b) or (isRE3 and selected.delayed_seek)))  then
@@ -1198,12 +1198,12 @@ GameObject.center_object = function(self)
 					if forced_mode and self.forced_mode_center and (self.anim_finished or self.do_next or self.do_prev) then -- and ((self.xform:call("get_Position") - self.forced_mode_center[3]):length() > 2.5) then 
 						self.xform:call("set_Position", self.forced_mode_center[3])
 						--self.xform:call("set_Rotation", self.forced_mode_center:to_quat())
-					elseif isRE3 and self.packed_init_transform and self.anim_finished or self.do_next or self.do_prev or (self.xform:call("get_Position"):length() > 5.0) then 
+					elseif isRE3 and self.init_worldmat and self.anim_finished or self.do_next or self.do_prev or (self.xform:call("get_Position"):length() > 5.0) then 
 						--if not (self.anim_maybe_finished and not self.anim_finished) or (self.last_cog_pos:length() > 3.0) then 
 						--if isRE3 then
-							self.xform:call("set_LocalPosition", self.packed_init_transform[3])
+							self.xform:call("set_LocalPosition", self.init_worldmat[3])
 							self.xform:call("set_LocalRotation", self.cog_joint:call("get_BaseLocalRotation"))
-							self.xform:call("set_Position", self.packed_init_transform[3])
+							self.xform:call("set_Position", self.init_worldmat[3])
 						--elseif isRE8 then
 						--	self.xform:call("set_Position", current_figure.xform:call("get_Position"))
 						--end
@@ -1222,7 +1222,9 @@ GameObject.center_object = function(self)
 						new_pos = org_cog_pos + self.init_cog_offset
 						local parent_matrix = isRE8 and Matrix4x4f.identity() or self.parent:call(isRE2 and "get_WorldMatrix" or "get_LocalMatrix")
 						local transformed_pos = mathex:call("transform(via.vec3, via.mat4)", new_pos, parent_matrix)
-						transformed_pos.y = new_pos.y
+						if not self.is_sel_obj then
+							transformed_pos.y = new_pos.y
+						end
 						new_pos = transformed_pos
 					end
 					--[[if forced_mode then 
@@ -1438,6 +1440,7 @@ GameObject.customize_cached_bank = function(self, cb)
 end
 
 GameObject.get_current_bank_name = function(self, no_check)
+	
 	if self.layer then
 		local bank = self.motion:call("get_MotionBankAsset")
 		if not bank then 
@@ -1458,6 +1461,7 @@ GameObject.get_current_bank_name = function(self, no_check)
 				bank = self.motion:call("get_MotionBankAsset")
 			end
 		end
+		
 		self.current_bank_name = bank and bank:add_ref():call("ToString()"):match("^.+%[@?(.+)%]")
 		self.current_bank_name = self.current_bank_name and self.current_bank_name:lower()
 		if bank and not no_check then
@@ -1568,7 +1572,9 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 				end
 			end
 			
-			self.motion:call("setDynamicMotionBankCount", 0)
+			if not self.is_sel_obj or (dyn_bank_count > 1) then
+				self.motion:call("setDynamicMotionBankCount", 0)
+			end
 			--this shit just makes it T-pose and lose all motlists and mots:
 			--[[if not self.old_dynamic_banks[mb_asset:call("ToString()"):match("^.+%[@?(.+)%]")] then
 				local new_dbank = sdk.create_instance("via.motion.DynamicMotionBank") 
@@ -2354,7 +2360,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 				if changed then 
 					anim_object:change_motion(nil, anim_object.mot_idx)
 				end
-				if figure_mode and not imgui.same_line() and imgui.button("Refresh") then 
+				if (figure_mode or forced_mode) and not imgui.same_line() and imgui.button("Refresh") then 
 					anim_object = anim_object:update_components({selected=(anim_object==selected) or nil})
 					anim_object.children = get_children(anim_object.xform)
 				end
@@ -2550,19 +2556,19 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 			end
 			
 			imgui.same_line()
-			if true then --not game_object.same_joints_constraint or game_object.center_obj then
+			--if true then --not game_object.same_joints_constraint or game_object.center_obj then
 				local center_obj = game_object --game_object.center_obj or game_object
 				was_changed, center_obj.force_center = imgui.checkbox("Center" .. (center_obj.aggressively_force_center and "*" or ""), center_obj.force_center)
 				if was_changed then
 					if center_obj.force_center and not center_obj.aggressively_force_center then
 						center_obj.aggressively_force_center = true
-						center_obj.packed_init_transform = (center_obj.parent_obj and center_obj.parent_obj.xform:call("get_WorldMatrix")) or Matrix4x4f.identity()
-						--log_value(center_obj.packed_init_transform)
+						center_obj.init_worldmat = (center_obj.parent_obj and center_obj.parent_obj.xform:call("get_WorldMatrix")) or Matrix4x4f.identity()
+						--log_value(center_obj.init_worldmat)
 						center_obj:set_parent(center_obj.parent or 0)
 						--deferred_calls[center_obj.xform] = {
 						--	{lua_object=center_obj, method=GameObject.set_parent, args={center_obj.parent or 0}},
-							--{lua_object=center_obj, method=GameObject.set_transform, args={center_obj.packed_init_transform}},
-							--(center_obj.packed_init_transform and {func="set_Position", args=center_obj.packed_init_transform}) or {},
+							--{lua_object=center_obj, method=GameObject.set_transform, args={center_obj.init_worldmat}},
+							--(center_obj.init_worldmat and {func="set_Position", args=center_obj.init_worldmat}) or {},
 						--}
 					elseif not center_obj.force_center and center_obj.aggressively_force_center then--if center_obj.force_center then 
 						center_obj.aggressively_force_center = nil
@@ -2591,7 +2597,7 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 				if was_changed then 
 					game_object.layer:call("set_MirrorSymmetry", game_object.mirrored)
 				end
-			end
+			--end
 			if EMVSettings.sync_face_mots then
 				imgui.same_line()
 				was_changed, game_object.sync = imgui.checkbox("Sync", game_object.sync)
@@ -3348,7 +3354,7 @@ re.on_frame(function()
 										lightset:toggle_display()
 									end
 									for j, light in orderedPairs(lightset.lights) do
-										light:set_transform(({mat4_to_trs(light.packed_init_transform)}), isRE2)
+										light:set_transform(({mat4_to_trs(light.init_worldmat)}), isRE2)
 									end
 								end
 							end
@@ -3504,9 +3510,9 @@ re.on_frame(function()
 									end
 									if (isRE2 or isDMC or isRE3) and parent_xform then  --correct for new rotatation
 										parent_xform.xform:call("set_Rotation", fixed_figure.xform:call("get_Rotation"))
-										local y_difference = parent_xform.packed_init_transform[3].y - fixed_figure.packed_init_transform[3].y
-										local new_pos = parent_xform.packed_init_transform[3]; new_pos.y = new_pos.y - y_difference
-										fixed_figure.xform:call("set_Position", parent_xform.packed_init_transform[3])
+										local y_difference = parent_xform.init_worldmat[3].y - fixed_figure.init_worldmat[3].y
+										local new_pos = parent_xform.init_worldmat[3]; new_pos.y = new_pos.y - y_difference
+										fixed_figure.xform:call("set_Position", parent_xform.init_worldmat[3])
 										deferred_calls[fixed_figure.xform] = {func="set_Position", args=new_pos} -- ,{lua_object=parent_xform.gameobj, method=write_byte, args={0x12, 1} } }
 									end
 								end
