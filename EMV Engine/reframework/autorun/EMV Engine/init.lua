@@ -5239,7 +5239,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 								end
 								new_value = mat
 							elseif var_metadata.is_rot then
-								new_value = (value.w and mat:to_quat()) or mat:to_euler()
+								new_value = (var_metadata.is_lua_type=="qua" and mat:to_quat()) or mat:to_euler()
 							elseif var_metadata.is_scale then
 								new_value = value - (pos - mat[3])
 							elseif var_metadata.is_local then
@@ -5496,8 +5496,9 @@ local function show_field(managed_object, field, key_name)
 	imgui.pop_id()
 	if changed then
 		managed_object[(field_data.name:match("%<(.+)%>") or field_data.name):lower()] = value
-		deferred_calls[parent_managed_object] = deferred_calls[parent_managed_object] or {}
-		table.insert(deferred_calls[managed_object], { field=field:get_name(), args=value, vardata=managed_object._.field_data[field:get_name()]}) --test=value_to_obj(value, field:get_type())
+		deferred_calls[parent_managed_object] = { field=field:get_name(), args=value, vardata=managed_object._.field_data[field:get_name()]}
+		--deferred_calls[parent_managed_object] = deferred_calls[parent_managed_object] or {}
+		--table.insert(deferred_calls[managed_object], { field=field:get_name(), args=value, vardata=managed_object._.field_data[field:get_name()]}) --test=value_to_obj(value, field:get_type())
 		managed_object:set_field(field:get_name(), value)
 	end
 	return changed
@@ -5528,8 +5529,9 @@ local function show_prop(managed_object, prop, key_name)
 			changed, value = read_field(managed_object, nil, prop, prop.name, prop.ret_type, key_name)
 		imgui.pop_id()
 		if changed and prop.set then 
-			deferred_calls[managed_object] = deferred_calls[managed_object] or {}
-			table.insert(deferred_calls[managed_object], {func=prop.set:get_name(), args=value, vardata=prop, })
+			deferred_calls[managed_object] = {func=prop.set:get_name(), args=value, vardata=prop, }
+			--deferred_calls[managed_object] = deferred_calls[managed_object] or {}
+			--table.insert(deferred_calls[managed_object], {func=prop.set:get_name(), args=value, vardata=prop, })
 		end
 	end
 	
@@ -7804,7 +7806,6 @@ GameObject = {
 		local poser = self.poser
 		
 		local function clear_joint(joint)
-			
 			old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
 			deferred_calls[joint] = {}
 			table.insert(deferred_calls[joint], {func=joint[poser.prop_name].set:get_name(), args=joint[poser.prop_name].value_org}) --reset
