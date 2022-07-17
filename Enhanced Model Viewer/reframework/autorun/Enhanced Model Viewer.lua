@@ -598,10 +598,10 @@ GameObject.new_AnimObject = function(self, args, o)
 		self.IBL = self.components_named.IBL
 		local ibl_resource = self.IBL:call("get_IBLTextureResource")
 		if ibl_resource then 
+			ibl_resource = ibl_resource:add_ref()
 			local ibl_name_full = ibl_resource:call("ToString()"):match("^.+%[@?(.+)%]")
 			if RSCache.tex_resources and not RSCache.tex_resources[ibl_name_full] then
 				self.background_idx = table.binsert(RN.tex_resource_names or {}, ibl_name_full)
-				ibl_resource:add_ref()
 				RSCache.tex_resources[ibl_name_full] = ibl_resource
 			else
 				self.background_idx = find_index(RN.tex_resource_names or {}, ibl_name_full)
@@ -1461,11 +1461,10 @@ GameObject.get_current_bank_name = function(self, no_check)
 				bank = self.motion:call("get_MotionBankAsset")
 			end
 		end
-		
-		self.current_bank_name = bank and bank:add_ref():call("ToString()"):match("^.+%[@?(.+)%]")
+		bank = bank and bank:add_ref()
+		self.current_bank_name = bank and bank:call("ToString()"):match("^.+%[@?(.+)%]")
 		self.current_bank_name = self.current_bank_name and self.current_bank_name:lower()
 		if bank and not no_check then
-			
 			RSCache.motbank_resources[self.current_bank_name] = RSCache.motbank_resources[self.current_bank_name] or bank
 			--self.motbanks = self.motbanks or {}
 			if not self.cached_banks then 
@@ -1573,12 +1572,13 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 			end
 			
 			if not self.is_sel_obj or (dyn_bank_count > 1) then
-				self.motion:call("setDynamicMotionBankCount", 0)
+				self.motion:call("setDynamicMotionBankCount", 0) --dynamic motion banks allow the ActiveMotionBanks list to be polluted with old Motlists that were unloaded, but is critical for player control
 			end
+			
 			--this shit just makes it T-pose and lose all motlists and mots:
 			--[[if not self.old_dynamic_banks[mb_asset:call("ToString()"):match("^.+%[@?(.+)%]")] then
-				local new_dbank = sdk.create_instance("via.motion.DynamicMotionBank") 
-				if new_dbank and new_dbank:add_ref() then 
+				local new_dbank = sdk.create_instance("via.motion.DynamicMotionBank"):add_ref() 
+				if new_dbank then 
 					new_dbank :call(".ctor")
 					new_dbank:call("set_MotionBank", mb_asset)
 					--self.motion:call("setDynamicMotionBankCount", get_table_size(self.old_dynamic_banks) + 1)
@@ -1586,6 +1586,7 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 					self.motion:call("setDynamicMotionBank", 0, new_dbank)
 				end
 			end]]
+			
 			self.layer:call("clearMotionResource")
 			self.motion:call("set_MotionBankAsset", mb_asset) 
 			
@@ -2816,7 +2817,8 @@ re.on_frame(function()
 				--log.info("DMC5 scan")
 				--[[local ev_objects = {}
 				local results = scene:call("findComponents(System.Type)", sdk.typeof("app.CutScenePlaySetting"))
-				for i, element in ipairs(results.get_elements and results:add_ref():get_elements() or {}) do
+				results = results and results:add_ref()
+				for i, element in ipairs(results.get_elements and results:get_elements() or {}) do
 					local gameobj = element:call("get_GameObject")
 					local xform = gameobj and gameobj:call("get_Transform")
 					local object = held_transforms[xform] or New_AnimObject({gameobj=gameobj, xform=xform})
@@ -2830,7 +2832,7 @@ re.on_frame(function()
 						local gameobj = result:call("get_GameObject")
 						local timeline = gameobj and lua_find_component(gameobj, "via.timeline.Timeline")
 						local amt = timeline and timeline:call("get_BindGameObjects")
-						amt = amt and amt:add_ref().get_size and amt:get_size()
+						amt = amt and amt.get_size and amt:get_size()
 						if amt then
 							table.insert(results,{gameobj=gameobj, obj=result, amt=amt}) 
 						end
@@ -2892,7 +2894,8 @@ re.on_frame(function()
 			local motion = lua_find_component(dummy_obj.gameobj, "via.motion.Motion")
 			if motion then 
 				local new_layer = motion and sdk.create_instance("via.motion.TreeLayer")
-				if new_layer and new_layer:add_ref() and new_layer:call(".ctor") then
+				new_layer = new_layer and new_layer:add_ref()
+				if new_layer and new_layer:call(".ctor") then
 					motion:call("setLayerCount", 1)
 					motion:call("setLayer", 0, new_layer)
 					dummy_obj = New_AnimObject({xform=dummy_obj.xform, body_part="Body"})
@@ -3276,7 +3279,8 @@ re.on_frame(function()
 					imgui.text("\nCAMERA")
 					if figure_mode and not figure_settings and not isDMC then
 						figure_behavior = (scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("FigureObjectBehavior"))))
-						figure_behavior = figure_behavior and figure_behavior.get_elements and figure_behavior:add_ref():get_elements()
+						figure_behavior = figure_behavior and figure_behavior:add_ref()
+						figure_behavior = figure_behavior and figure_behavior.get_elements and figure_behavior:get_elements()
 						for i, elem in ipairs(figure_behavior or {}) do 
 							figure_settings = figure_settings or  elem:get_field("_FigureSetting")
 							figure_behavior = elem

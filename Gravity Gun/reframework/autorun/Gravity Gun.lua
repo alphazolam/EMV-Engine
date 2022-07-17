@@ -636,15 +636,12 @@ GameObject.toggle_forced_funcs = function(self, bool)
 			--[[--only gravity gun objects should have reached this part, so give them collidables and rigid body components if they didnt have them:
 			--disabled because it causes internal game exceptions that make testing very hard
 			if not self.gameobj:call("getComponent(System.Type)", sdk.typeof("via.physics.Colliders")) then 
-				local colliders = self.gameobj:call("createComponent", sdk.typeof("via.physics.Colliders"))
+				local colliders = self.gameobj:call("createComponent", sdk.typeof("via.physics.Colliders")):add_ref()
 				colliders:call(".ctor")
-				colliders:add_ref()
-				local new_collider = sdk.create_instance("via.physics.Collider")
+				local new_collider = sdk.create_instance("via.physics.Collider"):add_ref()
 				new_collider:call(".ctor")
-				new_collider:add_ref()
-				local userdata = sdk.create_instance("via.physics.UserData")
+				local userdata = sdk.create_instance("via.physics.UserData"):add_ref()
 				userdata:call(".ctor")
-				userdata:add_ref()
 				new_collider:call("set_UserData", userdata)
 				colliders:call("setCollidersCount", 1)
 				colliders:call("setColliders", 0, new_collider)

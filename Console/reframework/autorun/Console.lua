@@ -251,8 +251,8 @@ local mini_console = function(managed_object, key)
 	if tmp ~= managed_object then 
 		if imgui.button("Assign to Console Var: tmp") then
 			tmp = managed_object
-			if sdk.is_managed_object(tmp)  then 
-				tmp:add_ref()
+			if tmp and sdk.is_managed_object(tmp)  then 
+				tmp = tmp:add_ref()
 				EMV.create_REMgdObj(tmp, true)
 				command = (command == "") and string.format("tmp = 0x%x", tmp:get_address())
 			else

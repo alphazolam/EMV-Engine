@@ -283,7 +283,8 @@ function spawn_pfb(pfb)
 		EMV.add_pfb_to_cache(clean_path)
 		prefab = RSCache.pfb_resources[clean_path]
 	end
-	if prefab and prefab:add_ref() then
+	if prefab then
+		prefab = prefab:add_ref()
 		spawn_zombie(nil, prefab)
 	end
 	return prefab
@@ -301,10 +302,10 @@ local function spawn_light(position, type_name, short_name)
 	local create_method = sdk.find_type_definition("via.GameObject"):get_method("create(System.String, via.Folder)")
 	local gameobj = create_method:call(nil, "MyLight_" .. short_name .. "_" .. (get_table_size(spawned_lights)+1), 0)
 	if gameobj then 
-		gameobj:add_ref()
+		gameobj = gameobj:add_ref()
 		gameobj:call(".ctor")
 		local new_light_component = gameobj:call("createComponent(System.Type)", sdk.typeof(type_name))
-		new_light_component:add_ref()
+		new_light_component = new_light_component:add_ref()
 		new_light_component:call(".ctor")
 		local light = GameObject:new_GrabObject{gameobj=gameobj}
 		if short_name:find("Spot") then 
