@@ -2000,12 +2000,12 @@ local function create_resource(resource_path, resource_type, force_create)
 	local new_rs_address = new_resource and new_resource:get_address()
 	if type(new_rs_address) == "number" then
 		local holder = sdk.create_instance(resource_type .. "Holder", true):add_ref()
-		if sdk.is_managed_object(holder) then 
-			holder:call(".ctor")
+		if holder then -- and sdk.is_managed_object(holder) then 
+			holder:call(".ctor()")
 			--deferred_calls[holder] = {lua_object=holder, method=holder.write_qword, args={0x10, new_rs_address}} 
 			holder:write_qword(0x10, new_rs_address)
 			if is_valid_obj(holder) then
-				RSCache[ext .. "_resources"][resource_path] = holder
+				RSCache[ext .. "_resources"][resource_path] = holder:add_ref()
 				return holder
 			end
 		end
@@ -2641,8 +2641,8 @@ end
 
 --Gets a SystemArray 
 local function lua_get_system_array(sys_array, allow_empty, convert_to_table)
+	sys_array = sys_array and sys_array.add_ref and sys_array:add_ref()
 	if not sys_array then return (allow_empty and {}) end
-	sys_array = sys_array.add_ref and sys_array:add_ref()
 	local system_array = sys_array.get_elements and sys_array:get_elements()
 	if not system_array then
 		system_array = sys_array.get_field and sys_array:get_field("mItems")
@@ -5599,7 +5599,7 @@ local function show_field(managed_object, field, key_name)
 	imgui.pop_id()
 	if changed then
 		managed_object[(field_data.name:match("%<(.+)%>") or field_data.name):lower()] = value
-		deferred_calls[parent_managed_object] = { field=field:get_name(), args=value, vardata=managed_object._.field_data[field:get_name()]}
+		deferred_calls[managed_object] = { field=field:get_name(), args=value, vardata=managed_object._.field_data[field:get_name()]}
 		--deferred_calls[parent_managed_object] = deferred_calls[parent_managed_object] or {}
 		--table.insert(deferred_calls[managed_object], { field=field:get_name(), args=value, vardata=managed_object._.field_data[field:get_name()]}) --test=value_to_obj(value, field:get_type())
 		managed_object:set_field(field:get_name(), value)
@@ -6157,7 +6157,8 @@ local Material = {
 						o.tex_num = i-1
 						break 
 					end
-					add_resource_to_cache(texture:add_ref())
+					texture = texture:add_ref()
+					add_resource_to_cache(texture)
 					table.insert(o.textures, texture)
 				end
 				--if o.saved_variables then
@@ -6720,7 +6721,7 @@ local function show_collection()
 				if obj.xform then
 					cd.collection_xforms[obj.xform] = obj 
 					new_collection[obj.unique_name] = obj
-				else
+				elseif obj.__gameobj_name then
 					new_collection[obj.__gameobj_name] = obj
 				end
 			end
@@ -7104,15 +7105,14 @@ local function show_collection()
 		if imgui.button("Reset") then 
 			do_reset = true
 		end
-		
+		cd.new_args = cd.new_args or {}
 		local file
 		if cd.o_tbl.show_load_input then 
 			imgui.same_line()
 			changed, cd.only_set_json_resources = imgui.checkbox("Load Only Resources", cd.only_set_json_resources)
 			imgui.same_line()
 			changed, cd.new_args.load_children = imgui.checkbox("Load Children", cd.new_args.load_children)
-			if cd.o_tbl.input_file_idx and (not cd.new_args.file or not cd.new_args.file.__dont_convert) then --and cd.o_tbl.files_list and cd.o_tbl.files_list.paths and cd.o_tbl.files_list.paths[cd.o_tbl.input_file_idx] then
-			--	imgui.text("set!")
+			if cd.o_tbl.input_file_idx and (not cd.new_args.file or not cd.new_args.file.__dont_convert) and cd.o_tbl.files_list and cd.o_tbl.files_list.paths and cd.o_tbl.files_list.paths[cd.o_tbl.input_file_idx] then
 				file = json.load_file(cd.o_tbl.files_list.paths[cd.o_tbl.input_file_idx])
 			end
 		end
@@ -7123,11 +7123,15 @@ local function show_collection()
 		imgui.text("	")
 		imgui.same_line()
 		imgui.begin_rect()	
+			if static_objs.spawned_prefabs_folder and imgui.button("Clear Spawned GameObjects") then 
+				static_objs.spawned_prefabs_folder:call("deactivate")
+				static_objs.spawned_prefabs_folder:call("activate")
+			end
 			if EMVSettings and not figure_mode then 
+				imgui.same_line()
 				changed, cd.new_args.add_to_anim_viewer = imgui.checkbox("Add to Animation Viewer", cd.new_args.add_to_anim_viewer)
 			end
 			static_funcs.init_resources()
-			cd.new_args = cd.new_args or {}
 			cd.new_components = cd.new_components or {"via.Transform", "via.render.Mesh", "via.motion.Motion"}
 			changed, cd.new_g_name = imgui.input_text("Name", cd.new_g_name or "NewObject")
 			changed, cd.new_g_parent_name = imgui.input_text("Parent Name", cd.new_g_parent_name)
@@ -8844,7 +8848,7 @@ local function init_settings()
 		if try and new_cache then 
 			for key, value in pairs(SettingsCache) do 
 				if new_cache[key] == nil then 
-					--new_cache[key] = value  --add any new settings from this script
+					new_cache[key] = value  --add any new settings from this script
 				end 
 			end
 			SettingsCache = new_cache

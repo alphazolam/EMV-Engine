@@ -90,7 +90,7 @@ local current_em_name
 local figure_start_time = nil
 local held_transforms_count = 0
 local ev_object = nil
-local figure_settings = nil
+figure_settings = nil
 local figure_behavior
 local current_fig_name = nil
 local fig_mgr_name
@@ -328,6 +328,9 @@ local function draw_world_xform(object)
 end 
 
 local function imgui_anim_object_figure_viewer(anim_object, obj_name, index)
+	
+	if not anim_object or not anim_object.gameobj then return end
+	
 	imgui.begin_rect()
 		imgui.push_id(anim_object.gameobj:get_address()+ 3 + (tonumber(index) or 0))
 			changed, anim_object.display = imgui.checkbox("",  anim_object.display)
@@ -2851,7 +2854,7 @@ re.on_frame(function()
 	camera = sdk.get_primary_camera()
 	camera = camera and camera:add_ref()
 	if not camera or tics < 2 then return end
-	--camera = camera and  get_anim_object(camera:call("get_GameObject")) 
+	camera = (tics > 10) and (camera and  get_anim_object(camera:call("get_GameObject")))
 	
 	--Take a global GameObject dubbed "forced_object" and turn it into forced_mode animation viewer object:
 	if _G.forced_object then
@@ -3280,10 +3283,7 @@ re.on_frame(function()
 				if isRE2 or isRE3 or isDMC then 
 					imgui.text("\nCAMERA")
 					if figure_mode and not figure_settings and not isDMC then
-						figure_behavior = (scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("FigureObjectBehavior"))))
-						figure_behavior = figure_behavior and figure_behavior:add_ref()
-						figure_behavior = figure_behavior and figure_behavior.get_elements and figure_behavior:get_elements()
-						for i, elem in ipairs(figure_behavior or {}) do 
+						for i, elem in ipairs(lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof(sdk.game_namespace("FigureObjectBehavior")))) or {}) do 
 							figure_settings = figure_settings or  elem:get_field("_FigureSetting")
 							figure_behavior = elem
 						end

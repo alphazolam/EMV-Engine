@@ -57,8 +57,8 @@ re.on_application_entry("UpdateMotion", function()
 			table.insert(all_motbanks, "sectionroot/animation/player/common/pl_common_facial.motbank")
 			--]]
 			
-			table.insert(all_motbanks, "sectionroot/animation/player/outer/pl20/ada_leading/bank/barehand.motbank")
-			table.insert(all_motbanks, "sectionroot/animation/player/outer/pl30/sherry_scare/bank/barehand.motbank")
+			--table.insert(all_motbanks, "sectionroot/animation/player/outer/pl20/ada_leading/bank/barehand.motbank")
+			--table.insert(all_motbanks, "sectionroot/animation/player/outer/pl30/sherry_scare/bank/barehand.motbank")
 			
 			--[[
 			table.insert(all_motbanks, "sectionroot/animation/player/pl10/pl10face.motbank")
@@ -521,9 +521,10 @@ re.on_application_entry("UpdateMotion", function()
 		for i, bank_string in ipairs(all_motbanks) do 
 			local bank
 			local bank_name = bank_string:lower() --bank_string:match("^.+/(.+)%.motbank") or bank_string
-			if pcall(function()
-				bank = create_resource(bank_string, "via.motion.MotionBankResource", (EMVSettings.special_mode > 1) )
-			end) and bank then
+			--if pcall(function()
+				bank = create_resource(bank_name, "via.motion.MotionBankResource", (EMVSettings.special_mode > 1) )
+			--end) and bank then
+			if bank then
 				global_motbanks[bank_name] = bank
 				RSCache.motbank_resources[bank_name] = bank
 			end
