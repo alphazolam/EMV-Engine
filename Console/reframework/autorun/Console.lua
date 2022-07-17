@@ -172,7 +172,6 @@ local function show_history(do_minimal, new_first_history_idx)
 				History.history_metadata[i] = History.history_metadata[i] or {}
 				--if History.history_metadata[i] ~= nil then
 					local clean_cmd = cmd:gsub(" +$", "")
-					is_calling_hooked_function = true
 					local do_run_again = imgui.button_w_hotkey("Run Again", clean_cmd, {command=clean_cmd}, nil, {__cmd_name=clean_cmd}) or History.history_metadata[i].keep_running 
 					--local do_run_again = (imgui.button("Run Again") or History.history_metadata[i].keep_running)
 					
@@ -184,8 +183,7 @@ local function show_history(do_minimal, new_first_history_idx)
 						History.history[cmd] = table.pack(out or tostring(out), tostring(out):find("::vector") and vector_to_table(out))
 					end
 					
-					update_lists_once = do_run_again and cmd or nil 
-					is_calling_hooked_function = false
+					update_lists_once = do_run_again and cmd or nil --"update_lists_once" updates console commands when "Run Again" is pressed
 				--end
 				read_imgui_element(result, nil, nil, cmd)
 				imgui.tree_pop()
