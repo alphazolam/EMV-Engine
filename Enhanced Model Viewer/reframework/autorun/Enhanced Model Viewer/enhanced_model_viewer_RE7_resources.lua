@@ -11,8 +11,9 @@ local orderedPairs = EMV.orderedPairs
 local loaded_resources = false
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
+--The mesh name of the object is searched for the key
 local alt_names = {
-	--["ch13_01"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") }
+	--["em5801"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") } --example
 }
 
 re.on_application_entry("BeginRendering", function()

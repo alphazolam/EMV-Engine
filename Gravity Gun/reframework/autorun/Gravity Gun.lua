@@ -78,17 +78,18 @@ local camera_forward = nil
 local last_camera_matrix = Matrix4x4f.new()
 local neg_last_camera_matrix = Matrix4x4f.new()
 
-GGSettings = {}
-GGSettings.load_json = false
-GGSettings.block_input = false
-GGSettings.action_monitor = false
-GGSettings.force_functions = (isMHR and true) or false
-GGSettings.show_transform = true
-GGSettings.prefer_rigid_bodies = (isRE2 or isRE3) and true
-GGSettings.wanted_layer = -1
-GGSettings.wanted_mask_bits = (isMHR and 10) or 2 --1?
-GGSettings.forced_funcs_data = {}
-GGSettings.load_type = {"via.render.Mesh", "via.render.Mesh"}
+GGSettings = {
+	load_json = false,
+	block_input = false,
+	action_monitor = false,
+	force_functions = (isMHR and true) or false,
+	show_transform = true,
+	prefer_rigid_bodies = (isRE2 or isRE3) and true,
+	wanted_layer = -1,
+	wanted_mask_bits = 2, --1?
+	forced_funcs_data = {},
+	load_type = {"via.render.Mesh", "via.render.Mesh"},
+}
 
 local wants_rigid_bodies = false
 local loaded_EMV = false
@@ -128,12 +129,12 @@ local width = EMV.statics.width
 local height = EMV.statics.height
 
 
---table.insert(GGSettings.ray_layers_tables.re3, )
 --Collision layers from which the gravity gun samples for each game:
 GGSettings.ray_layers_tables = {
 	["re2"] = 		{0, 1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 19, 20, 22, 21, 23, 24 , 27, 28, 29, 30, 31, 32},
 	["re3"] =		{0, 1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 19, 20, 22, 21, 23, 24 , 27, 28, 29, 30, 31, 32},
 	["re7"] =		{0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
+	--["re7"] =		{2, 3, 4, 8, 10, 11, 12, 13, 14, 15, 17, 19, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["mhrise"] =	{0, 1, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 17, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["re8"] =		{1, 4, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
 	["dmc5"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32}
@@ -208,11 +209,12 @@ local get_folders = EMV.get_folders
 local search = EMV.search
 local find = EMV.find
 local clear_object = EMV.clear_object
+local get_GameObject = EMV.get_GameObject
 
 
 ----------------------------------------------------------------------------------------------------------[[UTILITY FUNCTIONS]]
 
-local gg_default_settings = merge_tables({}, GGSettings)
+local gg_default_settings = EMV.deep_copy(GGSettings)
 local function load_settings()
 	local new_settings = jsonify_table(json.load_file("GravityGunAndConsole\\GGunConsoleSettings.json"), true)
 	if new_settings and new_settings.load_json then 
@@ -435,16 +437,16 @@ local ForcedValue = {
 GameObject.new_GrabObject = function(self, args, o)
 	
 	o = o or {}
-	self = (args.xform and held_transforms[args.xform]) or GameObject:new(args, o)
+	self = GameObject:new(args, o)
+	--self = (args.xform and held_transforms[args.xform]) or GameObject:new(args, o)
 	--self = (args.xform and held_transforms[args.xform] and merge_tables(held_transforms[args.xform], o, true)) or GameObject:new(args, o)
 	if not self or not self.update then 
-		log.info("Failed to create GameObject") 
 		return nil
 	end
-	touched_gameobjects[self.xform] = (touched_gameobjects[self.xform] and (touched_gameobjects[self.xform] ~= self) and merge_tables(self, touched_gameobjects[self.xform], true)) or self
-	self = touched_gameobjects[self.xform]
+	--touched_gameobjects[self.xform] = (touched_gameobjects[self.xform] and (touched_gameobjects[self.xform] ~= self) and merge_tables(self, touched_gameobjects[self.xform], true)) or self
+	--self = touched_gameobjects[self.xform]
 	
-	log.info("Creating " .. self.name)
+	log.info("Creating GrabObject " .. self.name)
 	self.collidable 			= args.collidable		
 	self.rigid_body 			= args.rigid_body		or has_dynamics and self.gameobj:call("getComponent(System.Type)", sdk.typeof("via.dynamics.RigidBodySet"))
 	self.contact_pt 			= args.contact_pt 	
@@ -515,8 +517,8 @@ GameObject.new_GrabObject = function(self, args, o)
 			end
 		end
 	end
-	
-	if isRE7 and (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
+	log.info(((last_camera_matrix[3] - self.impact_pos):length()))
+	if (isRE7 or isRE7rt) and ((last_camera_matrix[3] - self.impact_pos):length() < 0.1) or (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
 		self.invalid = true
 	end
 	if isDMC and self.ray_layer == 18 then 
@@ -527,11 +529,23 @@ GameObject.new_GrabObject = function(self, args, o)
 		self.invalid = true
 	end
 	
-	if go and (self.xform == go.xform) then go = self end --update other vars
-	if grav_objs[1] and (self.xform == grav_objs[1].xform) then grav_objs[1] = self end
-	if last_grabbed_object and (self.xform == last_grabbed_object.xform) then last_grabbed_object = self end
-	self.is_GrabObject = true
+	--Update named vars:
+	if go and (go~=self) and (go.xform==self.xform) then
+		self = merge_tables(self, go, true)
+		go = self
+	end
+	if grav_objs[1] and (grav_objs[1]~=self) and (grav_objs[1].xform==self.xform) then
+		self = merge_tables(self, grav_objs[1], true)
+		grav_objs[1] = self
+	end
+	if last_grabbed_object and (last_grabbed_object~=self) and (last_grabbed_object.xform==self.xform) then
+		self = merge_tables(self, last_grabbed_object, true)
+		last_grabbed_object = self
+	end
+	held_transforms[self.xform] = self
+	touched_gameobjects[self.xform] = self
 	
+	self.is_GrabObject = true
 	return self
 end
 
@@ -550,42 +564,42 @@ GameObject.update_GrabObject = function(self, is_known_valid)
 	
 	if is_known_valid or self:update() then
 		self.active = (not not active_objects[self.xform]) or nil	
---[[
-	if self.packed_xform and self.packed_xform[1] then -- and self.packed_xform[1] ~= self.pos then 
-		if cutscene_mode and self.cog_joint  then 
-			--local pos = self.cog_joint:call("get_Position")
-			--local rot = self.cog_joint:call("get_Rotation")
-			--local scale = self.cog_joint:call("get_LocalScale")
-			local pos = self.cog_joint:call("get_LocalPosition")
-			local rot = self.cog_joint:call("get_LocalRotation")
-			if self.active then
-				self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
-				self.cog_joint:call("set_Rotation", self.packed_xform[2])
-				--self.cog_joint:call("set_LocalScale", self.packed_xform[3])
-				self.last_cog_offset = {
-					self.cog_joint:call("get_LocalPosition") - pos,
-					self.cog_joint:call("get_LocalRotation") * rot,
-				}
-			else
-				--local transformed_pos = mathex:call("transform(via.vec3, via.Quaternion)", pos, Quaternion.new(0,0,-1,0)) --test
-				if not cutscene_mode.paused then
-					self.cog_joint:call("set_LocalPosition", self.last_cog_offset[1] + pos)
-					self.cog_joint:call("set_LocalRotation", self.last_cog_offset[2] * rot:inverse())
-				--	self.cog_joint:call("set_Position", pos + self.last_cog_offset[1])
-				--	self.cog_joint:call("set_Rotation", rot:inverse() * self.last_cog_offset[2]) -- 
+		--[[
+			if self.packed_xform and self.packed_xform[1] then -- and self.packed_xform[1] ~= self.pos then 
+				if cutscene_mode and self.cog_joint  then 
+					--local pos = self.cog_joint:call("get_Position")
+					--local rot = self.cog_joint:call("get_Rotation")
+					--local scale = self.cog_joint:call("get_LocalScale")
+					local pos = self.cog_joint:call("get_LocalPosition")
+					local rot = self.cog_joint:call("get_LocalRotation")
+					if self.active then
+						self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
+						self.cog_joint:call("set_Rotation", self.packed_xform[2])
+						--self.cog_joint:call("set_LocalScale", self.packed_xform[3])
+						self.last_cog_offset = {
+							self.cog_joint:call("get_LocalPosition") - pos,
+							self.cog_joint:call("get_LocalRotation") * rot,
+						}
+					else
+						--local transformed_pos = mathex:call("transform(via.vec3, via.Quaternion)", pos, Quaternion.new(0,0,-1,0)) --test
+						if not cutscene_mode.paused then
+							self.cog_joint:call("set_LocalPosition", self.last_cog_offset[1] + pos)
+							self.cog_joint:call("set_LocalRotation", self.last_cog_offset[2] * rot:inverse())
+						--	self.cog_joint:call("set_Position", pos + self.last_cog_offset[1])
+						--	self.cog_joint:call("set_Rotation", rot:inverse() * self.last_cog_offset[2]) -- 
+						else
+							self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
+							self.cog_joint:call("set_Rotation", self.packed_xform[2])
+						--	write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
+						end
+						--self.cog_joint:call("set_LocalScale", scale + self.last_cog_offset[3])
+					end
 				else
-					self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
-					self.cog_joint:call("set_Rotation", self.packed_xform[2])
-				--	write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
+					write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
+					self.packed_xform = nil
 				end
-				--self.cog_joint:call("set_LocalScale", scale + self.last_cog_offset[3])
 			end
-		else
-			write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
-			self.packed_xform = nil
-		end
-	end
-]]
+		]]
 		if self.packed_xform and self.packed_xform[1] then -- and self.packed_xform[1] ~= self.pos then 
 			if cutscene_mode and self.cog_joint  then 
 				local pos = self.cog_joint:call("get_Position")
@@ -619,6 +633,11 @@ GameObject.update_GrabObject = function(self, is_known_valid)
 		self:update_funcs()
 		if self.is_forced and self.do_reset <= 0 and not active_objects[self.xform] then 
 			self:toggle_forced_funcs(false)
+		end
+		
+		if held_transforms[self.xform] and held_transforms[self.xform]~=self then
+			self = merge_tables(self, held_transforms[self.xform])
+			held_transforms[self.xform] = self
 		end
 	else
 	--	clear_object(self.xform) 
@@ -1451,8 +1470,9 @@ local function gravity_gun()
 						impact_pos=o.impact_pos, 
 						ray_layer=o.ray_layer, 
 						children=o.children, 
-						shapes=o.shapes 
+						shapes=o.shapes, 
 					}
+					if not last_grabbed_object then goto exit end
 					active_objects[last_grabbed_object.xform] = last_grabbed_object
 					grav_objs[1] = last_grabbed_object
 				end
@@ -1468,6 +1488,7 @@ local function gravity_gun()
 				toggled = true
 			end
 		end
+		::exit::
 	end
 	
 	-- WHILE GRAVITY GUN IS ACTIVE:
@@ -1632,6 +1653,9 @@ re.on_draw_ui(function()
 			changed, GGSettings.wanted_layer = imgui.drag_int("Wanted layer: " .. layer_name, GGSettings.wanted_layer, 1, -1, 2048); --setting_was_changed = setting_was_changed or changed
 			changed, GGSettings.wanted_mask_bits = imgui.drag_int("Wanted mask bits", GGSettings.wanted_mask_bits, 1, 0, 100000000); --setting_was_changed = setting_was_changed or changed
 			imgui.text("Auto Mode Layers:")
+			if imgui.button("Reset") then 
+				GGSettings.ray_layers_tables = EMV.deep_copy(gg_default_settings.ray_layers_tables)
+			end
 			for i=0, 32 do 
 				local exists = find_index(GGSettings.ray_layers_tables[game_name], i) --table.bfind(GGSettings.ray_layers_tables[game_name], i)
 				local changed, layer = imgui.checkbox("Layer " .. i, not not exists) 
@@ -1793,10 +1817,12 @@ re.on_draw_ui(function()
 		if next(touched_gameobjects) then
 			if imgui.tree_node("Touched GameObjects") then 
 				for xform, game_object in orderedPairs(touched_gameobjects) do 
-					imgui.text("  "); imgui.same_line()
+					imgui.text("	"); imgui.same_line()
 					if imgui.tree_node_str_id(game_object.key_hash, game_object.name) then
-						imgui_anim_object_viewer(game_object)
-						imgui.tree_pop()
+						imgui.begin_rect()
+							imgui_anim_object_viewer(game_object)
+							imgui.tree_pop()
+						imgui.end_rect(2)
 					end
 				end
 			end

@@ -25,9 +25,9 @@ local to_obj = EMV.to_obj
 local try, out
 local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
 local reverse_table = EMV.reverse_table
+local get_GameObject = EMV.get_GameObject
 
 --EMV Global shortcut functions, for use in the Console
-_G.EMV = EMV or package.loaded.EMV_Engine
 _G.read_bytes = EMV.read_bytes
 _G.to_obj = EMV.to_obj
 _G.mkobj = EMV.make_obj
@@ -116,9 +116,9 @@ local run_command = function(input)
 	elseif input == "clear" then 
 		if History.first_history_idx == #History.history_idx + 1 then 
 			re.msg("Cleared")
-			History.history, History.history_idx, History.history_metadata, History.first_history_idx = {}, {}, {}, 1
+			History.history, History.history_idx, History.history_metadata, History.first_history_idx = {}, {}, {}, 2
 		else
-			History.first_history_idx = #History.history_idx + 1
+			History.first_history_idx = #History.history_idx + 2
 		end
 		input = ""
 	elseif input == "transforms"  then 
@@ -128,7 +128,7 @@ local run_command = function(input)
 	elseif input:sub(1,1) == "/" then
 		input = "search(\"" .. input:sub(2) .. "\")"
 	elseif input == "go" and go and is_valid_obj(go.xform) then
-		go = GameObject.new_GrabObject and GameObject:new_GrabObject{xform=go.xform} or GameObject:new{xform=go.xform}
+		go = GameObject:new_GrabObject{xform=go.xform}
 	end
 	return EMV.run_command(input)
 end 
@@ -212,7 +212,7 @@ local function show_history(do_minimal, new_first_history_idx)
 			if History.first_history_idx ~= #History.history_idx + 1 then
 				imgui.new_line()
 				imgui.end_rect(3)
-				imgui.text("Output: \n" .. logv(History.command_output, nil, 0))
+				imgui.text("Output: \n" .. logv(History.command_output, nil, 1))
 			end
 			imgui.end_child_window()
 		end
@@ -223,7 +223,7 @@ local function show_history(do_minimal, new_first_history_idx)
 			force_command = true
 		end
 		imgui.same_line()
-		imgui.push_id(1235)
+		imgui.push_id(1234)
 			if imgui.button(" ") then 
 				force_autocomplete = true
 			end 
@@ -232,7 +232,7 @@ local function show_history(do_minimal, new_first_history_idx)
 		changed, command = imgui.input_text(" ", command)
 		if not SettingsCache.use_child_windows then 
 			--imgui.text(History.command_output)
-			imgui.text(logv(History.command_output, nil, 0))
+			imgui.text(logv(History.command_output, nil, 1))
 		end
 	end
 	

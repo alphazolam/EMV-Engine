@@ -11,7 +11,9 @@ local loaded_resources = false
 
 --a dictionary of tables with 2-3 tables each, one for Body and one for Face and sometimes one to exclude
 local alt_names = { 
-	["ch13_01"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") }
+	["em5800"]= { exclude=table.pack("em5801", "em5802", "em5800_%d%d") },
+	["em5801"]= { exclude=table.pack("em5800", "em5802", "em5801_%d%d") },
+	["em5802"]= { exclude=table.pack("em5800", "em5801", "em5802_%d%d") },
 }
 
 re.on_application_entry("UpdateMotion", function()

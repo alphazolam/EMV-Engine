@@ -184,7 +184,7 @@ local draw_material_variable = EMV.draw_material_variable
 local change_multi = EMV.change_multi
 local show_imgui_mat = EMV.show_imgui_mat
 local get_enum = EMV.get_enum
-local is_unique_xform = EMV.is_unique_xform
+local contains_xform = EMV.contains_xform
 local is_unique_name = EMV.is_unique_name
 local look_at = EMV.look_at
 local offer_grab = EMV.offer_grab
@@ -201,6 +201,7 @@ local check_key_released = EMV.check_key_released
 local get_anim_object = EMV.get_anim_object
 local clear_object = EMV.clear_object
 local create_gameobj = EMV.create_gameobj
+local get_GameObject = EMV.get_GameObject
 
 function clear_figures()
 	paused = true
@@ -223,11 +224,11 @@ end
 local function get_player()
 	local player = EMV.get_player()
 	if player then 
-		local gameobj = isMHR and player:call("get_GameObject")
+		local gameobj = isMHR and get_GameObject(player)
 		local xform = (gameobj and gameobj:call("get_Transform")) or player:call("get_Transform")
 		if xform then 
-			touched_gameobjects[xform] = touched_gameobjects[xform] or GameObject:new_GrabObject { gameobj=gameobj, xform=xform  }
-			return touched_gameobjects[xform]
+			held_transforms[xform] = held_transforms[xform] or GameObject:new_AnimObject { gameobj=gameobj, xform=xform  }
+			return held_transforms[xform]
 		end
 	end
 end
@@ -550,35 +551,28 @@ GameObject.new_AnimObject = function(self, args, o)
 	o = o or {}
 	--self = (args.xform and touched_gameobjects[args.xform] and merge_tables(touched_gameobjects[args.xform], o, true)) or GameObject:new(args, o)
 	--self =  GameObject:new(args, o)
-	self = args.xform and touched_gameobjects[args.xform] or GameObject:new(args, o)--, o or (args.xform and touched_gameobjects[args.xform]))
-	if not self or not self.update or not self.xform then 
-		log.info("Failed to create AnimObject") 
-		if args.xform then 
-			clear_object(args.xform) 
-		end
+	self = GameObject:new(args, o)--, o or (args.xform and touched_gameobjects[args.xform])) --args.xform and touched_gameobjects[args.xform] or 
+	if not self or not self.update or not self.xform then
 		return nil
 	end
 	log.info("CREATING NEW ANIM OBJECT " .. self.name)
 	
-	--[[if touched_gameobjects[self.xform] and touched_gameobjects[self.xform] ~= self then 
-		touched_gameobjects[self.xform] = merge_tables(self, touched_gameobjects[self.xform], true)
-	end
-	self = touched_gameobjects[self.xform] or self]]
-	if held_transforms[self.xform] and held_transforms[self.xform] ~= self then 
-		held_transforms[self.xform] = merge_tables(self, held_transforms[self.xform], true)
-	end
-	self = held_transforms[self.xform] or self
-	held_transforms[self.xform] = self
+	--if held_transforms[self.xform] and held_transforms[self.xform] ~= self then 
+	--	held_transforms[self.xform] = merge_tables(self, held_transforms[self.xform], true)
+	--end
+	
+	--self = held_transforms[self.xform] or self
+	--held_transforms[self.xform] = self
 	
 	self.figure_name = args.figure_name or current_figure_name or (forced_mode and "Free Mode") or ""
 	self.index = args.index --or #total_objects
 	self.motion = args.motion or self.components_named.Motion or self.motion
-	self.layer = args.layer or (self.motion and self.motion:call("getLayer", 0)) or self.layer
+	--self.layer = args.layer or (self.motion and self.motion:call("getLayer", 0)) or self.layer
 	self.materials = args.materials or self.materials
 	self.force_center = args.force_center or o.force_center or (figure_mode and not not (self.body_part == "Body" or self.name:find("base")))
 	self.init_worldmat = args.init_worldmat or self.xform:call("get_WorldMatrix")
 	self.alt_names = args.alt_names
-	self.excluded_names = args.excluded_names 
+	self.excluded_names = args.excluded_names
 	self.physicscloth = self.components_named.PhysicsCloth
 	self.chain = self.components_named.Chain
 	self.joints = args.joints or lua_get_system_array(self.xform:call("get_Joints") or {}, false, true)
@@ -650,10 +644,9 @@ GameObject.new_AnimObject = function(self, args, o)
 	
 	--Check for parent container object:
 	if self.children and (self.components_named.DummySkeleton or self.components_named.CharacterController or (self.mesh and self.components_named.FigureObjectBehavior)) then --(isRE2 or isRE3) and 
-		
+	--if self.children and self.components_named.Motion and 
 		local candidate
 		for i, child in ipairs(self.children) do  
-			
 			held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{xform=child} 
 			local other = held_transforms[child] 
 			--log.info("checking " .. self.name .. " vs " .. other.name)
@@ -833,22 +826,42 @@ GameObject.new_AnimObject = function(self, args, o)
 		self:update_banks()
 	end
 	
-	if isDMC and self.name:find("03_Transparent") then --this thing keeps acting weird and glowing
+	if isDMC and figure_mode and self.name:find("03_Transparent") then --this thing keeps acting weird and glowing
 		--deferred_calls[self.gameobj] = { func="destroy", args=self.gameobj }
 		self.display = false
 		self:toggle_display()
 	end
 	
 	--Update named vars:
-	if _G.forced_mode and self.xform==_G.forced_mode.xform and _G.forced_mode ~= self then _G.forced_mode = self end
-	if current_figure and self.xform == current_figure.xform then current_figure = self end 
-	if selected and self.xform == selected.xform then selected = self end
-	if base_mesh and self.xform == base_mesh.xform then base_mesh = self end
-	if re2_figure_container_obj and self.xform == re2_figure_container_obj.xform then re2_figure_container_obj = self end
-	if ev_object and self.xform == ev_object.xform then ev_object = self end
-	if self.total_objects_idx and total_objects[self.total_objects_idx] and self.xform == total_objects[self.total_objects_idx].xform then 
+	if forced_mode and (forced_mode~=self) and (forced_mode.xform==self.xform) then
+		self = merge_tables(self, forced_mode, true)
+		forced_mode = self
+	end
+	if current_figure and (current_figure~=self) and (current_figure.xform==self.xform) then
+		self = merge_tables(self, current_figure, true)
+		current_figure = self
+	end
+	if selected and (selected~=self) and (selected.xform==self.xform) then
+		self = merge_tables(self, selected, true)
+		selected = self
+	end
+	if base_mesh and (base_mesh~=self) and (base_mesh.xform==self.xform) then
+		self = merge_tables(self, base_mesh, true)
+		base_mesh = self
+	end
+	if re2_figure_container_obj and (re2_figure_container_obj~=self) and (re2_figure_container_obj.xform==self.xform) then
+		self = merge_tables(self, re2_figure_container_obj, true)
+		re2_figure_container_obj = self
+	end
+	if ev_object and (ev_object~=self) and (ev_object.xform==self.xform) then
+		self = merge_tables(self, ev_object, true)
+		ev_object = self
+	end
+	if (self.total_objects_idx and total_objects[self.total_objects_idx]) and (total_objects[self.total_objects_idx]~=self) and (total_objects[self.total_objects_idx].xform==self.xform) then
+		self = merge_tables(self, total_objects[self.total_objects_idx], true)
 		total_objects[self.total_objects_idx] = self
 	end
+	held_transforms[self.xform] = self
 	
 	self.is_AnimObject = true
 	return self
@@ -870,9 +883,21 @@ GameObject.clear_AnimObject = function(self, xform)
 	if player and player.xform == xform then player = nil end
 	if self and self.total_objects_idx and total_objects[self.total_objects_idx] and xform == total_objects[self.total_objects_idx].xform then 
 		table.remove(total_objects, self.total_objects_idx)
-		log.info(#total_objects)
+		log.info("Removed idx " .. self.total_objects_idx .. " from total_objects, now at count " .. #total_objects)
 		if #total_objects == 0 then 
 			clear_figures()
+		else
+			local idx = contains_xform(imgui_anims, self.xform)
+			if idx then 
+				table.remove(imgui_anims, idx) 
+				log.info("Removed idx " .. idx .. " from imgui_anims, now at count " .. #imgui_anims)
+			else
+				idx = contains_xform(imgui_others, self.xform)
+				if idx then 
+					table.remove(imgui_others, idx)
+					log.info("Removed idx " .. idx .. " from imgui_others, now at count " .. #imgui_others)
+				end
+			end
 		end
 	end
 end
@@ -1034,10 +1059,13 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 		if self.force_center and (pre_cached_banks == nil) then
 			self:center_object()
 		end
+		updates_this_frame[self.xform] = nil
 	else
 	--	log.info("Removed held transform: " .. self.name .. " " .. self.xform:get_address())
 	end
 end
+
+updates_this_frame = {}
 
 GameObject.activate_forced_mode = function(self)
 	
@@ -1164,6 +1192,14 @@ GameObject.build_banks_list = function(self)
 		self.matched_random_limit = #self.all_mots
 	end
 	
+	--add or update imgui_anims
+	imgui_anims = imgui_anims or {}
+	local idx = contains_xform(imgui_anims, self, true)
+	if idx then 
+		imgui_anims[idx] = self
+	else
+		table.insert(imgui_anims, self)
+	end
 end
 
 GameObject.center_object = function(self)
@@ -1321,6 +1357,11 @@ GameObject.change_motion = function(self, mlist_idx, mot_idx, is_searching_sync,
 		self.anim_finished, self.anim_maybe_finished = nil
 		self:reset_physics()
 		
+		updates_this_frame[self.xform] = updates_this_frame[self.xform] or 0
+		updates_this_frame[self.xform] = updates_this_frame[self.xform] + 1
+		if updates_this_frame[self.xform] > 50 then 
+		--	log.info(asdf .. 1234)
+		end
 		
 		--if self.components_named.MotionFsm2 then
 		--	deferred_calls[self.components_named.MotionFsm2] = {func="restartTree"}
@@ -1345,28 +1386,35 @@ GameObject.check_bank_name = function(self, name, object_name, quick_check)
 	if self.body_part == "Body" and found_facial  then return false end --or (isDMC and lower_name:find("%d%d%d%d_%d%d") and not lower_name:find("_10"))
 	if (isRE2 or isRE3) and object_name:find("em%d%d%d") and lower_name:find("_[pe][ls]") then return false end
 	if quick_check and self.face_mode and not found_facial and found_body then return false end
-	if quick_check or lower_name:find(object_name) then return true end
+	if quick_check or (lower_name:find(object_name) and object_name:find(lower_name)) then return true end
+	
+	--if self.name == "em5801_shadow (shadow)" and name:find("em5801_") then
+	--	re.msg_safe(("bad shadow bank " .. name), 1234142)
+	--end
 	
 	local function is_excluded()
-		for excluded_name, value in pairs(self.excluded_names or {}) do
+		if not self.excluded_names then return end
+		for excluded_name, bool in pairs(self.excluded_names) do
 			if lower_name:find(excluded_name) then 
 				return true
+			end
+			if self.name == "em5801_shadow (shadow)" then 
+				log.info(lower_name .. " does not have " .. excluded_name .. " in it")
 			end
 		end
 	end
 	
 	--if self.name == "Face" then log.info("Checking " .. lower_name .. " vs " .. object_name .. ",  found facial: " .. tostring(found_facial) .. ", found_body: " .. tostring(found_body)) end
-	for alt_name, value in pairs(self.alt_names or {}) do 
-		if lower_name:find(alt_name) then 
-			if self.face_mode and found_facial then
-				if is_excluded() then return false end
-				return true
-			elseif self.body_part == "Body" and not found_facial and not found_item then --and found_body 
-				if is_excluded() then return false end
-				return true
-			elseif self.body_part == "Other" and found_item then
-				if is_excluded() then return false end
-				return true
+	if self.alt_names then
+		for alt_name, value in pairs(self.alt_names) do 
+			if lower_name:find(alt_name) then 
+				if self.face_mode and found_facial then
+					return not is_excluded()
+				elseif self.body_part == "Body" and not found_facial and not found_item then --and found_body 
+					return not is_excluded()
+				elseif self.body_part == "Other" and found_item then
+					return not is_excluded()
+				end
 			end
 		end
 	end
@@ -1593,18 +1641,16 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 			self.layer:call("clearMotionResource")
 			self.motion:call("set_MotionBankAsset", mb_asset) 
 			
-			if static_funcs.setup_mbank_method then 
-				static_funcs.setup_mbank_method:call(self.motion)
-			end
-			
 			if forced_mode and player and (self.xform == player.xform) and self.mfsm2 then 
 				self.mfsm2:call("set_PuppetMode", true)
 			end
 			if mlist_idx or mot_idx then 
 				self.mlist_idx, self.mot_idx = convert_mot_ids(global_cached_banks[self.motbank_names[mbank_idx]], mlist_idx, mot_idx)
 			end
+			
 			self.mbank_idx = find_index(self.motbank_names, motbank_name) or mbank_idx
 			if static_funcs.setup_mbank_method then 
+				self.motion:call("setupMotionBank")
 				self:change_motion(self.mlist_idx, self.mot_idx)--, true) --thanks to setupMotionBank(), it can change immediately
 				self:update_banks()
 			end
@@ -1809,10 +1855,10 @@ GameObject.update_banks = function(self, force)
 			global_cached_banks[bank_name] = cached_bank
 			self.cached_banks[self.mbank_idx] = cached_bank
 			
-			if isRE8 and not pre_cached_banks then 
+			--[[if isRE8 and not pre_cached_banks then 
 				held_transforms[self.xform] = held_transforms[self.xform] or GameObject:new_AnimObject{xform=self.xform}
 				if self.total_objects_idx then total_objects[self.total_objects_idx] = held_transforms[self.xform] end
-			end
+			end]]
 			
 			--Cached_bank saved data table:
 			if self.motbank_names[self.mbank_idx] then
@@ -2323,6 +2369,10 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 		else]]
 		if (is_main or embedded_mode) or (not imgui.same_line() and imgui.tree_node_str_id(anim_object.name, subtitle_string)) then
 			
+			if anim_object.layer and not (anim_object.alt_names or anim_object.motbank_names) then --if it got here without alt_names or motbank names, there was some table confusion somewhere and its not a real AnimObject
+				anim_object = GameObject:new_AnimObject({xform=anim_object.xform}, anim_object)
+			end
+			
 			if anim_object.motbank_names then 
 				if not selected and anim_object.display and anim_object.body_part == "Body" then
 					selected = anim_object
@@ -2405,8 +2455,9 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 	
 	local is_main = (idx == 0)
 	--if cutscene_mode and not forced_mode then return end
+	local good =  game_object and game_object.motion and game_object.layer
 		
-	if game_object and game_object.motion and ((game_object.layer and game_object.end_frame)) then --not figure_mode or 
+	if good and game_object.end_frame then --not figure_mode or 
 		
 		imgui.begin_rect()
 		imgui.push_id(game_object.xform)
@@ -2660,6 +2711,9 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 			changed = nil
 		imgui.pop_id()
 		imgui.end_rect(5)
+	elseif good and toks % 16 == 0 then
+		game_object.end_frame = game_object.layer:call("get_EndFrame")
+		--game_object:update_components()
 	end
 end
 
@@ -2692,8 +2746,8 @@ local function show_emv_settings()
 				EMVSettings = merge_tables({}, default_settings)
 				EMVSetting_was_changed = true
 			end
-			
 			if (figure_mode or forced_mode or cutscene_mode or total_objects) and not imgui.same_line() and imgui.button("Restart EMV") then 
+				forced_object = forced_mode
 				clear_figures()
 			end 
 			--[[
@@ -2823,7 +2877,7 @@ re.on_frame(function()
 				local results = scene:call("findComponents(System.Type)", sdk.typeof("app.CutScenePlaySetting"))
 				results = results and results:add_ref()
 				for i, element in ipairs(results.get_elements and results:get_elements() or {}) do
-					local gameobj = element:call("get_GameObject")
+					local gameobj = get_GameObject(element)
 					local xform = gameobj and gameobj:call("get_Transform")
 					local object = held_transforms[xform] or New_AnimObject({gameobj=gameobj, xform=xform})
 					held_transforms[xform] = object
@@ -2833,7 +2887,7 @@ re.on_frame(function()
 				local results = {}
 				for i, result in ipairs(findc((isDMC and "app.CutScenePlaySetting") or sdk.game_namespace("timeline.CutSceneMediator"))) do 
 					if is_valid_obj(result) then
-						local gameobj = result:call("get_GameObject")
+						local gameobj = get_GameObject(result)
 						local timeline = gameobj and lua_find_component(gameobj, "via.timeline.Timeline")
 						local amt = timeline and timeline:call("get_BindGameObjects")
 						amt = amt and amt.get_size and amt:get_size()
@@ -2854,7 +2908,7 @@ re.on_frame(function()
 	camera = sdk.get_primary_camera()
 	camera = camera and camera:add_ref()
 	if not camera or tics < 2 then return end
-	camera = (tics > 10) and (camera and  get_anim_object(camera:call("get_GameObject")))
+	camera = (tics > 10) and (camera and  get_anim_object(get_GameObject(camera)))
 	
 	--Take a global GameObject dubbed "forced_object" and turn it into forced_mode animation viewer object:
 	if _G.forced_object then
@@ -2862,11 +2916,8 @@ re.on_frame(function()
 		forced_object = nil
 	end
 	
-	if not (cutscene_mode or figure_mode or forced_mode) then
-		return
-	end
-	
-	if ((figure_mode or forced_mode) and not RN.loaded_resources) then--and (not (RN.motbank_resource_names or {})[3] or not next(RSCache.motbank_resources or {})))	then 
+	if ((figure_mode or forced_mode ) and not RN.loaded_resources) then--and (not (RN.motbank_resource_names or {})[3] or not next(RSCache.motbank_resources or {})))	then 
+		--re.msg_safe("triggered", 325647)
 		--res.reset()
 		--EMVSettings.init_EMVSettings()
 		--re.msg_safe("Starting res load", 314155)
@@ -2886,10 +2937,6 @@ re.on_frame(function()
 		return
 	end
 	
-	if figure_mode and not RSCache.motbank_resources then 
-		imgui.text("Enhanced Model Viewer: No resources found!")
-		return
-	end
 	
 	-- Begin EMV stuff ------------------------------------------------------------------------------------
 	--Load + cache motions and build list of motion data:
@@ -2909,6 +2956,15 @@ re.on_frame(function()
 		end
 		local obj_to_check = dummy_obj
 		if obj_to_check then obj_to_check:pre_cache_all_banks() end
+	end
+	
+	if not (cutscene_mode or figure_mode or forced_mode) then
+		return
+	end
+	
+	if figure_mode and not RSCache.motbank_resources then 
+		imgui.text("Enhanced Model Viewer: No resources found!")
+		return
 	end
 	
 	--Check cutscene mode AB loop and small updates to ev_object
@@ -2931,7 +2987,7 @@ re.on_frame(function()
 				cutscene_cam = get_anim_object(scene:call("findGameObject(System.String)", "EventCameraController"))
 			elseif isDMC then
 				cutscene_cam = ev_object.components_named.CutScenePlaySetting:get_field("<camera>k__BackingField")
-				cutscene_cam = cutscene_cam and get_anim_object(cutscene_cam:call("get_GameObject"))
+				cutscene_cam = cutscene_cam and get_anim_object(get_GameObject(cutscene_cam))
 			end
 		end
 	end
@@ -2945,7 +3001,7 @@ re.on_frame(function()
 	--Build list of model viewer objects:
 	if not forced_mode and (not total_objects[1] or not imgui_anims[1] or not imgui_others[1]) then -- and random(60) --or (#imgui_anims == 0 and this_figure_via_motions_count > 1)
 		
-		log.info("Creating total_objects...")
+		
 		if not fig_mgr_name then
 			fig_mgr_name, current_fig_name = nil, nil
 			if cutscene_mode then
@@ -2976,7 +3032,7 @@ re.on_frame(function()
 			if selected and not is_valid_obj(selected.xform) then 
 				selected = nil
 			end
-			
+			log.info("starting")
 			--[[if isRE8 then 
 				local figdata = figure_mode.components_named.FigureDataHolder
 				figdata._ = figdata._ or create_REMgdObj(figdata)
@@ -2985,18 +3041,19 @@ re.on_frame(function()
 				list = merge_indexed_tables(list, lua_get_system_array(figdata.physicsCloths))
 				list = merge_indexed_tables(list, lua_get_system_array(figdata.chains))
 				for i, elem in ipairs(merge_indexed_tables(list, lua_get_system_array(figdata.gpuCloths))) do 
-					local xform = elem:call("get_GameObject"):call("get_Transform")
+					local xform = get_GameObject(elem, 1)
 					figlist[xform] = xform and (held_transforms[xform] or GameObject:new_AnimObject{xform=xform})
 				end
 			end]]
-			
+			log.info("A")
 			all_transforms = lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof("via.Transform")) or {}, false, true)
 			if all_transforms then --gather gameobjects for model viewer
+				log.info("B")
 				local counter = 0
 				for i, xform in ipairs(all_transforms) do
 					counter = counter + 1
 					if is_valid_obj(xform) then 
-						local gameobj = xform:call("get_GameObject")
+						local gameobj = get_GameObject(xform)
 						if gameobj then 
 							local name = gameobj:call("get_Name")
 							local new_args = { gameobj=gameobj, xform=xform, index=i, name=name }
@@ -3020,7 +3077,7 @@ re.on_frame(function()
 				--total_args = reverse_table(total_args)
 				for i, args in ipairs(total_args) do 
 					local new_obj = held_transforms[args.xform] or New_AnimObject(args)
-					if new_obj and not unique_xforms[new_obj.xform] then--is_unique_xform(temp_objs, new_obj.xform) then
+					if new_obj and not unique_xforms[new_obj.xform] then--not contains_xform(temp_objs, new_obj.xform) then
 						table.insert(temp_objs, new_obj)
 						unique_xforms[new_obj.xform] = #temp_objs
 						local name = string.gsub(new_obj.name, '[ \t]+%f[\r\n%z]', '') 
@@ -3037,7 +3094,7 @@ re.on_frame(function()
 						if new_obj.name == "UI5005GUI" then 
 							dmc5_fig_mgr = new_obj
 						end
-						if new_obj.parent and not unique_xforms[new_obj.parent] and is_unique_xform(total_args, new_obj.parent) then 
+						if new_obj.parent and not unique_xforms[new_obj.parent] and not contains_xform(total_args, new_obj.parent) then 
 							unique_xforms[new_obj.xform] = #temp_objs
 							table.insert(total_args, { xform=new_obj.parent })
 						end
@@ -3045,7 +3102,7 @@ re.on_frame(function()
 				end
 				for i, obj in ipairs(temp_objs) do --get children
 					for i, child in ipairs(obj.children or {}) do 
-						if not unique_xforms[child] and is_unique_xform(temp_objs, child) then
+						if not unique_xforms[child] and not contains_xform(temp_objs, child) then
 							local new_obj = held_transforms[child] or New_AnimObject({xform=child})
 							if new_obj then 
 								table.insert(temp_objs, new_obj)
@@ -3058,23 +3115,24 @@ re.on_frame(function()
 					obj.total_objects_idx = i
 					table.insert(total_objects, obj) 
 				end
+				log.info("C " .. #total_objects)
 				--log.info("total_objects size is " .. #total_objects)
 			end
 		end
 		
 		if ev_object and ev_object.bind_gameobjects then --and ev_object.bind_gameobjects then --collect missing actors
 			for i, bind_object in ipairs(ev_object.bind_gameobjects) do 
-				if is_unique_xform(total_objects, bind_object.xform) then
+				if not contains_xform(total_objects, bind_object.xform) then
 					table.insert(total_objects, bind_object)
 				end
 			end
 			--[[local animatables = scene:call("findComponents(System.Type)", sdk.typeof("via.motion.DummySkeleton"))
 			animatables = animatables and animatables.get_elements and animatables:get_elements() or {}
 			for i, comp in ipairs(animatables) do 
-				animatables[i] = comp:call("get_GameObject"):call("get_Transform")
+				animatables[i] = get_GameObject(comp, 1)
 			end
 			for i, xform in ipairs(animatables) do 
-				if is_unique_xform(total_objects, xform) then
+				if not contains_xform(total_objects, xform) then
 					table.insert(total_objects, held_transforms[xform] or New_AnimObject({xform=xform})) 
 					--if #total_objects > 50 then break end
 				end
@@ -3082,7 +3140,7 @@ re.on_frame(function()
 		end
 	end
 	
-	if ((#imgui_anims == 0) or (#imgui_others == 0)) or (toks % 60 == 0) then
+	if ((#imgui_anims == 0) or (#imgui_others == 0)) or ((toks % 60) == 0) then
 	
 		lightsets = {}
 		imgui_anims = {}
@@ -3133,7 +3191,7 @@ re.on_frame(function()
 							light_obj.lightset.lights = light_obj.lightset.lights or {}
 							light_obj.lightset.lights[light_obj.name] = light_obj
 							--light_obj.lightset.gameobj:call("set_UpdateSelf", false)
-							if is_unique_xform(total_objects, light_obj.lightset.xform) then
+							if not contains_xform(total_objects, light_obj.lightset.xform) then
 								table.insert(total_objects, light_obj.lightset)
 							end
 							lightsets[light_obj.lightset.name] = light_obj.lightset
@@ -3223,6 +3281,10 @@ re.on_frame(function()
 				imgui.text("																	" .. tostring(current_figure_name))
 				
 				show_emv_settings()
+				if imgui.button("Restart EMV") then 
+					forced_object = forced_mode
+					clear_figures()
+				end
 				
 				--[[if isRE8 and figure_mode then 
 					imgui.text("\nFIGURE SETTINGS")
