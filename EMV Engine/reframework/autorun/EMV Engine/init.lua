@@ -2320,8 +2320,8 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 							end
 						end
 						new_tbl[key] = str
-					elseif value.__is_vec4==true then
-						new_tbl[key] = "qua:" .. value.x .. " " .. value.y .. " " .. value.z .. " " .. value.w
+					--elseif value.__is_vec4==true then
+					--	new_tbl[key] = "qua:" .. value.x .. " " .. value.y .. " " .. value.z .. " " .. value.w
 					elseif type(value.x) == "number" then
 						new_tbl[key] = "vec:" .. value.x .. " " .. value.y .. (value.z and ((" " .. value.z) .. (value.w and (" " .. value.w) or "")) or "")
 					end
@@ -5009,14 +5009,14 @@ local function show_imgui_vec4(value, name, is_int, increment, normalize)
 	local increment = increment or 0.1
 	if type(value) ~= "number" then
 		--local typename = value.__type and value.__type.name  glm::qua<float,0>
-		if value.__is_vec4  then 
+		if value.w  then 
 			if name:find("olor") then
 				changed, value = imgui.color_edit4(name, value, 17301504)
 			else
 				changed, value = imgui.drag_float4(name, value, increment, -10000.0, 10000.0)
-				if changed and normalize or (value.__is_vec4==true) then -- (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
-					value:normalize() 
-				end
+				--if changed and normalize or (value.__is_vec4==true) then -- (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
+				--	value:normalize() 
+				--end
 			end
 		elseif value.z then
 			if is_int then
@@ -5207,10 +5207,10 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		end
 	elseif value and ((var_metadata.is_lua_type == "qua") or (var_metadata.is_lua_type == "vec") ) then --all other lua types --or (value and var_metadata.can_index and (type(value.x or value[0])=="number"))
 		changed, value = show_imgui_vec4(value, display_name, nil, var_metadata.increment)
-		if value.__is_vec4==true then 
-			imgui.text("Before imgui: " .. tostring(value) .. ", " .. vector_to_string(value))
-		end
-		if var_metadata.is_lua_type=="qua" and value.__is_vec4==1 then 
+		--if value.__is_vec4==true then 
+		--	imgui.text("Before imgui: " .. tostring(value) .. ", " .. vector_to_string(value))
+		--end
+		if var_metadata.is_lua_type=="qua" then 
 			value = Quaternion.new(value.x, value.y, value.z, value.w) 
 		end
 		if value and ((var_metadata.is_lua_type == "qua") or (var_metadata.is_lua_type == "vec")) then
@@ -9133,7 +9133,9 @@ re.on_frame(function()
 					parent_name = name:match("^(.-)%.")
 					obj_name = name:match("^.+%.(.-)$")
 				end
+				
 				local gameobj = scene:call("findGameObject(System.String)", parent_name or obj_name)
+				log.info("searching for " .. (parent_name or obj_name))
 				if gameobj then 
 					local xform = gameobj:call("get_Transform")
 					--detect that one example of the object exists and then refresh the whole list if it's not already cached:

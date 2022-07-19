@@ -1,6 +1,6 @@
 # EMV-Engine (REFramework-Scripts)
 
-This is a repository of my extensive RE Engine Lua script mods, for use with [praydog](https://github.com/praydog) and [Cursey](https://github.com/cursey)'s "REFramework"   
+This is a repository of my RE Engine Lua script mods, for use with [praydog](https://github.com/praydog) and [Cursey](https://github.com/cursey)'s "REFramework"   
 ### Supported Games:
 * Devil May Cry 5
 * Resident Evil 7
@@ -19,7 +19,7 @@ This is a repository of my extensive RE Engine Lua script mods, for use with [pr
 * Alternatively, they can be installed or run manually by placing them in your game directory's reframework/autorun folder, or by running them manually with "Run Script" under REFramework's "ScriptRunner" UI  
 
 # EMV Engine Lua Script (Required)
-**EMV Engine** is a massive Lua script containing many useful utility features and functions that all my other scripts rely on. 
+**EMV Engine** is a large Lua script containing many useful utility features and functions that all my other scripts rely on. 
 The script does nothing on its own, but is utilized when Enhanced Model Viewer, Gravity Gun, Console or Enemy Spawner are used run.  
 ![alpha](https://i.imgur.com/2ykqQ8b.jpg)
 
@@ -46,30 +46,33 @@ Includes a variety of useful features in imgui for changing object settings, inc
 ![Imgui Managed Object Control Panel](https://i.imgur.com/5rGLiIr.jpg)
 * String values in the format **vec:1.0 0.0 0.0** or **res:[resource path]** are special string representations of vectors, matrices, quaternions and resources. These values can be copy pasted to transfer the real value  
 * Certain fields have special capabilities, such as for resources (files). You can click the checkbox to add a new file by typing its path, and other resources will appear in the list as you see them in the control panels.
-![Loading Resources](https://i.imgur.com/kUMLFfo.png)
+![Loading Resources](https://i.imgur.com/6MwUsjj.png)
 #### Advanced Managed Object Settings
 * A tree node titled "**\[Object Explorer\]**" contains advanced settings for a managed object, and displays Object Explorer
 * The **Update** button updates all fields of a Managed Object, and the **checkbox** next to it makes it so all Managed Objects of that type will have all their fields updated every frame. This is disabled by default and fields are cached, because this can get expensive with many control panels open  
 * **Clear Lua Data** makes the managed object Lua class instance be recreated, refreshing all properties anew
-* **Sort Alphabetically** Sorts the fields and properties in alphabetical ordered
+* **Sort Alphabetically** Sorts the fields and properties in alphabetical order
 * **Save/Load GameObject** are described in the Collection section below
 * **Assign to Console Var: tmp** makes a global variable "tmp" of the managed object that can be used in the console
 * **Find all [via.Components]** creates a console command that displays a list of all existing components of the same type as this Managed Object
+* The **Mini Console** provides a text input for the console embedded inside the \[Object Explorer\] menu. 
+* **Show History** forces the child window of the Mini Console to expand and displays recent commands inside
 ![Object Exlporer Menu](https://i.imgur.com/RP1Le0N.png)  
 #### EMV Engine Settings
 * **Remember Settings** makes EMV Engine save and load data from JSON. Many features rely on this
-* **Affect Children** makes many applied settings and features apply to a GameObject and all its children together
-* **Cache Ordered Dictionaries** makes it so dictionaries that are sorted alphabetically are not sorted every frame, improving performance
+* **Affect Children** makes many settings and features apply to a GameObject and all its children together
+* **Cache Ordered Dictionaries** makes it so dictionaries that are sorted alphanumberically are not sorted every frame, improving performance
 * **Remember Material Settings** toggles on and off the automatic loading of materials saved with the Material Manager  
 ![EMV Engine Settings](https://i.imgur.com/ge85DGM.png)
 #### via.GameObject / via.Transform / via.Component Tools
-* **Enabled Checkbox** lets you enable and disable the managed object (making it disappear and stop working on disable). Be careful using this with important objects, such as the camera.
+* **Enabled** Checkbox lets you enable and disable the managed object (making it disappear and stop working on disable). Be careful using this with important objects, such as the camera.
 * The **Destroy** button will delete the managed object or GameObject. Be careful with this as well
 * **Enable Animation Viewer** activates Enhanced Model Viewer if it is running, and adds the selected GameObject and its children to its list of animated actors
 * The **Set Parent** and **Unset / Reset** buttons let you pick another GameObject to be this GameObject's parent
 * **Show Transform** draws text in the game world indicating where a mesh is, visible through walls
 * The **Grab** is available when the Gravity Gun is running, and lets you grab the object with the gravity gun
 * The **Add to Collection** button is a means for adding new GameObjects to be pinned in the Collection menu
+* The **Look-At** checkbox activates lookAt mode, where the transform of the object or one of its bones can be forced to point towards another object
 * The **Show Joints** checkbox lets you see the bones of a GameObject from anywhere:  
 ![Show Joints](https://i.imgur.com/f5vnA1C.png)
 * **Show Joint Names** displays the names of each bone when Show Joints is checked.
@@ -78,7 +81,7 @@ Includes a variety of useful features in imgui for changing object settings, inc
 * **Max Fields / Properties Per Grouping** specifies the maximum number of list entries that will be displayed together. Groupings will make the fields and properties of large Managed Objects appear as **Elements 1-100, Elements 101-200** etc if the limit is 100  
 * **Show Extra Fields** displays Managed Object properties that may be hidden by default, due to being duplicates of fields or having strange behaviors (such as requiring an unknown extra parameter)
 * **Embed Into Object Exlplorer (Lua)** makes it so Imgui Managed Object Control Panel is shown as an imgui tree node any place where a script (any script) uses **object_explorer:handle_address()** function, embedding itself into many other scripts
-* **Exception Handling** makes it all field getters and setters used by EMV are put inside proptection function calls, to avoid crashes  
+* **Exception Handling** makes it so all field getters and setters used by EMV are called only inside protected function calls, to avoid crashes  
 ![Managed Object Control Panel Settings](https://i.imgur.com/ebzRgpq.png)
 * The **Freeze** and **X** buttons will appear next to recently changed fields, allowing for them to be reset to original value with X or frozen to the set value  
 ![Freeze](https://i.imgur.com/n9K6rAs.png)
@@ -200,7 +203,7 @@ Includes a variety of useful features in imgui for changing object settings, inc
 * Input whole Lua expressions to the text box and make them be evaluated by ending with a semicolon
 * Click the "Add" button to add a new Key + Value pair to a table
 * Remove table entries or cancel a new addition by setting values as "nil" or "" (nothing)
-* Arrays (ordered tables) are auto-detected and have special behaviors. Adding a new table and setting its key to the middle of the list will insert the new entry to that position and push all the others forward. Removing will do the same
+* Arrays (ordered tables) are auto-detected and have special behaviors. Adding a new value and setting its key to the middle of the list will insert the new entry to that position and push all the others forward. Making an item in the middle of an array nil will trigger table.remove
 * Set the new \[Key\] on the new table entry to an existing key to replace the entry (or erase it if set to nil). This is also the way to remove Tree Node elements (such as other tables and Managed Objects)  
 
 [![Editable Tables Video](https://i.imgur.com/vMDpQqN.png)](https://cdn.discordapp.com/attachments/925838720534446100/997197236230426774/2022-07-14_13-34-40.mp4)
@@ -243,8 +246,8 @@ Additionally, you can force the animation viewer to appear on most animatable ob
 * **Remove Mismatched Motlists** is a feature for when a matched motbank contains extra motlists that are of the wrong body type (facial animations for a body or vice versa), and removes mismatched ones
 * **Cache Figure Data** makes Enhanced Model Viewer use saved JSON data for its matched banks and motbanks, loading them faster
 * **Enable Hotkeys** makes the viewer's hotkeys (pictured below) be usable
-* **Re-cache Animations** is important for RE Engine games before RE8 in particular, and is what builds the huge list of motbanks, motlists and motions that EMV uses
-* **Clear Motbank Resource Cache** Clears the global list of motionbanks loaded by EMV, if it has become polluted with a broken file or has not been correctly filled
+* **Re-cache Animations** makes EMV re-read all motbank files and cache their contents. This particularly important for RE Engine games before RE8, and is what builds the huge list of motbanks, motlists and motions that EMV uses
+* **Clear Motbank Resource Cache** Clears the global list of motionbanks loaded by EMV, if it has become polluted with a broken file or has not been correctly filled with data
 * **Clear Figure Data** Deletes all the current Cached Figure Data described above  
 ![Enhanced Model Viewer Settings](https://i.imgur.com/ipuAxja.png)
 
@@ -285,12 +288,12 @@ Additionally, you can force the animation viewer to appear on most animatable ob
 * Check the **Unlock** checkbox to unlock only this light (as in "Unlock All Lights")
 * Press the **Move to Cam** button to move the light to the position of the camera. May require "Unlock" to be enabled on the light
 * If an IBL is seen in the Lights menu, its background can be set there in any game:
-![Animation Controls](https://i.imgur.com/X3LyjhM.png)
+![Animation Controls](https://i.imgur.com/CLLiCqf.png)
 
 #### Background
 * Available for RE2R and RE3R, may come back to DMC5 soon
 * Manupulates a via.render.IBL object, and can quickly load a Greenscreen background or any other background texture  
-![IBL](https://i.imgur.com/CLLiCqf.png)
+![IBL](https://i.imgur.com/X3LyjhM.png)
 
 #### Other Objects
 * **Other objects** is a dumping ground for all other unsorted objects in the figure. Objects are only shown if they are not parented to any other Other-Objects
@@ -353,11 +356,11 @@ For more information on making REFramework scripts, visit the [wiki](https://cur
 * Press **tab** or the **blank button** after the "Enter" button to **AutoComplete**, like in a terminal or command prompt
 * Press the **UP** and **DOWN** arrow keys on your keyboard to cycle through your history of past commands
 * Type '**/**' followed by some text to search the game world for objects with that text in their names
-* Type '**folders**' to get a list of all via.Folders in the game. Folders (representing SCN files) are the principal way in which the game contains and loads GameObjects
+* Type '**folders**' to get a list of all via.Folders in the game. Folders (representing SCN files) are the principal way in which the game contains and loads GameObjects, and can be activated or deactivated to spawn their contents
 * Type '**transforms**' to get a list of all objects in the game world, ordered by creation
 * Execute multiple lines of code within the console by using semicolons to separate statements
-* Use '=' to make assignments within for loops inside your Console commands, or ' = ' to make a one-line assignment and view the result
-*Example of a multi-command input, finding Timeline components with **findc** and sorting them by "amt" using the **qsort** function:*
+* Use '=' to make assignments within for loops inside your Console commands, or ' = ' to make a one-line assignment and view the result  
+*Example of a multi-command input, finding Timeline components with **findc** and sorting them by "amt" using the **qsort** function:*  
 ![MultiCommand](https://i.imgur.com/VwZ7IwM.png)
 
 <details>
@@ -366,7 +369,7 @@ For more information on making REFramework scripts, visit the [wiki](https://cur
 #### AutoComplete 
 * **AutoComplete** is a useful tool capable of guessing what you might want to type and completing your input. Press Tab or the Blank button shown below to AutoComplete  
 ![AutoComplete](https://i.imgur.com/Ki8fANG.png)
-* AutoComplete can give you the names of available functions, subtables, and values in the global scope as well as in your own tables and userdatas, with hidden metatable functions shown
+* AutoComplete can give you the names of available functions, subtables, and values in the global scope as well as in your own tables and userdatas, with hidden metatable variables shown
 * AutoComplete will work while typing paramaters for multiple nested function calls, as long as its at the end
 * Managed Objects will autocomplete to show their RE Engine methods, using a table for their arguments like this:   
 ![AutoComplete Method Call](https://i.imgur.com/nV79MMc.png)
@@ -388,7 +391,7 @@ For more information on making REFramework scripts, visit the [wiki](https://cur
 </details>
 
 # Enemy Spawner
-This script for RE2R, RE3R and DMC5 (with other spawning features for the other games) allows you to spawn any enemies at the last location that the Gravity gun was aimed at.  
+This script for RE2R, RE3R and DMC5 (with other spawning features for the other games) allows you to spawn any enemies at the last location that the Gravity gun was aimed at  
 * In all games, PFB files (prefabs) can also be spawned, creating a new instance of the GameObject contained in the PFB, from enemies to EFX effects
 * Includes custom SCN files that add new via.Folders to the game, to contain the spawned enemies and manage them separately
 
@@ -427,4 +430,4 @@ Just be sure to give credit where it is due, and to link users to this repo for 
 *\*These scripts are each a work-in-progress and may have bugs or cause crashes across the various game and engine versions*  
 
 							
-							Created by alphaZomega, 2022
+					Created by alphaZomega, 2022

@@ -642,6 +642,15 @@ GameObject.new_AnimObject = function(self, args, o)
 	
 	local forced_mode = args.forced_mode or forced_mode
 	
+	for i, child in ipairs(self.children or {}) do 
+		local childgameobj = child:call("get_GameObject")
+		if childgameobj then
+			o.physicscloth = o.physicscloth or lua_find_component(childgameobj, "app.PhysicsCloth") or nil
+			o.chain = o.chain or lua_find_component(childgameobj, "via.motion.Chain") or nil
+			if (o.physicscloth or o.chain) then break end
+		end
+	end
+	
 	--Check for parent container object:
 	if self.children and (self.components_named.DummySkeleton or self.components_named.CharacterController or (self.mesh and self.components_named.FigureObjectBehavior)) then --(isRE2 or isRE3) and 
 	--if self.children and self.components_named.Motion and 
@@ -2691,6 +2700,11 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 			
 			if control_changed or seek_changed then 
 				if EMVSettings.seek_all then
+					if do_reset_gpuc then 
+						for i, item in ipairs(merge_indexed_tables(findc("via.motion.Chain"), findc("app.PhysicsCloth"))) do
+							item:call("restart") 
+						end
+					end
 					for i, object in ipairs(imgui_anims or {game_object}) do
 						object:control_action( { paused=game_object.paused, do_restart=game_object.do_restart, do_seek=seek_changed, play_speed=game_object.play_speed, current_frame=current_frame, do_reset_gpuc=do_reset_gpuc } )
 					end
