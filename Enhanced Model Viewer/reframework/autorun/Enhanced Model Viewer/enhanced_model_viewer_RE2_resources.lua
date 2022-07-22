@@ -30,11 +30,11 @@ re.on_application_entry("UpdateMotion", function()
 		if EMVSettings.special_mode == 2 then 
 			table.insert(all_motbanks, "sectionroot/animation/player/pl10/Face.motbank")
 			table.insert(all_motbanks, "sectionroot/animation/player/pl10/bank/pl10body.motbank")
-			re.msg("Loaded Claire Assets")
+			--re.msg("Loaded Claire Assets")
 		elseif EMVSettings.special_mode == 3 then
 			table.insert(all_motbanks, "sectionroot/animation/player/alphaz/pl2000_cutscene_body.motbank")
 			table.insert(all_motbanks, "sectionroot/animation/player/alphaz/pl2050_cutscene_face.motbank")
-			re.msg("Loaded Ada Assets")
+			--re.msg("Loaded Ada Assets")
 		else	
 			--table.insert(all_motbanks, "sectionroot/animation/player/pl00/bank/pl0000_cutscene_body.motbank")
 			--table.insert(all_motbanks, "sectionroot/animation/player/pl00/pl0050_cutscene_face.motbank")
@@ -515,7 +515,7 @@ re.on_application_entry("UpdateMotion", function()
 			table.insert(all_motbanks, "sectionroot/animation/player/alphaz/pl6050_cutscene_face.motbank")
 			--]]
 
-			re.msg("Loaded Other Assets")
+			--re.msg("Loaded Other Assets")
 		end
 		
 		for i, bank_string in ipairs(all_motbanks) do 

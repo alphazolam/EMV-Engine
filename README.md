@@ -1,7 +1,7 @@
 # EMV-Engine (REFramework-Scripts)
 
 This is a repository of my RE Engine Lua script mods, for use with [praydog](https://github.com/praydog) and [Cursey](https://github.com/cursey)'s "REFramework"   
-### Supported Games:
+### Supported Games
 * Devil May Cry 5
 * Resident Evil 7
 * Resident Evil 8
@@ -25,7 +25,7 @@ The script does nothing on its own, but is utilized when Enhanced Model Viewer, 
 
 ## Features:  
 
-### Imgui Managed Object Control Panel: 
+### Imgui Managed Object Control Panel  
 Views GameObjects as control panels of their fields and properties, embedding many other tools inside  
 Includes a variety of useful features in imgui for changing object settings, including the ability to: 
 

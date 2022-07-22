@@ -499,7 +499,7 @@ local function orderedNext(t, state)
     if state == nil then
 		local do_multitype = type(state) ~= "string" and type(state) ~= "number"
 		if SettingsCache.cache_orderedPairs then 
-			if not G_ordered[t] or (G_ordered[t].ords and (#G_ordered[t].ords ~= get_table_size(t))) then 
+			if not G_ordered[t] or (t.__orderedIndex and (#t.__orderedIndex ~= get_table_size(t))) then 
 				t.__orderedIndex = __genOrderedIndex(t , do_multitype)
 				G_ordered[t] = {ords=t.__orderedIndex, open=uptime}
 			end
@@ -608,8 +608,16 @@ local function findtdm(typedef_name, method_name)
 end
 
 --Find components by type, returned as components
-local function findc(typedef_name)
-	return find(typedef_name, true)
+local function findc(typedef_name, gameobj_name)
+	local results = find(typedef_name, true)
+	if gameobj_name then 
+		for i, result in ipairs(results) do 
+			if get_GameObject(result, true) == gameobj_name then 
+				return result
+			end
+		end
+	end
+	return results
 end
 
 --Wrapper for converting an address to an object
@@ -6205,7 +6213,7 @@ local Material = {
 				--end
 			end
 			for i=1, o.var_num do
-				var_name = o.mesh:call("getMaterialVariableName", o.id, i-1)
+				local var_name = o.mesh:call("getMaterialVariableName", o.id, i-1)
 				table.insert(o.variable_names, var_name)
 				o.var_names_dict[var_name] = i
 				local type_of = o.mesh:call("getMaterialVariableType", o.id, i-1)
@@ -6626,6 +6634,26 @@ show_imgui_mats = function(anim_object)
 			anim_object.mesh:call("set_Material", RSCache.mdf2_resources[ RN.mdf2_resource_names[anim_object.current_mdf_idx] ])
 			anim_object.mpaths.mdf2_path = RN.mdf2_resource_names[ anim_object.current_mdf_idx ]
 			anim_object:set_materials() 
+		end
+	end
+	
+	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
+	if _G.BitStream and mesh then
+		if anim_object.materials.save_path_exists then
+			if imgui.button("Save") then
+				local mdfFile = MDFFile:new{filepath=anim_object.materials.save_path_text, mobject=mesh}
+				if mdfFile:save(anim_object.materials.save_path_text) then 
+					re.msg("Saved MDF file to:\nreframework/data/" .. anim_object.materials.save_path_text)
+				end
+			end
+			imgui.same_line()
+		end
+		if anim_object.materials.save_path_text==nil then
+			anim_object.materials.save_path_text = anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. (MDFFile.exts[game_name] or "")
+		end
+		changed, anim_object.materials.save_path_text = imgui.input_text("Save File", anim_object.materials.save_path_text)
+		if changed or anim_object.materials.save_path_exists==nil then
+			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text)
 		end
 	end
 	
@@ -7839,7 +7867,6 @@ GameObject = {
 		end
 		
 		self.__index = self
-		asd = o.gameobj
 		o.name = args.name or o.gameobj:call("get_Name")
 		o.name_w_parent = o.name
 		o.parent = args.parent or o.xform:call("get_Parent")
@@ -8717,7 +8744,7 @@ GameObject = {
 			changed = false
 			for i, child in ipairs(self.children) do
 				local child_obj = held_transforms[child]
-				if child_obj and (restore or (cutscene_mode or (not self.display or child_obj.display_org == true))) then
+				if child_obj and (child_obj.parent == self.xform) and (restore or (cutscene_mode or (not self.display or child_obj.display_org == true))) then
 					child_obj.display = self.display
 					child_obj:toggle_display(true)
 				end
@@ -9135,7 +9162,7 @@ re.on_frame(function()
 				end
 				
 				local gameobj = scene:call("findGameObject(System.String)", parent_name or obj_name)
-				log.info("searching for " .. (parent_name or obj_name))
+				--log.info("searching for " .. (parent_name or obj_name))
 				if gameobj then 
 					local xform = gameobj:call("get_Transform")
 					--detect that one example of the object exists and then refresh the whole list if it's not already cached:
@@ -9329,6 +9356,10 @@ re.on_draw_ui(function()
 	
 	update_lists_once = nil
 end)
+
+--BitStream writer Lua class
+--alphaZomega, July 19, 2022
+
 
 --These functions available by require() ------------------------------------------------------------------------------------------
 EMV = {
