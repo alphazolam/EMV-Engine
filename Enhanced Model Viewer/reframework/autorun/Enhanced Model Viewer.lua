@@ -1549,8 +1549,8 @@ GameObject.next_motion = function(self, mlist_idx, mot_idx)
 	if not self.mbank_idx then
 		self:get_current_bank_name()
 	end
-	new_mlist_idx = mlist_idx or self.mlist_idx
-	new_mot_idx = mot_idx or self.mot_idx
+	local new_mlist_idx = mlist_idx or self.mlist_idx
+	local new_mot_idx = mot_idx or self.mot_idx
 	local new_mbank_idx = self.mbank_idx
 	local next_idx = new_mot_idx + 1; 
 	local prev_idx = new_mot_idx - 1; 

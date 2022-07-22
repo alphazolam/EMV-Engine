@@ -6641,24 +6641,30 @@ show_imgui_mats = function(anim_object)
 	if _G.BitStream and mesh then
 		if anim_object.materials.save_path_exists then
 			if imgui.button("Save") then
-				local mdfFile = MDFFile:new{filepath=anim_object.materials.save_path_text, mobject=mesh}
-				if mdfFile:save(anim_object.materials.save_path_text) then 
-					re.msg("Saved MDF file to:\nreframework/data/" .. anim_object.materials.save_path_text)
+				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
+				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
+				if mdfFile:save(real_path) then 
+					re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
 				end
+				anim_object.materials.mdfFile = mdfFile
 			end
 			imgui.same_line()
 		end
 		if anim_object.materials.save_path_text==nil then
-			anim_object.materials.save_path_text = anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. (MDFFile.exts[game_name] or "")
+			anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. (MDFFile.extensions[game_name] or "")
 		end
 		changed, anim_object.materials.save_path_text = imgui.input_text("Save File", anim_object.materials.save_path_text)
 		if changed or anim_object.materials.save_path_exists==nil then
-			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text)
+			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
+		end
+		if anim_object.materials.mdfFile and imgui.tree_node("[MDF Lua]") then 
+			read_imgui_element(anim_object.materials.mdfFile)
+			imgui.tree_pop()
 		end
 	end
 	
 	for i, mat in ipairs(anim_object.materials) do
-		mat:draw_imgui_mat()
+		mat:draw_imgui_mat(anim_object.materials.mdfFile)
 	end
 end
 
