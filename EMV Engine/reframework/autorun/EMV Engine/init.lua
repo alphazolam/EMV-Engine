@@ -2,6 +2,7 @@
 --Console, imgui and support classes and functions for REFramework
 --July 12 2022
 --if true then return end
+
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
 metadata = {}				--Tables used for indexing REManagedObjects, RETransforms, SystemArrays and ValueTypes
@@ -1044,6 +1045,10 @@ local ImguiTable = {
 		o.is_array = (args.is_array or isArray(args.tbl)) or nil
 		o.is_vec = not not (tostring(args.tbl):find("::vector")) or nil
 		o.tbl = (o.is_vec and vector_to_table(args.tbl)) or args.tbl
+		
+		local tbl_size = get_table_size(o.tbl)
+		if tbl_size > 25000 then return {} end
+		
 		o.skip_underscores = args.skip_underscores
 		o.pairs = o.is_array and ipairs or orderedPairs
 		o.name = args.name or o.tbl.name
@@ -1086,9 +1091,11 @@ local ImguiTable = {
 			if (element.new or element.update) then --or (can_index(element) and element.new and (element.name .. ""))
 				name = elem_key .. ":	" .. tostring(element.name) .. "	[Object] (" .. get_table_size(element) .. " elements)"
 			elseif isArray(element) then
-				name = elem_key .. ":	[table] (" .. #element .. " elements)" 
+				name = elem_key .. ":	[" .. #element .. " elements]" 
 			else
-				name = elem_key .. ":	" .. (((element.name and (tostring(element.name) .. " ")) or (element.obj and (logv(element.obj, nil, 0) .. " "))) or "") .. "[dictionary] (" .. get_table_size(element) .. " elements)" 
+				local mt = getmetatable(element)
+				local nm = element.name or (mt and mt.name)
+				name = elem_key .. ":	" .. (((nm and (tostring(nm) .. " ")) or (element.obj and (logv(element.obj, nil, 0) .. " "))) or "") .. " (" .. get_table_size(element) .. " elements)" --[dictionary] 
 			end
 		end
 		return name
@@ -1145,148 +1152,168 @@ local ImguiTable = {
 
 --Read a table or dictionary in imgui, using ImguiTable to store metadata
 read_imgui_pairs_table = function(tbl, key, is_array, editable)
+	
 	key = key or tbl
 	editable = editable or ((editable~= false) and SettingsCache.show_editable_tables)
 	local edit_args = (editable and type(editable)=="table") and editable
 	
-	local tbl_obj = G_ordered[key] or ImguiTable:new{tbl=tbl or {}, key=key, is_array=is_array, skip_underscores=edit_args and edit_args.skip_underscores}
+	if true then --not SettingsCache.always_update_lists then
 	
-	tbl_obj:update(tbl)
-	
-	G_ordered[key] = tbl_obj
-	local ordered_idxes = tbl_obj.ordered_idxes
-	local will_update = SettingsCache.always_update_lists or (update_lists_once and (update_lists_once=="all" or tostring(key):find(update_lists_once))) --"update_lists_once" updates console commands when "Run Again" is pressed
-	
-	if will_update or (tbl_obj.should_update and not imgui.same_line()  and imgui.button("Update")) then 
-		tbl_obj.do_update = true
-	end
-	if will_update or not tbl_obj.should_update then
-		imgui.spacing()
-	end
-	
-	if #ordered_idxes == 0 then return end
-	
-	if tbl_obj.sortable then 
-		imgui.same_line()
-		if imgui.button("Sort By Distance") then
-			tbl_obj.sorted_once = true
-			tbl_obj.ordered_idxes, tbl_obj.names, tbl_obj.element_data = {}, {}, {}
-			local new_tbl, new_ordered_idxes, optional_max_idx = sort(tbl_obj.tbl, nil, tbl_obj.sort_closest_optional_max_distance or 25)
-			tbl_obj.sort_closest_optional_limit = (optional_max_idx < 100 and optional_max_idx) or 100
-			tbl_obj.ordered_idxes = next(new_ordered_idxes) and new_ordered_idxes or ordered_idxes
-			ordered_idxes = tbl_obj.ordered_idxes
+		local tbl_obj = G_ordered[key] or ImguiTable:new{tbl=tbl or {}, key=key, is_array=is_array, skip_underscores=edit_args and edit_args.skip_underscores}
+		
+		tbl_obj:update(tbl)
+		
+		G_ordered[key] = tbl_obj
+		local ordered_idxes = tbl_obj.ordered_idxes
+		local will_update = SettingsCache.always_update_lists or (update_lists_once and (update_lists_once=="all" or tostring(key):find(update_lists_once))) --"update_lists_once" updates console commands when "Run Again" is pressed
+		
+		if will_update or (tbl_obj.should_update and not imgui.same_line()  and imgui.button("Update")) then 
+			tbl_obj.do_update = true
 		end
-		if tbl_obj.sorted_once then 
+		if will_update or not tbl_obj.should_update then
+			imgui.spacing()
+		end
+		
+		if #ordered_idxes == 0 then return end
+		
+		if tbl_obj.sortable then 
 			imgui.same_line()
-			changed, tbl_obj.show_closest = imgui.checkbox("Show Closest", tbl_obj.show_closest) 
-			if tbl_obj.show_closest then
-				changed, tbl_obj.sort_closest_optional_max_distance = imgui.drag_float("Max Distance", tbl_obj.sort_closest_optional_max_distance or 25, 1, 0, 1000)
-				tbl_obj.sort_closest_optional_max_distance = changed and tonumber(tbl_obj.sort_closest_optional_max_distance) or tbl_obj.sort_closest_optional_max_distance
+			if imgui.button("Sort By Distance") then
+				tbl_obj.sorted_once = true
+				tbl_obj.ordered_idxes, tbl_obj.names, tbl_obj.element_data = {}, {}, {}
+				local new_tbl, new_ordered_idxes, optional_max_idx = sort(tbl_obj.tbl, nil, tbl_obj.sort_closest_optional_max_distance or 25)
+				tbl_obj.sort_closest_optional_limit = (optional_max_idx < 100 and optional_max_idx) or 100
+				tbl_obj.ordered_idxes = next(new_ordered_idxes) and new_ordered_idxes or ordered_idxes
+				ordered_idxes = tbl_obj.ordered_idxes
 			end
-		else
-			tbl_obj.sort_closest_optional_limit, tbl_obj.sort_closest_optional_max_distance = nil
+			if tbl_obj.sorted_once then 
+				imgui.same_line()
+				if imgui.button("X") then
+					tbl_obj.sorted_once = nil
+				end
+				imgui.same_line()
+				changed, tbl_obj.show_closest = imgui.checkbox("Show Closest", tbl_obj.show_closest) 
+				if tbl_obj.show_closest then
+					changed, tbl_obj.sort_closest_optional_max_distance = imgui.drag_float("Max Distance", tbl_obj.sort_closest_optional_max_distance or 25, 1, 0, 1000)
+					tbl_obj.sort_closest_optional_max_distance = changed and tonumber(tbl_obj.sort_closest_optional_max_distance) or tbl_obj.sort_closest_optional_max_distance
+				end
+			else
+				tbl_obj.sort_closest_optional_limit, tbl_obj.sort_closest_optional_max_distance = nil
+			end
 		end
-	end
-	
-	--[[if imgui.tree_node_str_id(key .. "T", "Table Medadata") then
-		read_imgui_element(tbl_obj, nil, key .. "T")
-		imgui.tree_pop()
-	end]]
-	
-	local do_subtables = ordered_idxes and (#ordered_idxes > SettingsCache.max_element_size)
-	--imgui.text(tostring(editable) .. asd)
-	for j = 1, #ordered_idxes, ((do_subtables and SettingsCache.max_element_size) or #ordered_idxes) do 
 		
-		j = math.floor(j)
-		local this_limit = math.floor((j+SettingsCache.max_element_size-1 < #ordered_idxes and j+SettingsCache.max_element_size-1) or #ordered_idxes)
+		--[[if imgui.tree_node_str_id(key .. "T", "Table Medadata") then
+			read_imgui_element(tbl_obj, nil, key .. "T")
+			imgui.tree_pop()
+		end]]
 		
-		if not do_subtables or imgui.tree_node_str_id(tostring(ordered_idxes[j]) .. "Elements", "Elements " .. j .. " - " .. this_limit) then
+		local do_subtables = ordered_idxes and (#ordered_idxes > SettingsCache.max_element_size)
+		--imgui.text(tostring(editable) .. asd)
+		for j = 1, #ordered_idxes, ((do_subtables and SettingsCache.max_element_size) or #ordered_idxes) do 
 			
-			for i = j, this_limit do 
+			j = math.floor(j)
+			local this_limit = math.floor((j+SettingsCache.max_element_size-1 < #ordered_idxes and j+SettingsCache.max_element_size-1) or #ordered_idxes)
+			
+			if not do_subtables or imgui.tree_node_str_id(tostring(ordered_idxes[j]) .. "Elements", "Elements " .. j .. " - " .. this_limit) then
 				
-				local index = ordered_idxes[i]
-				if index == "" then 
-					goto continue --not allowed
-				end
-				local element = tbl[ index ]
-				
-				if tbl_obj.is_array and (tbl_obj.sorted_once or index ~= i) then 
-					imgui.text(i .. ". ")
-					imgui.same_line()
-				end
-				
-				if element ~= nil then
+				for i = j, this_limit do 
 					
-					if ((type(element) ~= "table") or (not element.__pairs or pcall(element.__pairs, element))) then
-						
-						local do_update = (not tbl_obj.element_data[i]) or random(50)
-						local e_d = tbl_obj.element_data[i] or {}
-						local tostring_name = tostring(element)
-						local is_vec = (not do_update and e_d.is_vec) or tostring_name:find(":vector") or nil
-						local is_vt = not is_vec and ((not do_update and e_d.is_vt) or tostring_name:find("::ValueType") or tostring_name:find("::SystemArray")) or nil
-						local is_obj = is_vt or (not is_vec and ((not do_update and e_d.is_obj) or sdk.is_managed_object(element))) or nil --tostring_name:find("%.REManagedObject") or tostring_name:find("%.RETransform")
-						local elem_key = tostring(index)
-						
-						if is_obj or is_vec or ((type(element) == "table" and next(element) ~= nil)) then 
-							
-							local name = not do_update and tbl_obj.names[i]
-							if not name then
-								name = ImguiTable.get_element_name(element, elem_key, is_obj)
-							elseif e_d.is_array or name:find("e%] %(") then
-								name = name:gsub("%(%d.+ ", "(" .. #element .. " ")
-								e_d.is_array = true
-							elseif (e_d.is_array == false) or name:find("[yt]%] %(") then
-								name = name:gsub("%(%d.+ ", "(" .. get_table_size(element) .. " ")
-								e_d.is_array = false
-							end
-							tbl_obj.names[i] = name
-							
-							if is_obj then 
-								if is_vt or is_valid_obj(element) then
-									if imgui.tree_node_str_id(elem_key, name) then --RE objects
-										imgui.managed_object_control_panel(element, key .. elem_key) 
-										imgui.tree_pop()
-									end
-								else
-									if tbl_obj.is_vec then
-										--tbl = vector_to_table(tbl)
-										--tbl_obj.tbl = tbl
-									--	tbl_obj.tbl[ index ] = tbl_obj.names[i]
-									--	log.info( index )
-									--	tbl:set(index, tbl_obj.names[i])
-									else
-										tbl_obj.element_data[i] = {}
-										tbl_obj.names[i] = name:gsub("%:	", ":    [DELETED] ")
-										tbl[ index ] = ""--tbl_obj.names[i] --delete broken RE objects from lua
-									end
-									imgui.text("[Deleted]")
-									goto continue
-								end
-							elseif (not editable or not editable_table_field(elem_key, element, tbl)) and imgui.tree_node_str_id(elem_key, name) then --tables/dicts/vectors
-								read_imgui_pairs_table(element, key .. elem_key, elem_is_array, editable)
-								if G_ordered[key .. elem_key] then 
-									G_ordered[key .. elem_key].parent = tbl_obj
-									G_ordered[key .. elem_key].index = i
-								end
-								imgui.tree_pop()
-							end
-						elseif not editable or not editable_table_field(elem_key, element, tbl, nil, edit_args) then 
-							imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
-						end
-						tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, }
-					else
-						imgui.text(logv(ordered_idxes[i])) --unreadable sol classes
+					local index = ordered_idxes[i]
+					if index == "" then 
+						goto continue --not allowed
 					end
-				else
-					imgui.new_line()
-				--	tbl_obj.do_update = true
+					local element = tbl[ index ]
+					
+					if tbl_obj.is_array and (tbl_obj.sorted_once or index ~= i) then 
+						imgui.text(i .. ". ")
+						imgui.same_line()
+					end
+					
+					if element ~= nil then
+						
+						if ((type(element) ~= "table") or (not element.__pairs or pcall(element.__pairs, element))) then
+							
+							local do_update = (not tbl_obj.element_data[i]) or random(50)
+							local e_d = tbl_obj.element_data[i] or {}
+							local tostring_name = tostring(element)
+							local is_vec = (not do_update and e_d.is_vec) or tostring_name:find(":vector") or nil
+							local is_vt = not is_vec and ((not do_update and e_d.is_vt) or tostring_name:find("::ValueType") or tostring_name:find("::SystemArray")) or nil
+							local is_obj = is_vt or (not is_vec and ((not do_update and e_d.is_obj) or sdk.is_managed_object(element))) or nil --tostring_name:find("%.REManagedObject") or tostring_name:find("%.RETransform")
+							local elem_key = tostring(index)
+							
+							if is_obj or is_vec or ((type(element) == "table" and next(element) ~= nil)) then 
+								
+								local name = not do_update and tbl_obj.names[i]
+								if not name then
+									name = ImguiTable.get_element_name(element, elem_key, is_obj)
+								elseif e_d.is_array or name:find("e%] %(") then
+									name = name:gsub("%(%d.+ ", "(" .. #element .. " ")
+									e_d.is_array = true
+								elseif (e_d.is_array == false) or name:find("[yt]%] %(") then
+									name = name:gsub("%(%d.+ ", "(" .. get_table_size(element) .. " ")
+									e_d.is_array = false
+								end
+								tbl_obj.names[i] = name
+								
+								if is_obj then 
+									if is_vt or is_valid_obj(element) then
+										if imgui.tree_node_str_id(elem_key, name) then --RE objects
+											imgui.managed_object_control_panel(element, key .. elem_key) 
+											imgui.tree_pop()
+										end
+									else
+										if tbl_obj.is_vec then
+											--tbl = vector_to_table(tbl)
+											--tbl_obj.tbl = tbl
+										--	tbl_obj.tbl[ index ] = tbl_obj.names[i]
+										--	log.info( index )
+										--	tbl:set(index, tbl_obj.names[i])
+										else
+											tbl_obj.element_data[i] = {}
+											tbl_obj.names[i] = name:gsub("%:	", ":    [DELETED] ")
+											tbl[ index ] = ""--tbl_obj.names[i] --delete broken RE objects from lua
+										end
+										imgui.text("[Deleted]")
+										goto continue
+									end
+								elseif (not editable or not editable_table_field(elem_key, element, tbl)) and imgui.tree_node_str_id(elem_key, name) then --tables/dicts/vectors
+									read_imgui_pairs_table(element, key .. elem_key, elem_is_array, editable)
+									if G_ordered[key .. elem_key] then 
+										G_ordered[key .. elem_key].parent = tbl_obj
+										G_ordered[key .. elem_key].index = i
+									end
+									imgui.tree_pop()
+								end
+							elseif not editable or not editable_table_field(elem_key, element, tbl, nil, edit_args) then 
+								imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
+							end
+							tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, }
+						else
+							imgui.text(logv(ordered_idxes[i])) --unreadable sol classes
+						end
+					else
+						imgui.new_line()
+					--	tbl_obj.do_update = true
+					end
+					::continue::
 				end
-				::continue::
-			end
-			if do_subtables then
-				imgui.tree_pop()
+				if do_subtables then
+					imgui.tree_pop()
+				end
 			end
 		end
+	
+	--[[else
+		for sub_key, sub_elem in orderedPairs(tbl) do 
+			if (type(sub_elem)=="table" or can_index(sub_elem)) then
+				if imgui.tree_node_str_id(key, sub_elem) then
+					read_imgui_pairs_table(sub_elem, sub_key)
+					imgui.tree_pop()
+				end
+			else
+				imgui.text(sub_key .. ": " .. tostring(sub_elem))
+			end
+		end]]
 	end
 end
 
@@ -3634,7 +3661,7 @@ local function log_value(value, value_name, layer_limit, layer, verbose, return_
 				local is_array = is_vec or (value[1] ~= nil and isArray(value))
 				if is_array then
 					if verbose then 
-						table.insert(msg, (is_vec and " [vector] " or " [table] ") .. " (" .. #value .. " elements) ") 
+						table.insert(msg, (is_vec and " [vector] " or " ") .. " [" .. #value .. " elements] ") 
 					end
 					if (layer < layer_limit) or (layer_limit == -1) then
 						for i, val in ipairs(value) do 
@@ -4280,7 +4307,7 @@ local VarData = {
 						out = out:add_ref()
 						self.array_count = (self.array_count and out:call("get_Count")) or self.array_count
 					end
-					local old_value = obj[self.name] or (index and self.cvalue and self.cvalue[#self.value+1]) or (not index and self.cvalue)
+					local old_value = (index and self.cvalue and self.cvalue[#self.value+1]) or (not index and self.cvalue) or nil
 					if (old_value~=nil) and (old_value ~= out) and old_value._  then --and not self.array_count and is_obj_or_vt(out) then
 						--[[local old_obj = old_value.cvalue or old_value.value
 						if self.is_vt and not self.is_lua_type and old_obj and not self.mysize then 
@@ -4327,7 +4354,8 @@ local VarData = {
 		local is_obj = self.is_obj or self.is_vt
 		if not is_obj or (forced_update or self.update) then 
 			if self:update_item(o_tbl) then
-				obj[self.name] = self.value
+				--obj[self.name] = self.value
+				self.cvalue = self.value
 				if (self.value ~= nil) and not self.is_lua_type and is_obj then
 					obj:__set_owner(self.value)
 				end
@@ -4486,13 +4514,13 @@ local REMgdObj = {
 			end
 		end
 		
-		for name, field in pairs(propdata.fields) do
-			o[name:match("%<(.+)%>") or name] = field:get_data(obj)
-		end
+		--for name, field in pairs(propdata.fields) do
+		--	o[name:match("%<(.+)%>") or name] = field:get_data(obj)
+		--end
 		
-		for name, method in pairs(propdata.functions) do
-			o[name] = method
-		end
+		--for name, method in pairs(propdata.functions) do
+		--	o[name] = method
+		--end
 		
 		if next(propdata.counts) then 
 			local counts = { counts=propdata.counts, counts_names={}, method=(SettingsCache.generic_count_methods[o_tbl.name_full] and otype:get_method(SettingsCache.generic_count_methods[o_tbl.name_full])) }
@@ -4535,12 +4563,12 @@ local REMgdObj = {
 								}
 								table.insert(o_tbl.props, prop)
 								o_tbl.used_props[method_name] = #o_tbl.props
-								if o[method_name] and not bad_obj then
+								--if o[method_name] and not bad_obj then
 									--re.msg_safe("Prop " .. prop.name .. " name conflict in console object 'bad_obj'!", 1241545)
-									bad_obj = obj
-								else
-									o[method_name] = o[method_name] or prop
-								end
+								--	bad_obj = obj
+								--else
+								--	o[method_name] = o[method_name] or prop
+								--end
 							end
 						end
 					end
@@ -4686,6 +4714,7 @@ local REMgdObj = {
 	end,
 }
 
+
 --Function to initialize REMgdObj, used once at the start of the script
 --Binds managed objects to a global dictionary, metadata, which allows them to be indexed like normal tables
 add_to_REMgdObj = function(obj)
@@ -4769,6 +4798,8 @@ if REMgdObj_objects then
 		create_REMgdObj(mathex, true) 
 	end
 end
+
+
 
 --Functions to display managed objects in imgui --------------------------------------------------------------------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -6728,16 +6759,22 @@ local function imgui_anim_object_viewer(anim_object, obj_name, index)
 			end
 			
 			if not (is_only_child or is_only_parent) then 
-				imgui.text("	")
+				imgui.text("  Children:")
+				imgui.text("  ")
 				imgui.same_line()
 				imgui.begin_rect()
 			end
 			for i, child in ipairs(anim_object.children or {}) do
-				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
-				if held_transforms[child] and imgui.tree_node_str_id(obj_name .. "Ch" .. i,  is_only_child or held_transforms[child].name) then
-					imgui_anim_object_viewer(held_transforms[child], "Object")
-					--imgui.managed_object_control_panel(child, "Ch" .. i, held_transforms[child].name)
-					imgui.tree_pop()
+				local child_obj = held_transforms[child] or GameObject:new_AnimObject{ xform=child }
+				if child_obj then
+					if imgui.tree_node_str_id(obj_name .. "Ch" .. i,  is_only_child or child_obj.name) then
+						imgui_anim_object_viewer(child_obj, "Object")
+						--imgui.managed_object_control_panel(child, "Ch" .. i, held_transforms[child].name)
+						imgui.tree_pop()
+					end
+				else
+					anim_object.children = get_children(anim_object.xform)
+					break
 				end
 			end
 			if not (is_only_child or is_only_parent) then
@@ -9496,6 +9533,7 @@ EMV = {
 	get_body_part = get_body_part,
 	is_obj_or_vt = is_obj_or_vt,
 	get_GameObject = get_GameObject,
+	get_fields_and_methods = get_fields_and_methods,
 }
 
 return EMV

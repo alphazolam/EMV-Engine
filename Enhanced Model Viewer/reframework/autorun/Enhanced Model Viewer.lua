@@ -1203,7 +1203,7 @@ GameObject.build_banks_list = function(self)
 	
 	--add or update imgui_anims
 	imgui_anims = imgui_anims or {}
-	local idx = contains_xform(imgui_anims, self, true)
+	local idx = contains_xform(imgui_anims, self.xform, true)
 	if idx then 
 		imgui_anims[idx] = self
 	else

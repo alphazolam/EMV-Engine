@@ -348,7 +348,7 @@ local function autocomplete()
 		else
 			special_split = nil
 		end
-		local globals = merge_tables({}, _G) --makes a copy to not mess up the originals
+		local globals = merge_tables({}, _G) --makes a copy to not mess with the original _G
 		
 		local function check_sub_table(key, value, level, key_prefix, is_metadata_func)
 			
@@ -389,9 +389,10 @@ local function autocomplete()
 				elseif (type(value) == "table" or type(value) == "userdata") then
 					local next_key_prefix = (level > 1 and (key_prefix .. "." .. key)) or key
 					local elems = (type(value) == "table" and pcall(function() pairs(value) end) and value) or {} 
-					local try, elems2 = pcall(merge_tables, elems, getmetatable(value) or {})
+					local try, mt_copy = pcall(merge_tables, {}, getmetatable(value) or {})
+					local try, elems2 = try and pcall(merge_tables, mt_copy, elems)
 					local tostring_val = tostring(value)
-					elems = (try and elems2) and elems2 or elems
+					elems = merge_tables({}, (try and elems2) or elems) --DONT merge metatable into real table
 					if (tostring_val:find("REManaged") or tostring_val:find("RETransf") or tostring_val:find("ValueType") or tostring_val:find("SystemArray")) then --create REMgdObj class
 						if not metadata[value] then EMV.create_REMgdObj(value, true) end
 						elems = merge_tables(elems, metadata[value] or {})
@@ -422,7 +423,6 @@ local function autocomplete()
 					else
 						idx = counter + 1
 					end
-					
 				end
 				counter = counter + 1
 			end
@@ -541,6 +541,28 @@ local function show_console_window()
 	imgui.end_window()
 end
 
+folderTree = nil
+
+local function generateFolderTree(pathName, static_class)
+	folderTree = folderTree or {}
+	local ftree = folderTree
+    local parts = {}
+    for part in pathName:gmatch("[^\\]+") do
+        table.insert(parts, part)
+    end
+	for i, part in ipairs(parts) do
+		if not ftree[part] then
+			if part:find("%.") then 
+				table.insert(ftree, part)
+				break
+			else
+				ftree[part] = {}
+			end
+		end
+		ftree = ftree[part]
+	end
+end
+
 local function show_console_settings()
 	if imgui.tree_node("Console Settings") then
 		if imgui.button(SettingsCache.show_console and "Hide Console" or "Spawn Console") then 
@@ -603,6 +625,10 @@ re.on_frame(function()
 		History.current_history_idx = History.current_history_idx or 1
 		History.first_history_idx = #History.history_idx + 1
 		History.command_output = History.command_output or " "
+		History.current_directory = History.current_directory or ""
+		for i, path in ipairs(fs.glob(".*")) do
+			generateFolderTree(path)
+		end
 	end
 	
 	toks = math.floor(os.clock()*100)
