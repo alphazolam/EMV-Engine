@@ -2071,9 +2071,8 @@ local function create_resource(resource_path, resource_type, force_create)
 	local new_rs_address = new_resource and new_resource:get_address()
 	if type(new_rs_address) == "number" then
 		local holder = sdk.create_instance(resource_type .. "Holder", true):add_ref()
-		if holder then -- and sdk.is_managed_object(holder) then 
+		if holder then
 			holder:call(".ctor()")
-			--deferred_calls[holder] = {lua_object=holder, method=holder.write_qword, args={0x10, new_rs_address}} 
 			holder:write_qword(0x10, new_rs_address)
 			if is_valid_obj(holder) then
 				RSCache[ext .. "_resources"][resource_path] = holder:add_ref()
@@ -2681,11 +2680,11 @@ local function lua_get_enumerator(m_obj, o_tbl)
 		end
 		local state, is_obj = fields[1]:get_data(m_obj), false
 		while (state == 1 or state == 0) and ({pcall(sdk.call_object_func, m_obj, "MoveNext")})[2] == true do
-			local current, val = fields[2]:get_data(m_obj)
+			local current, val = fields[2]:get_data(m_obj), nil
 			state = fields[1]:get_data(m_obj)
 			if sdk.is_managed_object(current) then 
 				val = current:get_field("mValue")
-				if not val then 
+				if val==nil then 
 					is_obj = true
 					current = current:add_ref()
 				end
@@ -2709,13 +2708,13 @@ end
 
 --Gets a SystemArray 
 local function lua_get_system_array(sys_array, allow_empty, convert_to_table)
-	sys_array = sys_array and sys_array.add_ref and sys_array:add_ref()
+	--sys_array = sys_array and sys_array.add_ref and sys_array:add_ref()
 	if not sys_array then return (allow_empty and {}) end
 	local system_array = sys_array.get_elements and sys_array:get_elements()
 	if not system_array then
 		system_array = sys_array.get_field and sys_array:get_field("mItems")
-		system_array = system_array and system_array.add_ref and system_array:add_ref()
-		system_array = system_array and system_array:get_elements()
+		--system_array = system_array and system_array.add_ref and system_array:add_ref()
+		system_array = system_array and system_array.get_elements and system_array:get_elements()
 	end
 	if not system_array and sys_array.get_type_definition and sys_array:get_type_definition():get_method("GetEnumerator") then 
 		system_array = lua_get_enumerator(sys_array:call("GetEnumerator"))
@@ -2737,6 +2736,7 @@ local function lua_get_system_array(sys_array, allow_empty, convert_to_table)
 		end
 		system_array = dict--((get_table_size(dict) == #system_array) and dict) or system_array
 	end
+	
 	if system_array and ((system_array[1] and sdk.is_managed_object(system_array[1])) or (not system_array[1] and next(system_array) and sdk.is_managed_object(({next(system_array)})[2]))) then
 		for key, element in pairs(system_array) do 
 			if element then 
@@ -2744,6 +2744,7 @@ local function lua_get_system_array(sys_array, allow_empty, convert_to_table)
 			end
 		end
 	end
+	
 	return system_array
 end
 
@@ -4732,9 +4733,6 @@ add_to_REMgdObj = function(obj)
 			REManagedObject[key] = value
 		elseif key == "REMgdObj" then --using "REMgdObj" as the key will call the constructor
 			metadata[self] = REMgdObj:__new(self, value) or {}
-		--elseif key == "REMgdObj_minimal" then
-		--	metadata[self] = REMgdObj:__new_minimal(self) or {}
-		--	metadata[self][key] = value
 		else
 			metadata[self] = metadata[self] or {}
 			metadata[self][key] = value
@@ -6689,7 +6687,8 @@ show_imgui_mats = function(anim_object)
 			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
 		end
 		if anim_object.materials.mdfFile and imgui.tree_node("[MDF Lua]") then 
-			read_imgui_element(anim_object.materials.mdfFile)
+			--read_imgui_element(anim_object.materials.mdfFile)
+			anim_object.materials.mdfFile:displayImgui()
 			imgui.tree_pop()
 		end
 	end

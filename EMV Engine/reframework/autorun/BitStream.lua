@@ -735,10 +735,10 @@ MDFFile = {
 	--MDF file extensions by game
 	extensions = {
 		re2 = ((tdb_ver==66) and ".10") or ".21",
-		re3 = ((tdb_ver==67) and ".13") or ".21",
+		re3 = ((tdb_ver==68) and ".13") or ".21",
 		re8 = ".19",
 		re7 = ((tdb_ver==49) and ".6") or ".21",
-		dmc5 =".11",
+		dmc5 =".10",
 		mhrise = ".23",
 	},
 	
@@ -916,7 +916,7 @@ MDFFile = {
 }
 
 -- MDFFile struct adjustments for different TDB versions:
-if sdk.get_tdb_version() >= 67 then --RE3R+
+if sdk.get_tdb_version() >= 68 then --RE3R+
 	table.insert(MDFFile.structs.TexHeader, {"skip", 8})
 	MDFFile.structs.ParamHeader[4], MDFFile.structs.ParamHeader[5] = MDFFile.structs.ParamHeader[5], MDFFile.structs.ParamHeader[4]
 end
@@ -925,7 +925,7 @@ if sdk.get_tdb_version() == 49 then --RE7
 	table.insert(MDFFile.structs.MatHeader, 3, {"UInt64", "uknRE7"})
 end
 
-if sdk.get_tdb_version() >= 68 then --RE8+
+if sdk.get_tdb_version() >= 69 then --RE8+
 	table.insert(MDFFile.structs.MatHeader, 11, {"UInt64", "firstMaterialNameOffset"})
 	table.insert(MDFFile.structs.MatHeader, 6, {"skip", 8})
 end
