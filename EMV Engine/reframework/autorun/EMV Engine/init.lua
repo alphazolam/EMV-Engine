@@ -4542,6 +4542,7 @@ local REMgdObj = {
 		--initial properties setup:
 		if next(propdata.getters) then
 			o_tbl.props = {}
+			o_tbl.props_named = {}
 			local skeleton
 			for i, method_name in ipairs(propdata.method_names) do
 				if do_all_props or o_tbl.used_props[method_name] then
@@ -4563,6 +4564,7 @@ local REMgdObj = {
 									is_count = not not method_name:find("[CN][ou][um][n]?[t]?$") or nil,
 								}
 								table.insert(o_tbl.props, prop)
+								o_tbl.props_named[prop.name] = prop
 								o_tbl.used_props[method_name] = #o_tbl.props
 								--if o[method_name] and not bad_obj then
 									--re.msg_safe("Prop " .. prop.name .. " name conflict in console object 'bad_obj'!", 1241545)
@@ -5368,7 +5370,6 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	end
 	
 	if var_metadata.show_var_data then 
-		--imgui.begin_popup_context_item(1232141); imgui.text("lalala\n\n\n\n\n\n"); imgui.end_popup(1232141)
 		
 		imgui.text("		")
 		imgui.same_line()
@@ -5479,6 +5480,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						editable_table_field("value_org", var_metadata.value_org, var_metadata, "Original Value")
 					end
 				end
+				
 				if not var_metadata.ret_type:is_primitive() then
 					var_metadata.gvalue_name = var_metadata.gvalue_name or ""
 					var_metadata.value = var_metadata.value or var_metadata.value_org
@@ -5799,7 +5801,6 @@ local function show_save_load_button(o_tbl, button_type, load_by_name, save_chil
 				o_tbl.show_load_input = nil
 			end
 		end
-		
 	end
 end
 
@@ -5814,14 +5815,12 @@ local function show_imgui_uservariables(m_obj, name)
 				local var = uvar:call("getVariable", i-1)
 				local var_name = var:call("get_Name") .. (var:call("get_ReadOnly") and "*" or "")
 				local type_kind = var:call("get_TypeKind")
-				if not metadata[var] then 
-					create_REMgdObj(var)
-				end
-				local prop = var._U64
+				local v_o_tbl = var._ or create_REMgdObj(var)
+				local prop = v_o_tbl.props_named._U64
 				if type_kind == 2 then --Bool
-					prop = var._Bool
+					prop = v_o_tbl.props_named._Bool
 				elseif type_kind == 11 then --Float
-					prop = var._F32
+					prop = v_o_tbl.props_named._F32
 				end
 				was_changed, value = read_field(var, nil, prop, var_name, prop.ret_type, o_tbl.key_hash .. u .. i)
 				if was_changed then 
@@ -8095,8 +8094,8 @@ GameObject = {
 		local function clear_joint(joint)
 			old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
 			deferred_calls[joint] = {}
-			table.insert(deferred_calls[joint], {func=joint[poser.prop_name].set:get_name(), args=joint[poser.prop_name].value_org}) --reset
-			joint[poser.prop_name].freeze = nil
+			table.insert(deferred_calls[joint], {func=joint._.props_named[poser.prop_name].set:get_name(), args=joint._.props_named[poser.prop_name].value_org}) --reset
+			joint._.props_named[poser.prop_name].freeze = nil
 		end
 		
 		if not poser.names then
@@ -8149,7 +8148,7 @@ GameObject = {
 			local current_file = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json") or {}
 			if not clear_slot  then
 				for i, joint in ipairs(self.joints or {}) do
-					if joint[poser.prop_name].freeze then 
+					if joint._.props_named[poser.prop_name].freeze then 
 						pose[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
 					end
 				end
@@ -8191,8 +8190,8 @@ GameObject = {
 		imgui.same_line()
 		if imgui.same_line and imgui.button("Freeze All") then 
 			for i, joint in ipairs(self.joints or {}) do 
-				joint[poser.prop_name].freeze = true
-				deferred_calls[joint] = {func="set" .. poser.prop_name, args=joint[poser.prop_name].cvalue, vardata=joint[poser.prop_name]}
+				joint._.props_named[poser.prop_name].freeze = true
+				deferred_calls[joint] = {func="set" .. poser.prop_name, args=joint._.props_named[poser.prop_name].cvalue, vardata=joint._.props_named[poser.prop_name]}
 			end
 		end
 		
@@ -8200,7 +8199,7 @@ GameObject = {
 		if imgui.same_line and imgui.button("Unfreeze All") then 
 			local frozen_total = 0
 			for i, joint in ipairs(self.joints or {}) do 
-				if joint[poser.prop_name].freeze then 
+				if joint._.props_named[poser.prop_name].freeze then 
 					frozen_total = frozen_total + 1
 					clear_joint(joint)
 				end
@@ -8225,7 +8224,7 @@ GameObject = {
 		for i, joint in ipairs(self.joints or {}) do 
 			local j_o_tbl = joint._ or create_REMgdObj(joint, nil, {"get_LocalEulerAngle", "get_EulerAngle", "get_LocalPosition", "get_Position"})
 			j_o_tbl.last_opened = uptime
-			local var_metadata = joint[poser.prop_name]
+			local var_metadata = j_o_tbl.props_named[poser.prop_name]
 			--[[if imgui.tree_node(joint:call("ToString()")) then
 				read_imgui_element(joint._ )
 				imgui.tree_pop()
@@ -8322,9 +8321,9 @@ GameObject = {
 			--	mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][3])
 			end             
 			
-			if changed or (not joint[poser.prop_name].freeze and shift_pressed) then 
-				deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.is_pos and (mat[3]:to_vec3()) or mat:to_quat():to_euler(), vardata=joint[poser.prop_name]} --joint:call("get_BaseLocalPosition")*2 - 
-				joint[poser.prop_name].freeze = 1
+			if changed or (not joint._.props_named[poser.prop_name].freeze and shift_pressed) then 
+				deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.is_pos and (mat[3]:to_vec3()) or mat:to_quat():to_euler(), vardata=joint._.props_named[poser.prop_name]} --joint:call("get_BaseLocalPosition")*2 - 
+				joint._.props_named[poser.prop_name].freeze = 1
 				prop_changed = joint
 				poser.is_changing_gizmo = true
 			end
@@ -8340,11 +8339,11 @@ GameObject = {
 
 		if prop_changed then
 			local joint = prop_changed
-			if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 0.25)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
+			if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 0.33)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint._.props_named[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
 				poser.undo.last = poser.undo.last or {}
 				table.insert(poser.undo.last, joint) 
-				poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint[poser.prop_name].cvalue}
-				table.insert(poser.undo[joint].prev_rot, joint[poser.prop_name].cvalue)
+				poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint._.props_named[poser.prop_name].cvalue}
+				table.insert(poser.undo[joint].prev_rot, joint._.props_named[poser.prop_name].cvalue)
 			end
 			poser.undo[joint].start = uptime
 		end
@@ -8359,9 +8358,9 @@ GameObject = {
 				end
 				goto goback
 			elseif joint then
-				joint[poser.prop_name].freeze = 1
+				joint._.props_named[poser.prop_name].freeze = 1
 				if poser.undo[joint] and poser.undo[joint].prev_rot then
-					deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint[poser.prop_name]}
+					deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint._.props_named[poser.prop_name]}
 					poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
 				end
 				if not poser.undo[joint].prev_rot[1] then
