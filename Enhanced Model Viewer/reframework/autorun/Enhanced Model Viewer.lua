@@ -1083,6 +1083,7 @@ GameObject.activate_forced_mode = function(self)
 		self = GameObject.new_AnimObject(nil, {xform=self.xform}) --recreate object with class from this script
 		forced_mode = self
 		current_figure = self
+		imgui_anims, imgui_others = {}, {}
 		--held_transforms, total_objects, imgui_anims, imgui_others = {[self.xform]=self}, {self}, {}, {} --
 		self.forced_mode_center = self.xform:call("get_WorldMatrix")
 		if self.components_named.PlayerLookAt then 
@@ -1549,9 +1550,9 @@ GameObject.next_motion = function(self, mlist_idx, mot_idx)
 	if not self.mbank_idx then
 		self:get_current_bank_name()
 	end
-	local new_mlist_idx = mlist_idx or self.mlist_idx
-	local new_mot_idx = mot_idx or self.mot_idx
-	local new_mbank_idx = self.mbank_idx
+	local new_mlist_idx = mlist_idx or self.mlist_idx or 1
+	local new_mot_idx = mot_idx or self.mot_idx or 1
+	local new_mbank_idx = self.mbank_idx or 1
 	local next_idx = new_mot_idx + 1; 
 	local prev_idx = new_mot_idx - 1; 
 	local do_set_motionbank
@@ -2081,7 +2082,8 @@ local function wwise_seek_all(ev_object, seek_frame, pause)
 					old_deferred_calls["app.WwiseContainerApp"] = nil
 					deferred_calls[wwise.wwise] = {lua_object=wwise.wwise, method=wwise.wwise.write_float, args={0x214, (ev_object.play_speed+0.000001)}, vardata={freeze=true}}
 					--deferred_calls[wwise.wwise] = {func="set_TimeScale(System.Single)", args=ev_object.play_speed+0.000001}
-					--wwise.wwise:call("set_TimeScale(System.Single)", ev_object.play_speed)]]
+					--wwise.wwise:call("set_TimeScale(System.Single)", ev_object.play_speed)
+					]]
 				end
 			end
 		end
@@ -2380,6 +2382,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 			
 			if anim_object.layer and not (anim_object.alt_names or anim_object.motbank_names) then --if it got here without alt_names or motbank names, there was some table confusion somewhere and its not a real AnimObject
 				anim_object = GameObject:new_AnimObject({xform=anim_object.xform}, anim_object)
+				if not anim_object then return end
 			end
 			
 			if anim_object.motbank_names then 
@@ -3015,6 +3018,7 @@ re.on_frame(function()
 	--Build list of model viewer objects:
 	if not forced_mode and (not total_objects[1] or not imgui_anims[1] or not imgui_others[1]) then -- and random(60) --or (#imgui_anims == 0 and this_figure_via_motions_count > 1)
 		
+		log.info("init create total objects")
 		
 		if not fig_mgr_name then
 			fig_mgr_name, current_fig_name = nil, nil

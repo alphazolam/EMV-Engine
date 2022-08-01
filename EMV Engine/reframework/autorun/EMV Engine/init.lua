@@ -2070,7 +2070,7 @@ local function create_resource(resource_path, resource_type, force_create)
 	local new_resource = sdk.create_resource(resource_type, resource_path):add_ref()
 	local new_rs_address = new_resource and new_resource:get_address()
 	if type(new_rs_address) == "number" then
-		local holder = sdk.create_instance(resource_type .. "Holder", true):add_ref()
+		local holder = sdk.create_instance(resource_type .. "Holder", true)
 		if holder then
 			holder:call(".ctor()")
 			holder:write_qword(0x10, new_rs_address)
@@ -2426,15 +2426,19 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 							tbl.__address = nil
 							local converted_tbl = recurse(tbl, key, level + 1) or {}
 							
-							for field_name, field in pairs(propdata.fields) do 
-								deferred_calls[obj] = deferred_calls[obj] or {}
-								local to_set = converted_tbl[field_name]
-								if (to_set ~= nil) and type(to_set)~="string" then
-									--log.info("Setting field " .. field_name .. " " .. logv(to_set, nil, 0) .. " for " .. logv(obj, nil, 0) )
-									table.insert(deferred_calls[obj], { field=field_name, args= to_set } )
-								end
-							end
+							
+
+							
 							if (tbl.__is_vt or set_props) then
+								local o_tbl = obj._ or create_REMgdObj(obj)
+								for field_name, field in pairs(propdata.fields) do 
+									deferred_calls[obj] = deferred_calls[obj] or {}
+									local to_set = converted_tbl[field_name]
+									if (to_set ~= nil) and type(to_set)~="string" then
+										--log.info("Setting field " .. field_name .. " " .. logv(to_set, nil, 0) .. " for " .. logv(obj, nil, 0) )
+										table.insert(deferred_calls[obj], { field=field_name, args=to_set, vardata=o_tbl.field_data[field_name] } )
+									end
+								end
 								for method_name, method in pairs(propdata.setters) do
 									if converted_tbl[method_name] ~= nil then
 										deferred_calls[obj] = deferred_calls[obj] or {}
@@ -2443,7 +2447,9 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 											if to_set.__typedef == "via.Transform" then
 												to_set = scene:call("findGameObject(System.String)", tbl.__gameobj_name:gsub(" %(%d%d?%)$", ""))
 												to_set = to_set and to_set:call("get_Transform")
-												if to_set then table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set } ) end
+												if to_set then 
+													table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set } ) 
+												end
 											else
 												for i, item in ipairs(tbl[method_name]) do --list objects, like TreeLayers
 													
@@ -2464,21 +2470,19 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 																if sub_mth then
 																	local so_tbl = sub_obj._ or create_REMgdObj(sub_obj)
 																	log.info("Sub table set " .. sub_mth:get_name() .. " " .. logv(val, nil, 0) .. " for " .. logv(sub_obj, nil, 0) )
-																	table.insert(deferred_calls[sub_obj], { func=sub_mth:get_name(), args=val , vardata=sub_obj[fname]} )
+																	table.insert(deferred_calls[sub_obj], { func=sub_mth:get_name(), args=val , vardata=so_tbl.props_named[fname]} )
 																end
 															end
 														end
 													else --if (type(to_set[i])~="string") or not to_set[i]:find("%.%.%.") then
-														local o_tbl = obj._ or create_REMgdObj(obj)
 														log.info("Multi-param set " .. method_name .. " " .. logv(to_set[i], nil, 0) .. " at idx " .. (i-1) .. " for " .. logv(obj, nil, 0) )
-														table.insert(deferred_calls[obj], { func=method:get_name(), args= (not method:get_param_types()[2]:is_primitive()) and {i-1, to_set[i]} or {to_set[i], i-1}, vardata=obj[method_name] } )
+														table.insert(deferred_calls[obj], { func=method:get_name(), args= (not method:get_param_types()[2]:is_primitive()) and {i-1, to_set[i]} or {to_set[i], i-1}, vardata=o_tbl.props_named[method_name] } )
 													end
 												end
 											end
 										elseif (to_set ~= nil) and (to_set ~= "") then
-											local o_tbl = obj._ or create_REMgdObj(obj)
 											log.info("Setting " .. method_name .. " " .. logv(to_set, nil, 0) .. " for " .. logv(obj, nil, 0) )
-											table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set, vardata=obj[method_name] } )
+											table.insert(deferred_calls[obj], { func=method:get_name(), args=to_set, vardata=o_tbl.props_named[method_name] } )
 										end
 									end
 								end
@@ -2737,13 +2741,13 @@ local function lua_get_system_array(sys_array, allow_empty, convert_to_table)
 		system_array = dict--((get_table_size(dict) == #system_array) and dict) or system_array
 	end
 	
-	if system_array and ((system_array[1] and sdk.is_managed_object(system_array[1])) or (not system_array[1] and next(system_array) and sdk.is_managed_object(({next(system_array)})[2]))) then
+	--[[if system_array and ((system_array[1] and sdk.is_managed_object(system_array[1])) or (not system_array[1] and next(system_array) and sdk.is_managed_object(({next(system_array)})[2]))) then
 		for key, element in pairs(system_array) do 
 			if element then 
 				system_array[key] = element:add_ref() 
 			end
 		end
-	end
+	end]]
 	
 	return system_array
 end
@@ -5937,11 +5941,11 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 							end
 							o_tbl.hierarchy = reverse_table(o_tbl.hierarchy)
 						end]]
-						if imgui.tree_node("[Lua]") then 
+						--if imgui.tree_node("[Lua]") then 
 							read_imgui_element(o_tbl)
-							imgui.tree_pop()
-						end
-						read_imgui_element(metadata[m_obj])
+						--	imgui.tree_pop()
+						--end
+						--read_imgui_element(metadata[m_obj])
 						imgui.tree_pop()
 					end
 					
@@ -8173,14 +8177,13 @@ GameObject = {
 						joint._ = joint._ or create_REMgdObj(joint)
 						local joint_tbl = {__address=saved_joint.__address, __typedef=saved_joint.__typedef}
 						for key, value in pairs(saved_joint) do 
-							if joint[key] and (poser.load_all or key == poser.prop_name) then 
-								old_deferred_calls[logv(joint) .. " " .. poser.prop_name]  = nil
-								--deferred_calls[joint].vardata = joint[key]
-								joint[key].freeze = 1
+							if joint._.props_named[key] and (poser.load_all or key == poser.prop_name) then 
+								old_deferred_calls[logv(joint) .. " " .. poser.prop_name] = nil
+								joint._.props_named[key].freeze = 1
 								joint_tbl[key] = value
 							end
 						end
-						jsonify_table(joint_tbl, true, {set_props=true, obj_to_load_to=joint})
+						jsonify_table(joint_tbl, true, {set_props=true, obj_to_load_to=joint} )
 					end
 				end
 			end
