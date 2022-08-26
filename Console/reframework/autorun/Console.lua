@@ -73,8 +73,8 @@ local force_autocomplete
 
 --RE2, RE3
 local cheats = {
-	["god"] = table.pack({ comp="HitPoint", method="set_NoDamage", get_method="get_NoDamage"}),
-	["God"] = table.pack({ comp="HitPoint", method="set_Invincible", get_method="get_Invincible"}),
+	["god"] = table.pack({ comp="HitPointController", method="set_NoDamage", get_method="get_NoDamage"}),
+	["God"] = table.pack({ comp="HitPointController", method="set_Invincible", get_method="get_Invincible"}),
 	--["noclip"] = table.pack({ comp="CharacterController", method="set_Enabled", active=false }, { comp="GroundFixer", method="set_Enabled", active=false }),
 }
 
@@ -107,6 +107,7 @@ local run_command = function(input)
 					cheat.active = not component:get_field(cheat.field)
 				else
 					component:call(cheat.method, not cheat.active)
+					--re.msg("Called method " .. cheat.method .. " " .. tostring(not cheat.active))
 					cheat.active = not component:call(cheat.get_method)
 				end
 				active = active or cheat.active

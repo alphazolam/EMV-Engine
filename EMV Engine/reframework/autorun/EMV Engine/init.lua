@@ -152,6 +152,10 @@ if static_objs.main_view ~= nil then
 	statics.height = size:get_field("h")
 end
 
+misc_vars = {
+	tooltip_timers = {},
+}
+
 local cog_names = { 
 	["re2"] = "COG", 
 	["re3"] = "COG", 
@@ -491,7 +495,6 @@ local function __genOrderedIndex( t , do_multitype)
         orderedIndex[#orderedIndex+1] = key
     end
 	table.sort( orderedIndex, do_multitype and cmp_multitype )
-	--log.info("__genOrderedIndex " .. tics)
     return orderedIndex
 end
 
@@ -510,15 +513,17 @@ local function orderedNext(t, state)
 		end
         key = t.__orderedIndex[1]
     elseif t.__orderedIndex then
-		--t.__orderedIndex = G_ordered[t].ords
         for i = 1, #t.__orderedIndex do
             if t.__orderedIndex[i] == state then
                 key = t.__orderedIndex[i+1]
             end
         end
     end
-    if key then
-        return key, t[key]
+	if key then 
+		if t[key]~=nil then 
+			return key, t[key] 
+		end
+		G_ordered[t] = nil
     end
     t.__orderedIndex = nil
     return
@@ -826,6 +831,19 @@ local function run_command(input)
 	return ((outputs[2]~=nil) and outputs or outputs[1])
 end
 
+--Shows a floating message over an imgui element when hovered:
+imgui.tooltip = function(msg, key, delay)
+	delay = key and (delay or 0.5)
+	if not imgui.is_item_hovered() then 
+		if delay then misc_vars.tooltip_timers[key] = nil end
+	else
+		if delay then misc_vars.tooltip_timers[key] = misc_vars.tooltip_timers[key] or uptime end
+		if (not delay or (not misc_vars.tooltip_timers[key] or ((uptime - misc_vars.tooltip_timers[key]) > delay))) then
+			imgui.set_tooltip(msg or "")
+		end
+	end
+end
+
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
 --Returns true if it displayed an editable field, or 1 if the editable field was set
 --"check_add_func" is a function that should take a string and return whether it is acceptable as the new value
@@ -1049,6 +1067,7 @@ local ImguiTable = {
 		local tbl_size = get_table_size(o.tbl)
 		if tbl_size > 25000 then return {} end
 		
+		
 		o.skip_underscores = args.skip_underscores
 		o.pairs = o.is_array and ipairs or orderedPairs
 		o.name = args.name or o.tbl.name
@@ -1106,7 +1125,7 @@ local ImguiTable = {
 		tbl = tbl or {}
 		self.tbl = self.tbl or {}
 		self.open = os.clock()
-		self.tbl_count = self.is_array and #tbl or get_table_size(tbl)
+		self.tbl_count = (self.is_array and #tbl) or get_table_size(tbl) or 1
 		self.should_update = (self.tbl_count ~= #self.ordered_idxes + (self.skip_underscores or 0)) or nil
 		
 		if self.do_update then
@@ -1202,10 +1221,11 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 			end
 		end
 		
-		--[[if imgui.tree_node_str_id(key .. "T", "Table Medadata") then
+		--[[if imgui.tree_node_str_id(key .. "T", "Table Metadata") then
 			read_imgui_element(tbl_obj, nil, key .. "T")
 			imgui.tree_pop()
 		end]]
+		--imgui.text(tostring(tbl_obj.tbl_count))
 		
 		local do_subtables = ordered_idxes and (#ordered_idxes > SettingsCache.max_element_size)
 		--imgui.text(tostring(editable) .. asd)
@@ -1224,7 +1244,7 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 					end
 					local element = tbl[ index ]
 					
-					if tbl_obj.is_array and (tbl_obj.sorted_once or index ~= i) then 
+					if not tbl_obj.is_array or (tbl_obj.sorted_once or index ~= i) then 
 						imgui.text(i .. ". ")
 						imgui.same_line()
 					end
@@ -1284,7 +1304,7 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 									end
 									imgui.tree_pop()
 								end
-							elseif not editable or not editable_table_field(elem_key, element, tbl, nil, edit_args) then 
+							else--if not editable or not editable_table_field(elem_key, element, tbl, nil, edit_args) then 
 								imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
 							end
 							tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, }
@@ -1395,7 +1415,7 @@ end
 
 --Convert matrix4 to Translation, Rotation and Scale
 local function mat4_to_trs(mat4, as_tbl)
-	local pos = mat4[3]
+	local pos = mat4[3]:to_vec3()
 	local rot = mat4:to_quat()
 	local scale = mat4_scale(mat4)
 	if as_tbl then return {pos, rot, scale} end
@@ -1433,7 +1453,7 @@ local function trs_to_mat4(translation, rotation, scale)
 	)
 	local new_mat = rotation:to_mat4() or Matrix4x4f.identity()
 	new_mat = new_mat * scale_mat
-	new_mat[3] = (translation and translation:to_vec4()) or new_mat[3]
+	new_mat[3] = ((translation and translation.to_vec4 and translation:to_vec4()) or translation) or new_mat[3]
 	return new_mat
 end
 
@@ -3115,7 +3135,7 @@ local function create_gameobj(name, component_names, args, dont_rename)
 				deferred_calls[new_gameobj] = {lua_object=new_obj, method=new_obj.activate_forced_mode }
 				new_obj.forced_mode_center = worldmatrix and worldmatrix[3]:to_vec3()
 			else
-				clear_figures()
+				EMV.clear_figures()
 			end
 		end
 		
@@ -3369,7 +3389,7 @@ deferred_call = function(managed_object, args, index, on_frame)
 			elseif args.lua_object and args.method then
 				if args.method then 
 					if args.args then
-						try, out = pcall(args.method, args.lua_object, table.unpack(args.args))
+						try, out = pcall(args.method, args.lua_object, (type(args.args)=="table" and table.unpack(args.args)) or args.args)
 					else
 						try, out = pcall(args.method, args.lua_object)
 					end
@@ -3688,6 +3708,7 @@ local function log_value(value, value_name, layer_limit, layer, verbose, return_
 							if (layer_limit < 2) and (len > 512) then break end
 							table.insert(msg, addition)
 						end
+						value.__orderedIndex = nil
 					end
 				else 
 					table.insert(msg, str_val)
@@ -3714,7 +3735,7 @@ local function log_value(value, value_name, layer_limit, layer, verbose, return_
 					local typedef = value:get_type_definition()
 					msg = {typedef:get_full_name()}
 					--if verbose then 
-						if msg[1] == "GameObject" then
+						if msg[1] == "via.GameObject" and value:call("get_Valid") then
 							msg[1] = value:call("get_Name")
 						elseif typedef:is_a("via.Component") then
 							local gameobj = get_GameObject(value) --({pcall(value.call, value, "get_GameObject")})
@@ -4217,7 +4238,8 @@ local VarData = {
 		
 		if o.ret_type:is_a("System.Single") or o.ret_type:is_a("via.vec3") or o.ret_type:is_a("via.vec4") or o.ret_type:is_a("via.Quaternion") or o.ret_type:is_a("via.mat4") then
 			SettingsCache.increments[rt_name] = SettingsCache.increments[rt_name] or {}
-			o.increment = SettingsCache.increments[rt_name].increment or 0.1
+			o.increment = SettingsCache.increments[rt_name].increment or 0.01
+			--if o.increment == 0.0 then o.increment = 0.01 end
 			SettingsCache.increments[rt_name].increment = o.increment
 		end
 		
@@ -4401,6 +4423,10 @@ local VarData = {
 				self.mysize = self.mysize or (self.count and self.count:call(obj)) or (o_tbl.counts and o_tbl.counts.method and o_tbl.counts.method:call(obj)) or 0
 				self.mysize = (type(self.mysize)=="number") and self.mysize or 0
 				if should_update_cvalue and (self.mysize < 25) or random(3) then
+					if o_tbl.item_type and self.ret_type:get_full_name() == "System.Object" then --fix props with generic System.Object types if the parent MgdObj has the real ret type
+						self.ret_type = o_tbl.item_type
+						self.name_methods = get_name_methods(self.ret_type)
+					end
 					self.value = {}
 					for j=0, (self.mysize and self.mysize-1) or 0 do 
 						if not self:update_item(o_tbl, j) then 
@@ -4421,7 +4447,9 @@ local VarData = {
 						o_tbl.item_type = self.ret_type
 						o_tbl.elements = self.cvalue
 						o_tbl.mysize = self.mysize
-						o_tbl.element_names = self.element_names
+						if (not o_tbl.item_type or not o_tbl.element_names) then
+							o_tbl.element_names = self.element_names
+						end
 						o_tbl.is_lua_type = self.is_lua_type
 					end
 				end
@@ -5049,7 +5077,7 @@ end
 local function show_imgui_vec4(value, name, is_int, increment, normalize)
 	if not value then return end
 	local changed = false
-	local increment = increment or 0.1
+	local increment = increment or 0.01
 	if type(value) ~= "number" then
 		--local typename = value.__type and value.__type.name  glm::qua<float,0>
 		if value.w  then 
@@ -5237,6 +5265,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 			local new_value = Matrix4x4f.new()
 			for i=0, 3 do 
 				changed, new_value[i] = show_imgui_vec4(value[i], "Row[" .. i .. "]", nil, var_metadata.increment)
+				
 				was_changed = changed or was_changed
 				if i == 3 and new_value[i].w == 1 then 
 					do_offer_worldpos = { new_value[i], (o_tbl and (o_tbl.Name or o_tbl.name) or "") .. " " .. display_name, key_name, parent_managed_object, (field or prop.get) }
@@ -5463,9 +5492,10 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						--local ret_name = var_metadata.ret_type:get_full_name()
 						if var_metadata.increment then
 							local rt_name, changed = var_metadata.ret_type:get_full_name()
-							changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment, 0.0001, 0.0001, 1) 
+							changed, metadata_methods[rt_name].increment = imgui.drag_float("Increment: " .. rt_name, metadata_methods[rt_name].increment or SettingsCache.increments[rt_name].increment, 0.0001, 0.0001, 1) 
 							if changed then 
 								var_metadata.increment = metadata_methods[rt_name].increment
+								SettingsCache.increments[rt_name].increment = var_metadata.increment
 							end
 						end
 					end
@@ -5563,11 +5593,11 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 				imgui.same_line()
 				if imgui.tree_node_str_id(key_name .. element_name .. i, disp_name ) then
 					tbl_changed, element = imgui.managed_object_control_panel(element, key_name .. element_name .. i, element_name)
-					if element._ then
+					--[[if element._ then
 						element._.Name = element._.Name or disp_name
 						arr_tbl.element_names[i] = element._.Name
 						--element._.is_open = true
-					end
+					end]]
 					imgui.tree_pop()
 				--elseif element._ then
 				--	element._.is_open = nil
@@ -6644,19 +6674,21 @@ show_imgui_mats = function(anim_object)
 		anim_object.mpaths = anim_object.mpaths or {}
 		changed, anim_object.current_mesh_idx = imgui.combo("Change Mesh: " .. anim_object.name, find_index(RN.mesh_resource_names, anim_object.mpaths.mesh_path) or anim_object.current_mesh_idx, RN.mesh_resource_names)
 		if changed then 
-			if type(RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ][1]=="string") then 
-				add_resource_to_cache(RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ][1], RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ][2])
+			local m_r_name = RN.mesh_resource_names[ anim_object.current_mesh_idx]
+			if type(RSCache.mesh_resources[m_r_name][1]=="string") then 
+				add_resource_to_cache(RSCache.mesh_resources[m_r_name][1], RSCache.mesh_resources[m_r_name][2])
 			end
-			local msh_tbl = RSCache.mesh_resources[ RN.mesh_resource_names[anim_object.current_mesh_idx] ]
+			local msh_tbl = RSCache.mesh_resources[m_r_name]
 			local old_parent = anim_object.parent
 			anim_object:set_parent(0)
 			anim_object.mesh:call("setMesh", msh_tbl[1])
 			if old_parent then anim_object:set_parent(anim_object.parent) end
-			if RSCache.mesh_resources[ RN.mesh_resource_names[ anim_object.current_mesh_idx] ][2] then 
+			
+			if RSCache.mesh_resources[m_r_name][2] then 
 				anim_object.mesh:call("set_Material", msh_tbl[2])
 				anim_object.mpaths.mdf2_path = msh_tbl[2] and msh_tbl[2].call and msh_tbl[2]:call("ToString()"):match("^.+%[@?(.+)%]")
 			end
-			anim_object.mpaths.mesh_path = RN.mesh_resource_names[ anim_object.current_mesh_idx ]
+			anim_object.mpaths.mesh_path = m_r_name
 			anim_object:set_materials() 
 		end
 		
@@ -6685,7 +6717,7 @@ show_imgui_mats = function(anim_object)
 		if anim_object.materials.save_path_text==nil then
 			anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. (MDFFile.extensions[game_name] or "")
 		end
-		changed, anim_object.materials.save_path_text = imgui.input_text("Save File", anim_object.materials.save_path_text)
+		changed, anim_object.materials.save_path_text = imgui.input_text("Modify File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text)
 		if changed or anim_object.materials.save_path_exists==nil then
 			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
 		end
@@ -7889,8 +7921,8 @@ GameObject = {
 		o.gameobj			= args.gameobj or o.gameobj
 		if o.xform and self.dead_addresses[o.xform] then 
 			self.dead_addresses[o.xform] = self.dead_addresses[o.xform] + 1
-			log.info("Prevented dead GameObject, attempt #" .. self.dead_addresses[o.xform])
-			if self.dead_addresses[o.xform] == 500 then 
+			log.info("Prevented dead GameObject " .. tostring(o.xform) .. ", attempt #" .. self.dead_addresses[o.xform])
+			if self.dead_addresses[o.xform] == 300 then 
 				log.info("asdf " .. asdffggsd) --causes an error that can be traced to what keeps trying to create
 			end
 			return
@@ -8146,6 +8178,7 @@ GameObject = {
 		imgui.same_line()
 		
 		changed, poser.load_all = imgui.checkbox("Import All Properties", poser.load_all)
+		changed = nil
 		
 		if imgui.button("Save Pose") or clear_slot then 
 			local pose = {}
@@ -8383,7 +8416,7 @@ GameObject = {
 		imgui.same_line()
 		
 		if imgui.button("Destroy " .. self.name) then 
-			deferred_calls[self.gameobj] = { { func="destroy", args=self.gameobj }, (self.frame and {lua_func=_G.clear_figures}) }
+			deferred_calls[self.gameobj] = { { func="destroy", args=self.gameobj }, (self.frame and EMV.clear_figures and {lua_func=EMV.clear_figures}) }
 		end
 		
 		if (self.layer or self.children) and not imgui.same_line() and imgui.button(forced_mode and "Add to Animation Viewer" or "Enable Animation Viewer") then --and not cutscene_mode 
@@ -8447,7 +8480,7 @@ GameObject = {
 		end
 		
 		imgui.same_line()
-		imgui_changed, self.parent_index = imgui.combo("Set Parent ", self.parent_index, self.parents_list.edited_names)
+		imgui_changed, self.parent_index = imgui.combo("Parent", self.parent_index, self.parents_list.edited_names)
 		
 		if self.parent_index == self.index_h then 
 			imgui.same_line()
@@ -8723,7 +8756,7 @@ GameObject = {
 		self.last_display = self.display
 		if SettingsCache.affect_children and self.children then 
 			for i, child in ipairs(self.children) do
-				held_transforms[child] = held_transforms[child] or (GameObject.new_AnimObject and GameObject:new_AnimObject{xform=child} or GameObject:new{xform=child})
+				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{xform=child}
 				if held_transforms[child] then held_transforms[child]:pre_fix_displays() end
 			end
 		end
@@ -8732,9 +8765,10 @@ GameObject = {
 	set_transform = function(self, trs, do_deferred)
 		if do_deferred then
 			deferred_calls[self.xform] = deferred_calls[self.xform] or {}
-			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_transform, args={trs}})
+			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_transform, args=trs})
 		else
 			--self:pre_fix_displays()
+			--log.info("setting transform for " .. self.name .. " 1. " .. tostring(trs[1]) .. " 2. " .. tostring(trs[2]) .. " 3. " .. tostring(trs[3]))
 			if trs[1] then self.xform:call("set_Position", trs[1]) end
 			if trs[2] then self.xform:call("set_Rotation", trs[2]) end
 			if trs[3] then self.xform:call("set_Scale", trs[3]) end
@@ -8746,10 +8780,10 @@ GameObject = {
 		if do_deferred then
 			local deferred_calls = (do_deferred==1) and on_frame_calls or deferred_calls
 			deferred_calls[self.xform] = deferred_calls[self.xform] or {}
-			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_parent, args={new_parent_xform}})
+			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_parent, args=new_parent_xform})
 		else 
 			self:pre_fix_displays()
-			pcall(sdk.call_object_func, self.xform, "set_Parent", new_parent_xform)
+			pcall(sdk.call_object_func, self.xform, "set_Parent", new_parent_xform or 0)
 			self.parent = self.xform:call("get_Parent")
 			self.parent_obj = self.parent and (held_transforms[self.parent] or (GameObject.new_AnimObject and GameObject:new_AnimObject{xform=self.parent} or GameObject:new{xform=self.parent}))
 			self:toggle_display()
@@ -8807,7 +8841,7 @@ GameObject = {
 		held_transforms[self.xform], touched_gameobjects[self.xform] = nil
 		self = GameObject:new_AnimObject({xform=self.xform}, basis_args, true)
 		if touched_gameobjects[self.xform] then
-			self = GameObject:new_GrabObject({xform=self.xform}, basis_args, true)
+		--	self = GameObject:new_GrabObject({xform=self.xform}, basis_args, true)
 		end
 		return self
 	end,
@@ -9044,26 +9078,6 @@ re.on_application_entry("UpdateMotion", function()
 		deferred_call(managed_object, args)
 	end
 	
-	--deferred_calls = {}
-	for instance, data in pairs(metadata) do
-		local o_tbl = instance._
-		if o_tbl then 
-			if not (o_tbl.keep_alive or o_tbl.is_frozen) then
-				o_tbl.last_opened = o_tbl.last_opened or uptime
-			end
-			if o_tbl.invalid or (o_tbl.last_opened and (uptime - o_tbl.last_opened) > 5) then
-				log.info("REMgdObj deleting " .. o_tbl.name)
-				metadata[instance] = nil
-			else
-				instance:__update(nil, o_tbl.clear)
-				o_tbl.clear = nil
-			end
-			o_tbl.is_open = nil
-		--else
-		--	metadata[instance] = nil
-		end
-		
-	end
 end)
 
 --On pre-LockScene -------------------------------------------------------------------------------------------------------------------------------------------
@@ -9140,6 +9154,26 @@ re.on_frame(function()
 		init_settings()
 	end
 	
+	--deferred_calls = {}
+	for instance, data in pairs(metadata) do
+		local o_tbl = instance._
+		if o_tbl then 
+			if not (o_tbl.keep_alive or o_tbl.is_frozen) then
+				o_tbl.last_opened = o_tbl.last_opened or uptime
+			end
+			if o_tbl.invalid or (o_tbl.last_opened and (uptime - o_tbl.last_opened) > 5) then
+				log.info("REMgdObj deleting " .. o_tbl.name)
+				metadata[instance] = nil
+			else
+				instance:__update(nil, o_tbl.clear)
+				o_tbl.clear = nil
+			end
+			o_tbl.is_open = nil
+		--else
+		--	metadata[instance] = nil
+		end
+	end
+	
 	if random(60) then
 		for key, tbl in pairs(G_ordered) do
 			if not tbl.open or (uptime > tbl.open + 30) then
@@ -9149,7 +9183,7 @@ re.on_frame(function()
 	end
 	
 	for managed_object, args in pairs(on_frame_calls) do 
-		deferred_call(managed_object, args, nil, true)
+		deferred_call(managed_object, args, nil, true) 
 	end
 	
 	for tbl_addr, metadata in pairs(__temptxt or {}) do

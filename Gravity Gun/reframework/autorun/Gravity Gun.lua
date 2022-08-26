@@ -216,7 +216,7 @@ local get_GameObject = EMV.get_GameObject
 
 local gg_default_settings = EMV.deep_copy(GGSettings)
 local function load_settings()
-	local new_settings = jsonify_table(json.load_file("GravityGunAndConsole\\GGunConsoleSettings.json"), true)
+	local new_settings = jsonify_table(json.load_file("GravityGunAndConsole\\GGunConsoleSettings.json") or {}, true)
 	if new_settings and new_settings.load_json then 
 		GGSettings = new_settings
 		for key, value in pairs(gg_default_settings) do
@@ -517,7 +517,7 @@ GameObject.new_GrabObject = function(self, args, o)
 			end
 		end
 	end
-	log.info(((last_camera_matrix[3] - self.impact_pos):length()))
+	--log.info(((last_camera_matrix[3] - self.impact_pos):length()))
 	if (isRE7 or isRE7rt) and ((last_camera_matrix[3] - self.impact_pos):length() < 0.1) or (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
 		self.invalid = true
 	end
@@ -546,6 +546,7 @@ GameObject.new_GrabObject = function(self, args, o)
 	touched_gameobjects[self.xform] = self
 	
 	self.is_GrabObject = true
+	last = self
 	return self
 end
 
@@ -1185,10 +1186,12 @@ local function cast_rays(ray_method, ray_query)
 							gameobjects[contact_pt_dist].impact_pos = contact_pos
 							gameobjects[contact_pt_dist].contact_pt = new_contactpoint 
 							gameobjects[contact_pt_dist].is_old = true
+							gameobjects[contact_pt_dist].ray_layer = ray_layer
 						else
 							gameobjects[contact_pt_dist] = GameObject:new_GrabObject { gameobj=game_object, xform=transform, collidable=new_collidable, contact_pt=new_contactpoint, impact_pos = contact_pos, ray_layer=ray_layer, dist=contact_pt_dist, num_contacts=num_contact_pts }
 							--re.on_update_transform(transform, on_update_transform)
 						end
+						--re.msg(ray_layer)
 					end
 				end
 			end
@@ -1228,6 +1231,7 @@ local function cast_rays(ray_method, ray_query)
 								gameobjects[contact_pt_dist].rigid_body = new_rigid_component
 								gameobjects[contact_pt_dist].rigid_id = new_rigid_id:get_field("Value")
 								gameobjects[contact_pt_dist].contact_pt = new_contactpoint 
+								gameobjects[contact_pt_dist].ray_layer = ray_layer
 								gameobjects[contact_pt_dist].is_old = true
 							elseif not touched_gameobjects[transform] then
 								gameobjects[contact_pt_dist] = GameObject:new_GrabObject { gameobj=game_object, xform=transform, rigid_body=new_rigid_component, rigid_id=rigid_index, contact_pt=new_contactpoint, impact_pos=contact_pos, ray_layer=ray_layer, dist=contact_pt_dist, num_contacts=num_contact_pts } 
@@ -1818,11 +1822,11 @@ re.on_draw_ui(function()
 			if imgui.tree_node("Touched GameObjects") then 
 				for xform, game_object in orderedPairs(touched_gameobjects) do 
 					imgui.text("	"); imgui.same_line()
-					if imgui.tree_node_str_id(game_object.key_hash, game_object.name) then
+					if game_object and imgui.tree_node_str_id(game_object.key_hash, game_object.name) then
 						imgui.begin_rect()
 							imgui_anim_object_viewer(game_object)
-							imgui.tree_pop()
 						imgui.end_rect(2)
+						imgui.tree_pop()
 					end
 				end
 			end
