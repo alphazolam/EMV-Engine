@@ -2997,6 +2997,7 @@ re.on_frame(function()
 	if center_gameobj and not center_gameobj:call("get_Valid") then 
 		center_gameobj, static_objs.center = nil 
 	end
+	
 	if not cutscene_mode and center_gameobj then 
 		--deferred_calls[center_gameobj] = {func="destroy", args=center_gameobj}
 		for i, child in ipairs(get_children(center_gameobj:call("get_Transform")) or {}) do 
@@ -3517,16 +3518,18 @@ re.on_frame(function()
 							if imgui.button("Reset All") then 
 								for i, lightset in pairs(lightsets) do
 									lightset.display = lightset.display_org
-									if lightset.toggle_display then 
-										lightset:pre_fix_displays()
-										lightset:toggle_display()
-									end
-									for j, light in pairs(lightset.lights) do
-										if light.display then
-											light:set_parent(light.parent_org or (light.parent_obj and light.parent_obj.name~="dummy_Center" and light.parent_obj.xform) or 0)
-											light:set_transform(mat4_to_trs(light.init_worldmat, true), isRE2 or isDMC)
-											--write_transform(light, pos, rot, scale) 
-											--deferred_calls[light.gameobj] = { lua_func=write_transform, args={light, pos, rot, scale} } --mat4_to_trs(light.init_worldmat)
+									if lightset.display then
+										if lightset.toggle_display then 
+											lightset:pre_fix_displays()
+											lightset:toggle_display()
+										end
+										for j, light in pairs(lightset.lights) do
+											if light.display then
+												light:set_parent(light.parent_org or (light.parent_obj and light.parent_obj.name~="dummy_Center" and light.parent_obj.xform) or 0, true)
+												light:set_transform(mat4_to_trs(light.init_worldmat, true), true)
+												--write_transform(light, pos, rot, scale) 
+												--deferred_calls[light.gameobj] = { lua_func=write_transform, args={light, pos, rot, scale} } --mat4_to_trs(light.init_worldmat)
+											end
 										end
 									end
 								end
@@ -3643,6 +3646,7 @@ re.on_frame(function()
 							
 							local parent_xform = (isRE8 and base_mesh) or current_figure
 							
+							--local center
 							if cutscene_mode then
 								static_objs.center = static_objs.center or center_gameobj or create_gameobj("dummy_Center", nil, {worldmatrix=selected and selected.xform:call("get_WorldMatrix"),}, true)
 								if not static_objs.center.xform then
@@ -3651,7 +3655,7 @@ re.on_frame(function()
 								parent_xform = static_objs.center
 							end
 							
-							fixed_figure = (isDMC and base_mesh) or selected or base_mesh --re2_figure_container_obj or base_mesh
+							fixed_figure = (cutscene_mode and static_objs.center) or (isDMC and base_mesh) or selected or base_mesh --re2_figure_container_obj or base_mesh
 							
 							if not isDMC then
 								if fixed_figure.parent then 
@@ -3671,10 +3675,11 @@ re.on_frame(function()
 								--fixed_figure.xform:call("set_Parent", 0)--(isDMC and camera.xform) or 0)
 								if not isRE8 then 
 									for i, light_obj in ipairs(lights) do 
-										if light_obj.display then 
+										if light_obj.display then
 											if not light_obj.unlock_light then
 												local wmatrix = light_obj.xform:call("get_WorldMatrix")
-												light_obj:set_parent(parent_xform.xform or 0)
+												light_obj:pre_fix_displays()
+												light_obj:set_parent(parent_xform.xform or 0, isRE2 or isDMC)
 												light_obj:set_transform( mat4_to_trs(wmatrix, true), isRE2 or isDMC)
 												--deferred_calls[light_obj.gameobj] = { lua_func=write_transform, args={light_obj, pos, rot, scale} }
 											end
@@ -3682,7 +3687,7 @@ re.on_frame(function()
 									end
 								end
 								if not cutscene_mode then
-									fixed_figure:set_parent(0)
+									fixed_figure:set_parent(0,  isRE2 or isDMC)
 									if isDMC then deferred_calls[selected.xform] = {func="set_Position", args=selected.xform:call("get_Position")} end
 									deferred_calls[parent_xform.xform] = { func="set_LocalPosition", args=position }
 								end
@@ -3690,7 +3695,7 @@ re.on_frame(function()
 								if not isRE8 then 
 									for i, light_obj in ipairs(lights) do 
 										if light_obj.display and not light_obj.unlock_light then
-											light_obj:set_parent((isRE3 and unlocked_parent.xform) or light_obj.parent_org or 0)
+											light_obj:set_parent((isRE3 and unlocked_parent.xform) or light_obj.parent_org or 0, isRE2 or isDMC)
 											--light_obj.xform:call("set_Parent", (isRE3 and unlocked_parent.xform) or light_obj.parent_org or 0)
 										end
 									end

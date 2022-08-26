@@ -3405,6 +3405,7 @@ deferred_call = function(managed_object, args, index, on_frame)
 				if value == "__nil" then 
 					value = nil
 				end
+				
 				if args.field ~= nil and args.func == nil then
 					--[[if vardata and vardata.is_lua_type == "vec" or vardata.is_lua_type == "quat" or vardata.is_lua_type == "string" or vardata.is_lua_type == "mat" then
 						value = value_to_obj(value, vardata.ret_type)
@@ -3418,7 +3419,7 @@ deferred_call = function(managed_object, args, index, on_frame)
 							value[i] = (arg~="__nil") and arg or nil
 						end]]
 						if args.func then
-							try, out = pcall(managed_object.call,	managed_object, args.func, 	table.unpack(value)) --methods with args 
+							try, out = pcall(managed_object.call,	managed_object, args.func, 	table.unpack(value)) --methods by name with args 
 						elseif args.method then
 							try, out = pcall(args.method.call,	args.method, managed_object, table.unpack(value))
 						end
@@ -5933,7 +5934,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						end
 						for i, prop in ipairs(o_tbl.props or {}) do 
 							if (prop.value_org ~= nil) and prop.was_changed and not (prop.is_obj or prop.elements) and not prop.is_count then
-								table.insert(deferred_calls[m_obj], {func=prop.full_name, args=prop.value_org})
+								table.insert(deferred_calls[m_obj], {func=prop.set, args=prop.value_org})--:to_vec4()})
 							end
 						end
 						o_tbl.invalid = true
@@ -8765,7 +8766,7 @@ GameObject = {
 	set_transform = function(self, trs, do_deferred)
 		if do_deferred then
 			deferred_calls[self.xform] = deferred_calls[self.xform] or {}
-			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_transform, args=trs})
+			table.insert(deferred_calls[self.xform], {lua_object=self, method=GameObject.set_transform, args={trs}})
 		else
 			--self:pre_fix_displays()
 			--log.info("setting transform for " .. self.name .. " 1. " .. tostring(trs[1]) .. " 2. " .. tostring(trs[2]) .. " 3. " .. tostring(trs[3]))
