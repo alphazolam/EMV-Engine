@@ -7154,8 +7154,8 @@ local function show_collection()
 							if cd.sel_obj then --on un-selected:
 								cd.sel_obj.force_center = nil 
 								local vd = cd.sel_obj.xform._ or create_REMgdObj(cd.sel_obj.xform, true)
-								vd.obj._Position.freeze, vd.obj._Rotation.freeze = true, true
-								deferred_calls[cd.sel_obj.xform] = {{func="set_Position", args=vd.obj._Position.value, vardata=vd.obj._Position}, {func="set_Rotation", args=vd.obj._Rotation.value, vardata=vd.obj._Rotation}}
+								vd.props_named._Position.freeze, vd.props_named._Rotation.freeze = true, true
+								deferred_calls[cd.sel_obj.xform] = {{func="set_Position", args=vd.props_named._Position.value, vardata=vd.props_named._Position}, {func="set_Rotation", args=vd.props_named._Rotation.value, vardata=vd.props_named._Rotation}}
 							end
 							cd.sel_obj = is_selected and GameObject:new_AnimObject({xform=obj.xform}, obj) or nil
 							cd.sel_obj_coll_key = cd.sel_obj and obj.unique_name
@@ -7165,10 +7165,10 @@ local function show_collection()
 								cd.worldmatrix = obj.xform:call("get_WorldMatrix")
 								if cd.gizmo_freeze_selected and obj.cog_joint then
 									local vd = obj.cog_joint._ or create_REMgdObj(obj.cog_joint, true)
-									if vd.obj._LocalPosition then
-										vd.obj._LocalPosition.freeze = true
+									if vd.props_named._LocalPosition then
+										vd.props_named._LocalPosition.freeze = true
 									end
-									deferred_calls[obj.cog_joint] = {func="set_LocalPosition", args=obj.cog_joint:call("get_BaseLocalPosition"), vardata=vd.obj._LocalPosition } --or {freeze=true}
+									deferred_calls[obj.cog_joint] = {func="set_LocalPosition", args=obj.cog_joint:call("get_BaseLocalPosition"), vardata=vd.props_named._LocalPosition } --or {freeze=true}
 									cd.worldmatrix[3] = (obj.cog_joint:call("get_Position") - obj.cog_joint:call("get_BaseLocalPosition")):to_vec4()
 								end
 								obj.sel_frozen = true
