@@ -335,11 +335,15 @@ REResource = {
 			end
 		end
 		
-		if self.RSZ then
+		
+		
+		local RSZ = self.RSZ or self.isRSZ and self
+		
+		if RSZ then
 			
 			if not self.instanceNames then 
 				self.instanceNames = {}
-				for i, dataTbl in ipairs(self.RSZ.rawData) do 
+				for i, dataTbl in ipairs(RSZ.rawData) do 
 					self.instanceNames[i] = dataTbl.name
 				end
 			end
@@ -356,13 +360,13 @@ REResource = {
 						if parentFieldListIdx then
 							changed, parentField.objectIndex[parentFieldListIdx] = imgui.combo("ObjectIndex", parentField.objectIndex[parentFieldListIdx], self.instanceNames)
 							if (parentField.isNative and EMV.editable_table_field(parentFieldListIdx, parentField.objectIndex[parentFieldListIdx], parentField.objectIndex, "ObjectIndex?")==1) or changed then
-								parentField.value[parentFieldListIdx] = self.RSZ.rawData[ parentField.objectIndex[parentFieldListIdx] ].sortedTbl
+								parentField.value[parentFieldListIdx] = RSZ.rawData[ parentField.objectIndex[parentFieldListIdx] ].sortedTbl
 								parentField.rawField.value[parentFieldListIdx] = parentField.objectIndex[parentFieldListIdx]
 							end
 						else
 							changed, parentField.objectIndex = imgui.combo("ObjectIndex", parentField.objectIndex, self.instanceNames)
 							if (parentField.isNative and EMV.editable_table_field("objectIndex", parentField.objectIndex, parentField, "ObjectIndex?")==1) or changed then 
-								parentField.value = self.RSZ.rawData[parentField.objectIndex].sortedTbl
+								parentField.value = RSZ.rawData[parentField.objectIndex].sortedTbl
 								parentField.rawField.value = parentField.objectIndex
 							end
 						end
@@ -405,14 +409,14 @@ REResource = {
 												if toInsert then 
 													local newItem = rawF.value[toInsert]
 													if rawF.value[toInsert]==nil then 
-														newItem = self.RSZ:makeFieldTable(rawF.typeId, rawF.index, true, true).value
+														newItem = RSZ:makeFieldTable(rawF.typeId, rawF.index, true, true).value
 													elseif type(newItem)=="table" then
 														newItem = EMV.deep_copy(newItem)
 													end
 													if field.objectIndex then 
 														newItem = (newItem~=0 and newItem) or instance.rawDataTbl.index-1
 														table.insert(rawF.value, toInsert, newItem)
-														table.insert(field.value, toInsert, self.RSZ.rawData[newItem].sortedTbl )
+														table.insert(field.value, toInsert, RSZ.rawData[newItem].sortedTbl )
 														field.objectIndex = EMV.deep_copy(rawF.value)
 													else
 														table.insert(rawF.value, toInsert, newItem)
@@ -458,7 +462,11 @@ REResource = {
 								imgui.pop_id()
 							end
 						elseif instance.userdataFile then
-							imgui.text(instance.userdataFile)
+							if instance.userdataFile.displayImgui then
+								instance.userdataFile:displayImgui()
+							else
+								imgui.text(instance.userdataFile)
+							end
 						end
 					imgui.end_rect(2)
 					imgui.spacing()
@@ -577,129 +585,143 @@ REResource = {
 			
 			--RawData:
 			if imgui.tree_node("RSZ") then
-				self.RSZ:displayImgui()
-				if imgui.tree_node("RawData") then
+				if not self.isRSZ then
+					RSZ:displayImgui()
+				end
+				if imgui.tree_node("RawData") then --self.isRSZ or 
 					imgui.text("	")
 					imgui.same_line()
 					imgui.begin_rect()
-						showAddInstanceMenu(self.RSZ)
+						showAddInstanceMenu(RSZ)
 					imgui.end_rect(2)
 					if imgui.tree_node("[Unformatted]") then
-						for i, instance in ipairs(self.RSZ.rawData) do
+						for i, instance in ipairs(RSZ.rawData) do
 							displayInstance(instance, i .. ". " .. instance.name)
 						end
 						imgui.tree_pop()
 					end
-					for i, instance in ipairs(self.RSZ.rawData) do
+					for i, instance in ipairs(RSZ.rawData) do
 						--[[if imgui.button("X") then 
 							--delete the instance
 						end
 						imgui.same_line()]]
 						displayInstance(instance.sortedTbl, i .. ". " .. instance.name)
 					end
-					imgui.tree_pop()
+					--if not self.isRSZ then 
+						imgui.tree_pop() 
+					--end
 				end
 				imgui.tree_pop()
 			end
 			
 			--Organized Data:
 			imgui.spacing()
-			if self.gameObjects and imgui.tree_node("GameObjects") then
-				
-				local function displayGameObject(gameObject, displayName)
+			if self.gameObjects then 
+				if imgui.tree_node("GameObjects") then
 					
-					if imgui.tree_node(displayName) then 
-						-- set Gameobject parent:
-						local gameObjectInfo = gameObject.gInfo
-						if not gameObject.parents_list or not gameObject.imguiParentIdx or self.gameobjTableResetAction then 
-							gameObject.parents_list = {}
-							for i, gInfo in ipairs(self.gameObjectInfos) do 
-								local listName = (gInfo==gameObject.gInfo and " ") or (gInfo.name .. "[" .. gInfo.gameObject.idx .. "]")
-								local parentGInfo, isParentOfThis = self.gameObjectInfosIdMap[gInfo.objectId], false
-								while self.gameObjectInfosIdMap[parentGInfo.parentId] and parentGInfo.parentId~=parentGInfo.objectId do 
-									if parentGInfo.parentId == gameObject.gInfo.objectId then
-										listName = listName .. " (CHILD)"; break
+					local function displayGameObject(gameObject, displayName)
+						
+						if imgui.tree_node(displayName) then 
+							-- set Gameobject parent:
+							local gameObjectInfo = gameObject.gInfo
+							if not gameObject.parents_list or not gameObject.imguiParentIdx or self.gameobjTableResetAction then 
+								gameObject.parents_list = {}
+								for i, gInfo in ipairs(self.gameObjectInfos) do 
+									local listName = (gInfo==gameObject.gInfo and " ") or (gInfo.name .. "[" .. gInfo.gameObject.idx .. "]")
+									local parentGInfo, isParentOfThis = self.gameObjectInfosIdMap[gInfo.objectId], false
+									while self.gameObjectInfosIdMap[parentGInfo.parentId] and parentGInfo.parentId~=parentGInfo.objectId do 
+										if parentGInfo.parentId == gameObject.gInfo.objectId then
+											listName = listName .. " (CHILD)"; break
+										end
+										parentGInfo = self.gameObjectInfosIdMap[parentGInfo.parentId]
 									end
-									parentGInfo = self.gameObjectInfosIdMap[parentGInfo.parentId]
-								end
-								table.insert(gameObject.parents_list, listName)
-								if gInfo.objectId == gameObject.gInfo.parentId or (gInfo==gameObject.gInfo and not gameObject.parent) then  --gInfo.parentId == -1
-									gameObject.imguiParentIdx = i
+									table.insert(gameObject.parents_list, listName)
+									if gInfo.objectId == gameObject.gInfo.parentId or (gInfo==gameObject.gInfo and not gameObject.parent) then  --gInfo.parentId == -1
+										gameObject.imguiParentIdx = i
+									end
 								end
 							end
-						end
-						
-						if imgui.tree_node(gameObject.name) then
-							EMV.read_imgui_element(gameObject)
-							imgui.tree_pop()
-						end
-						
-						-- change Gameobject parent:
-						changed, gameObject.imguiParentIdx = imgui.combo("Select Parent", gameObject.imguiParentIdx or 0, gameObject.parents_list)
-						if changed then 
-							if not gameObject.parents_list[gameObject.imguiParentIdx]:find("CHILD") then
-								local parentChildListIdx = gameObject.parent and EMV.find_index(gameObject.parent.children, gameObject)
-								if parentChildListIdx then 
-									self.gameobjTableRemoveAction = {"remove", gameObject.parent.children, parentChildListIdx}
-								end
-								if not self.gameObjectInfos[gameObject.imguiParentIdx] or self.gameObjectInfos[gameObject.imguiParentIdx]==gameObject.gInfo or self.gameObjectInfos[gameObject.imguiParentIdx].gameObject==gameObject then
-									gameObject.gInfo.parentId = -1
-									self.gameobjTableAddAction = {"insert", self.gameObjects, #self.gameObjects+1, gameObject}
-									gameObject.parent = nil
-								else
-									if not parentChildListIdx then
-										self.gameobjTableRemoveAction = {"remove", self.gameObjects, EMV.find_index(self.gameObjects, gameObject)}
-									end
-									local insertIdx = #self.gameObjectInfos[gameObject.imguiParentIdx].gameObject.children+1
-									for g, gobj in ipairs(self.gameObjectInfos[gameObject.imguiParentIdx].gameObject.children) do
-										if gobj.idx > gameObject.idx then insertIdx = g; break end
-									end
-									self.gameobjTableAddAction = {"insert", self.gameObjectInfos[gameObject.imguiParentIdx].gameObject.children, insertIdx, gameObject}
-									gameObject.gInfo.parentId = self.gameObjectInfos[gameObject.imguiParentIdx].objectId
-									gameObject.parent = self.gameObjectInfos[gameObject.imguiParentIdx].gameObject
-								end
-							end
-							gameObject.imguiParentIdx = nil --reset list
-						end
-						
-						imgui.spacing()
-						
-						imgui.begin_rect()
-							displayInstance(gameObject.gameobj, "via.GameObject[" .. gameObject.gameobj.rawDataTbl.index .. "]")
-							for i, sortedInstance in ipairs(gameObject.components) do
-								displayInstance(sortedInstance, i .. ". " .. sortedInstance.name)
-							end
-							imgui.text("	")
-							imgui.same_line()
-							imgui.begin_rect()
-								showAddInstanceMenu(self.RSZ, gameObject.components, gameObjectInfo)
-							imgui.end_rect(2)
-							if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
-								for c, childObject in ipairs(gameObject.children) do
-									displayGameObject(childObject, c .. ". " .. childObject.name, childObject.idx)
-								end
+							
+							if imgui.tree_node(gameObject.name) then
+								EMV.read_imgui_element(gameObject)
 								imgui.tree_pop()
 							end
-						imgui.end_rect(2)
-						imgui.tree_pop()
+							
+							-- change Gameobject parent:
+							changed, gameObject.imguiParentIdx = imgui.combo("Select Parent", gameObject.imguiParentIdx or 0, gameObject.parents_list)
+							if changed then 
+								if not gameObject.parents_list[gameObject.imguiParentIdx]:find("CHILD") then
+									local parentChildListIdx = gameObject.parent and EMV.find_index(gameObject.parent.children, gameObject)
+									if parentChildListIdx then 
+										self.gameobjTableRemoveAction = {"remove", gameObject.parent.children, parentChildListIdx}
+									end
+									if not self.gameObjectInfos[gameObject.imguiParentIdx] or self.gameObjectInfos[gameObject.imguiParentIdx]==gameObject.gInfo or self.gameObjectInfos[gameObject.imguiParentIdx].gameObject==gameObject then
+										gameObject.gInfo.parentId = -1
+										self.gameobjTableAddAction = {"insert", self.gameObjects, #self.gameObjects+1, gameObject}
+										gameObject.parent = nil
+									else
+										if not parentChildListIdx then
+											self.gameobjTableRemoveAction = {"remove", self.gameObjects, EMV.find_index(self.gameObjects, gameObject)}
+										end
+										local insertIdx = #self.gameObjectInfos[gameObject.imguiParentIdx].gameObject.children+1
+										for g, gobj in ipairs(self.gameObjectInfos[gameObject.imguiParentIdx].gameObject.children) do
+											if gobj.idx > gameObject.idx then insertIdx = g; break end
+										end
+										self.gameobjTableAddAction = {"insert", self.gameObjectInfos[gameObject.imguiParentIdx].gameObject.children, insertIdx, gameObject}
+										gameObject.gInfo.parentId = self.gameObjectInfos[gameObject.imguiParentIdx].objectId
+										gameObject.parent = self.gameObjectInfos[gameObject.imguiParentIdx].gameObject
+									end
+								end
+								gameObject.imguiParentIdx = nil --reset list
+							end
+							
+							imgui.spacing()
+							
+							imgui.begin_rect()
+								displayInstance(gameObject.gameobj, "via.GameObject[" .. gameObject.gameobj.rawDataTbl.index .. "]")
+								for i, sortedInstance in ipairs(gameObject.components) do
+									displayInstance(sortedInstance, i .. ". " .. sortedInstance.name)
+								end
+								imgui.text("	")
+								imgui.same_line()
+								imgui.begin_rect()
+									showAddInstanceMenu(RSZ, gameObject.components, gameObjectInfo)
+								imgui.end_rect(2)
+								if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
+									for c, childObject in ipairs(gameObject.children) do
+										displayGameObject(childObject, c .. ". " .. childObject.name, childObject.idx)
+									end
+									imgui.tree_pop()
+								end
+							imgui.end_rect(2)
+							imgui.tree_pop()
+						end
 					end
-				end
+					
+					for i, gameObject in ipairs(self.gameObjects) do
+						displayGameObject(gameObject, i .. ". " .. gameObject.name, gameObject.idx)
+					end
+					self.gameobjTableResetAction = nil
+					if self.gameobjTableAddAction then 
+						table[self.gameobjTableAddAction[1]](self.gameobjTableAddAction[2], self.gameobjTableAddAction[3], self.gameobjTableAddAction[4])
+						self.gameobjTableAddAction = nil
+					end
+					if self.gameobjTableRemoveAction then 
+						table[self.gameobjTableRemoveAction[1]](self.gameobjTableRemoveAction[2],self.gameobjTableRemoveAction[3])
+						self.gameobjTableRemoveAction = nil
+						self.gameobjTableResetAction = true
+					end
+					imgui.text()
+					imgui.tree_pop()
 				
-				for i, gameObject in ipairs(self.gameObjects) do
-					displayGameObject(gameObject, i .. ". " .. gameObject.name, gameObject.idx)
 				end
-				self.gameobjTableResetAction = nil
-				if self.gameobjTableAddAction then 
-					table[self.gameobjTableAddAction[1]](self.gameobjTableAddAction[2], self.gameobjTableAddAction[3], self.gameobjTableAddAction[4])
-					self.gameobjTableAddAction = nil
-				end
-				if self.gameobjTableRemoveAction then 
-					table[self.gameobjTableRemoveAction[1]](self.gameobjTableRemoveAction[2],self.gameobjTableRemoveAction[3])
-					self.gameobjTableRemoveAction = nil
-					self.gameobjTableResetAction = true
-				end
-				imgui.text()
+			elseif self.objects then 
+				if imgui.tree_node("Objects") then
+					for i, object in ipairs(self.objects) do
+						displayInstance(object, object.name)
+					end
 				imgui.tree_pop()
+				end
 			end
 		end
 	end,
@@ -923,6 +945,16 @@ RSZFile = {
 			usedRSZUserDataInstances[self.RSZUserDataInfos[i].instanceId] = i --self.RSZUserDataInfos[i].name
 		end
 		
+		--embedded userdatas:
+		if self.header.userdataCount > 0 and tdb_ver <= 67 then
+			for i, rszInfo in ipairs(self.RSZUserDataInfos) do
+				test = {self, rszInfo, self.bs:readString(rszInfo.RSZOffset)}
+				self:seek(rszInfo.RSZOffset)
+				local stream = self.bs:extractStream(rszInfo.dataSize)--rszInfo.RSZOffset, rszInfo.dataSize)
+				rszInfo.RSZData = RSZFile:new({file=stream, startOf=0})
+			end
+		end
+		
 		if not noRawData then
 			self:seek(self.header.dataOffset)
 			self.rawData = {}
@@ -937,7 +969,7 @@ RSZFile = {
 					index = i,
 				}
 				if instance.RSZUserDataIdx then 
-					instance.userdataFile = self.RSZUserDataInfos[instance.RSZUserDataIdx].path
+					instance.userdataFile = ((tdb_ver > 67) and self.RSZUserDataInfos[instance.RSZUserDataIdx].path) or self.RSZUserDataInfos[instance.RSZUserDataIdx].RSZData
 				else
 					instance.fields = {}
 					for index=1, instance.fieldCount do 
@@ -1328,10 +1360,16 @@ RSZFile = {
 			{"UInt", "CRC"},
 		},
 		
-		RSZUserDataInfo = {
+		RSZUserDataInfo = tdb_ver > 67 and {
 			{"UInt", "instanceId"},
 			{"UInt", "typeId"},
 			{"UInt64", "pathOffset", {"WString", "path"}},
+		} or {
+			{"UInt", "instanceId"},
+			{"UInt", "typeId"},
+			{"UInt", "jsonPathHash"},
+			{"UInt", "dataSize"},
+			{"UInt64", "RSZOffset", {"WString", "path"}},
 		},
 		
 		structOrder = { "header", "objectTable", "instanceInfo", }	
@@ -1883,7 +1921,7 @@ MDFFile = {
 	--MDF file extensions by game
 	extensions = {
 		re2 = ((tdb_ver==66) and ".10") or ".21",
-		re3 = ((tdb_ver==67) and ".13") or ".21",
+		re3 = ((tdb_ver==68) and ".13") or ".21",
 		re8 = ".19",
 		re7 = ((tdb_ver==49) and ".6") or ".21",
 		dmc5 =".10",

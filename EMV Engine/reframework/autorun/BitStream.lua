@@ -146,6 +146,7 @@ BitStream = {
 	-- Reads and returns a value of the format 'fmtString' at position 'pos' that is size 'numBytes', advancing 'numBytes' if 'doSkip' is true
 	read = function(self, pos, numBytes, fmtString, doSkip)
 		if pos < self.size then
+			
 			self.file:seek("set", pos)
 			local strVal
 			if numBytes then
@@ -167,6 +168,7 @@ BitStream = {
 			if doSkip then 
 				self.pos = self.pos + numBytes
 			end
+			
 			return (fmtString and string.unpack(fmtString, strVal)) or strVal
 		end
 	end,
