@@ -221,8 +221,10 @@ local function spawn_deferred_prefab(packed_func_call)
 	local gameobj
 	
 	if not packed_func_call.already_exists then
+		
 		pfb:call("set_Standby", true)
 		gameobj = pfb:call(packed_func_call.func_name, table.unpack(packed_func_call.args)) --spawn
+		--test = {pfb, packed_func_call, gameobj, packed_func_call.func_name, table.unpack(packed_func_call.args)}
 		if isRE2 or isRE3 then
 			local guid = ValueType.new(sdk.find_type_definition("System.Guid")):call("NewGuid")
 			emmgr:call("requestInstantiate", guid, packed_func_call.packed_pfb.type_id, packed_func_call.packed_pfb.name, emmgr:get_field("<LastPlayerStaySceneID>k__BackingField"), packed_func_call.args[1], packed_func_call.args[2], true, nil, nil)
@@ -230,7 +232,7 @@ local function spawn_deferred_prefab(packed_func_call)
 		end
 	end
 	
-	gameobj = gameobj or scene:call("findGameObject(System.String)", packed_func_call.packed_pfb.name) --NOT lowercase
+	gameobj = gameobj or (packed_func_call.packed_pfb.name and scene:call("findGameObject(System.String)", packed_func_call.packed_pfb.name)) --NOT lowercase
 	local xform = gameobj and gameobj:call("get_Transform")
 	
 	if xform then 

@@ -958,7 +958,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 					
 					local p_check_add_func = check_add_func and function(input)
 						local try, out = pcall(check_add_func, input)
-						return not try or out
+						return not try or out --if it excepts, just bypass it
 					end
 					
 					local tmp = _G.to_load
@@ -994,6 +994,9 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 						owner_tbl[key] = ''
 					else
 						local cmd = ((to_load~=nil) and ((type(value)=="string" and type(to_load)=="string") and ("'" .. to_load .. "'") or ("to_load"))) or m_subtbl.value or ""
+						if type(value)=="string" and cmd:find("%.") and not cmd:find("\\\\") then
+							cmd = cmd:gsub("\\", "\\\\")
+						end
 						local try, out = pcall(load("return " .. cmd))
 						--re.msg("CMD " .. cmd .. " " .. tostring(try) .. " " .. tostring(out))
 						if out==false then 
@@ -1004,6 +1007,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 							if (type(out)~="string" or not (out:find("ERROR:")==1)) then
 								final_value = (((out ~= "") and (m_subtbl.value~="nil")) and out) or nil
 							end
+							--re.msg("FINAL: " .. tostring(final_value) .. ", Func:" .. tostring(p_check_add_func) .. " or " .. tostring(check_add_func) .. ", " .. tostring(p_check_add_func(final_value)) .. ", " .. tostring(check_add_func(final_value)))
 							if (final_value==nil) then
 								if not isArray(owner_tbl) or not pcall(function() table.remove(owner_tbl, key) end) then
 									owner_tbl[key] = nil
@@ -1011,8 +1015,8 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 							else
 								if (tostring(cmd) == "'nil'") or (tostring(cmd)=="to_load" and tostring(to_load)=="nil") then 
 									owner_tbl[key] = m_subtbl.value
-								elseif not p_check_add_func or p_check_add_func(final_value) then
-									owner_tbl[key] = final_value --Set the 
+								elseif p_check_add_func==nil or p_check_add_func(final_value) then
+									owner_tbl[key] = final_value 
 								end
 							end
 							output = 1
@@ -1189,6 +1193,12 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 		if will_update or (tbl_obj.should_update and not imgui.same_line()  and imgui.button("Update")) then 
 			tbl_obj.do_update = true
 		end
+		
+		if tbl_obj.do_update then
+			imgui.same_line()
+			imgui.text("UPDATING")
+		end
+		
 		if will_update or not tbl_obj.should_update then
 			imgui.spacing()
 		end
@@ -2928,8 +2938,12 @@ add_pfb_to_cache = function(via_prefab, pfb_path)
 		local current_idx = not RSCache.pfb_resources[pfb_path] and table.binsert(RN.pfb_resource_names, pfb_path)
 		RSCache.pfb_resources[pfb_path] = via_prefab
 		return current_idx, pfb_path, "pfb"
+	else
+		re.msg_safe("File not found", 23525643634)
 	end
 end
+--stage/prefab/antique/antiqueFigure_MR/figure_104.pfb
+--REResources\evc0010_Character.pfb.17
 
 --Get the local player -----------------------------------------------------------------------------------------------------------------
 local function get_player(as_GameObject)
@@ -6703,13 +6717,13 @@ show_imgui_mats = function(anim_object)
 	end
 	
 	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
-	if _G.BitStream and mesh then
+	if _G.REResource and _G.BitStream and mesh then
 		if anim_object.materials.save_path_exists then
 			if imgui.button("Save") then
 				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
 				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
 				if mdfFile:save(real_path) then 
-					re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
+				--	re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
 				end
 				anim_object.materials.mdfFile = mdfFile
 			end
@@ -6718,10 +6732,11 @@ show_imgui_mats = function(anim_object)
 		if anim_object.materials.save_path_text==nil then
 			anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. (MDFFile.extensions[game_name] or "")
 		end
-		changed, anim_object.materials.save_path_text = imgui.input_text("Modify File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text)
+		changed, anim_object.materials.save_path_text = imgui.input_text("Modify File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text) --
 		if changed or anim_object.materials.save_path_exists==nil then
 			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
 		end
+		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh", "fpath3")
 		if anim_object.materials.mdfFile and imgui.tree_node("[MDF Lua]") then 
 			--read_imgui_element(anim_object.materials.mdfFile)
 			anim_object.materials.mdfFile:displayImgui()
@@ -9310,6 +9325,13 @@ re.on_frame(function()
 	end
 end)
 
+-- Resource Editor UI
+local ResourceEditor = {
+	textBox = "",
+	currentItemIdx = nil,
+	previousItems = {},
+}
+
 --On Draw UI (Show Settings) ---------------------------------------------------------------------------------------------------------------------------------------
 re.on_draw_ui(function()
 	
@@ -9416,6 +9438,57 @@ re.on_draw_ui(function()
 			
 			imgui.tree_pop()
 		end
+		imgui.tree_pop()
+	end
+	
+	if REResource and imgui.tree_node("Resource Editor") then --, {check_add_func=(function(str) return str:lower():find("%.[psm][fcd][bnf]2?%.") end)} --tdb_ver >= 69 and 
+		imgui.begin_rect()
+		
+			ResourceEditor.textBox = ResourceEditor.textBox or ""
+			imgui.text((ResourceEditor.previousItems[ResourceEditor.textBox:lower()] and "  ") or " ?")
+			imgui.same_line()
+		
+			if EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File")==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?%.") then 
+				local lowerC = ResourceEditor.textBox:lower()
+				currentItem = nil
+				if lowerC:find("%.pfb") then
+					currentItem = PFBFile:new(lowerC)
+				elseif lowerC:find("%.scn") then
+					currentItem = SCNFile:new(lowerC)
+				elseif lowerC:find("%.mdf2") then 
+					currentItem = MDFFile:new(lowerC)
+				elseif lowerC:find("%.user") then 
+					currentItem = UserFile:new(lowerC)
+				end
+				currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
+				if currentItem and not ResourceEditor.previousItems[currentItem.filepath] then -- EMV.insert_if_unique(ResourceEditor.previousItems, ResourceEditor.currentItem, "filepath")
+					ResourceEditor.previousItems[currentItem.filepath] = currentItem
+					re.msg("Opened File: " .. currentItem.filepath)
+				else
+					re.msg("File not found!")
+				end
+			end
+			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath2")
+			
+			if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 
+				for path, item in orderedPairs(ResourceEditor.previousItems) do
+					local id = imgui.get_id(path)
+					imgui.push_id(id)
+						local do_clear = imgui.button("X")
+					imgui.pop_id()
+					imgui.same_line()
+					if imgui.tree_node(path) then
+						item:displayImgui()
+						imgui.tree_pop()
+					end
+					if do_clear then
+						ResourceEditor.previousItems[path] = nil
+					end
+				end
+				imgui.tree_pop()
+			end
+			
+		imgui.end_rect()
 		imgui.tree_pop()
 	end
 	

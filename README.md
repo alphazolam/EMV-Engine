@@ -127,7 +127,7 @@ Includes a variety of useful features in imgui for changing object settings, inc
 
 * Click "Save New Defaults" to save the current material settings to JSON. Any time a GameObject with the same name is found in the scene, those settings will be applied.
 * Swap Mesh and Material (MDF) files and change textures using drop-down lists
-* Save your changes to a MDF file with [MDF Manager](https://github.com/Silvris/MDF-Manager) by Silvris  
+* Save your changes to a MDF file by injection with EMV's RE Engine Resource Editor, or with [MDF Manager](https://github.com/Silvris/MDF-Manager) by Silvris  
 * Use "Change Multi" to change properties of multiple connected GameObjects at a time. This checks all materials of all a GameObject's children, siblings and parent for materials with names matching the given keywords (separated by spaces), then changes the same material property on those GameObjects if it is found.  
 ![Material Manager](https://i.imgur.com/KBJYUQu.png)
 * Saved Materials automatically coloring enemies skin green:
@@ -215,7 +215,7 @@ Includes a variety of useful features in imgui for changing object settings, inc
 #### *You must install EMV Engine first to use any of my other scripts, which require "EMV Engine\init.lua" to be available!
   
 ## Lua Scripts based on EMV Engine
-I have written 4 scripts so far as extensions of EMV Engine: **Enhanced Model Viewer**, **Gravity Gun**, **Console** and **Enemy Spawner**
+5 scripts have been made so far as extensions of EMV Engine: **Enhanced Model Viewer**, **Gravity Gun**, **Console**, **Enemy Spawner** and **RE Engine Resource Editor**
 Below is a manual of sorts describing how to use each script and its features
 
 # Enhanced Model Viewer
@@ -412,6 +412,43 @@ This script for RE2R, RE3R and DMC5 (with other spawning features for the other 
 * The **Add PFB File** text input allows you to specially add a PFB file to the spawner's list. You can try searching through the PFB files listed in the [file list](https://residentevilmodding.boards.net/thread/10567/pak-tex-editing-tool) for each game to find the filepaths of PFB files to spawn
 * The **Clear Spawns** button will wipe away all spawned enemies like they never existed. **NOTE:** This button also clears Spawned GameObjects from the Collection
 * The **Existing Spawns** imgui tree node contains a list of all current spawned enemies, where they can be configured with Managed Object Control Panel and made to loiter individually
+
+</details>
+
+# RE Engine Resource Editor
+RE Engine Resource Editor is a powerful script that can save and load PFB, SCN, and USER files for RE8 and all games after, and MDF2 files from all games.
+* Use the same JSON dumps as used in the [RSZ Template](https://github.com/alphazolam/RE_RSZ) to read and write important game files
+* Add components, instances, change Parents and recreate whole files entirely from Lua tables
+* Save Material edits from EMV directly to the corresponding MDF file
+
+![REEngineResourceEditor](https://i.imgur.com/MARlxvW.jpg)
+
+<details>
+<summary>Click Here for RE Engine Resource Editor Guide and Screenshots</summary>
+
+#### File Loader
+* Copy and paste the filepath of a MDF2, SCN, PFB, or USER file into the text box to read the file
+* Files can be loaded from the "reframework\data" folder, or from your game's natives folder using the syntax "$natives\myFile.pfb.17"
+* Opened files will be displayed in the "Opened Files" tree
+* Click the "X" button to close a file
+
+![FileLoader](https://i.imgur.com/5JwHNei.png)
+
+#### RSZ Resources (PFB, SCN, USER)
+* RSZ resources require special JSON dumps to be read correctly. These dumps can be found at the [RSZ Template](https://github.com/alphazolam/RE_RSZ) repository, and must be placed in the `reframework\data\
+* Reading RSZ Resources from DMC5 and original RE2 and RE7 is not currently supported due to user.2 files being embedded
+* Features include changing all RSZ fields, swapping ObjectIDs (references), GameObject parents, inserting Instances, inserting Components, adding / removing all non-RSZ structs, and more
+* Save SCN files as PFB files and PFB files as SCN files
+* More guides soon, download this video for a demonstration:
+
+[![RSZFileEditDemo](https://i.imgur.com/Yrr3pXq.png)](https://cdn.discordapp.com/attachments/925838720534446100/1001933610594599073/2022-07-27_15-20-28.mp4)
+
+#### MDF Files
+* Each component of the MDF File is displayed with features to add and remove structs
+* Edit colors and other parameters in the ParamHeaders themselves, or change texture strings. Any aspect of the file can be edited.
+* Click "Save File" from the Materials menu to inject and existing MDF file with your current mesh material settings
+
+![MDFReader](https://i.imgur.com/tUQQZgq.png)
 
 </details>
 
