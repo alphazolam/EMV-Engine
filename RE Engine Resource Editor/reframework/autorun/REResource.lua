@@ -23,7 +23,7 @@ local CHINESE_GLYPH_RANGES = {
     0,
 }
 
-local utf16_font = imgui.load_font("NotoSansJP-Regular.otf", imgui.get_default_font_size()+3, CHINESE_GLYPH_RANGES)
+local utf16_font = imgui.load_font("NotoSansJP-Regular.otf", imgui.get_default_font_size() + ((game_name=="dmc5") and 3 or 0), CHINESE_GLYPH_RANGES)
 
 
 -- Core resource class with important file methods shared by all specific resource types:
@@ -54,7 +54,7 @@ REResource = {
 		for key, value in pairs(getmetatable(o)) do newMT[key] = value end
 		newMT.__index = newMT
 		o = setmetatable(o, newMT)
-		
+		--"E:\\SteamLibrary\\steamapps\\common\\RESIDENT EVIL 2  BIOHAZARD RE2\\reframework\\data\\rsz\\rszre2.json"
 		argsTbl = (type(args)=="table" and args) or {}
 		o.filepath = argsTbl.filepath or (type(argsTbl[1])=="string" and argsTbl[1]) or (type(args)=="string" and args) or o.filepath
 		o.mobject = argsTbl.mobject or (type(argsTbl[1])=="userdata" and argsTbl[1]) or (type(argsTbl[2])=="userdata" and argsTbl[2]) or (type(args)=="userdata" and args) or o.mobject
@@ -70,9 +70,17 @@ REResource = {
 		end
 		
 		o.ext = o.extensions and o.extensions[game_name] or ".?"
-		if o.isRSZ and not rsz_parser then 
-			re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
-			o.bs = BitStream:new()
+		if o.isRSZ then
+			if not rsz_parser then 
+				re.msg("Failed to locate reframework\\data\\plugins\\rsz_parser_REF" .. ".dll !\n")
+				o.bs = BitStream:new()
+			elseif not rsz_parser.IsInitialized() then 
+				rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json")
+				if not rsz_parser.IsInitialized() then 
+					re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
+					o.bs = BitStream:new()
+				end
+			end
 		end
 		
 		return o
@@ -1717,7 +1725,7 @@ PFBFile = {
 		self.bs:seek(start or 0)
 		self.offsets = {}
 		self.header = self:readStruct("header")
-		
+		test = {self}
 		self.gameObjectInfos = {}
 		self.gameObjectInfosIdMap = {}
 		for i = 1, self.header.infoCount do 
@@ -1732,11 +1740,14 @@ PFBFile = {
 			self.resourceInfos[i].name = self.resourceInfos[i].resourcePath
 		end
 		
-		self:seek(self.header.userdataInfoOffset)
-		self.userdataInfos = {}
-		for i = 1, self.header.userdataCount do 
-			self.userdataInfos[i] = self:readStruct("userdataInfo")
-			self.userdataInfos[i].name = rsz_parser.GetRSZClassName(self.userdataInfos[i].typeId) .. " - " .. self.userdataInfos[i].userdataPath
+		
+		if self.header.userdataInfoOffset then
+			self:seek(self.header.userdataInfoOffset)
+			self.userdataInfos = {}
+			for i = 1, self.header.userdataCount do 
+				self.userdataInfos[i] = self:readStruct("userdataInfo")
+				self.userdataInfos[i].name = rsz_parser.GetRSZClassName(self.userdataInfos[i].typeId) .. " - " .. self.userdataInfos[i].userdataPath
+			end
 		end
 		
 		self:seek(self.header.dataOffset)
