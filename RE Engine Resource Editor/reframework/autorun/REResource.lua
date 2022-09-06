@@ -1109,7 +1109,7 @@ RSZFile = {
 				local stringStart = self:tell()
 				local value = ""
 				if charCount > 0 then
-					self.bs:readWString()
+					value = self.bs:readWString()
 					self:seek(stringStart + charCount * 2)
 				end
 				
