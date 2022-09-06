@@ -157,7 +157,88 @@ BitStream = {
 					if fmtString==false then --WStrings:
 						strVal = ((strVal and strVal:match("^(.-%z%z%z)")) or '')
 						numBytes = strVal:len()
-						strVal = strVal:gsub("%z", "")
+						local i
+						local tempStr = ""
+						for i = 1,strVal:len(),2 do
+							local temp1 = strVal:byte(i)
+							local temp2 = strVal:byte(i+1)
+							if(not temp1)then break end
+							if(temp2)then
+								temp1 = temp1 + (temp2 << 8)
+							end
+							tempStr = tempStr .. utf8.char(temp1)
+						end
+						strVal = tempStr
+						--strVal = strVal:gsub("%z", "")
+					else --Strings:
+						strVal = strVal:match("^(.-%z)")
+						numBytes = strVal:len()
+						strVal = strVal:gsub("%z$", "")
+					end
+				end
+			end
+			if doSkip then 
+				self.pos = self.pos + numBytes
+			end
+			
+			return (fmtString and string.unpack(fmtString, strVal)) or strVal
+		end
+	end,
+
+	-- Writes a value of the format 'fmtString' at position 'pos' that is size 'numBytes', advancing 'numBytes' if 'doSkip' is true
+	write = function(self, pos, numBytes, fmtString, value, doSkip)
+		self.file:seek("set", pos)
+		if fmtString then
+			local strVal = string.pack(fmtString, value or 0)
+			self.file:write(string.pack(fmtString, value))
+		elseif fmtString==false then --WStrings:
+			local wstr = {}
+			local p,c
+			for p,c in utf8.codes(value) do
+				if(not c or c == 0)then break end
+				self.file:write(string.pack("<H",tonumber(c)))
+			end
+			numBytes = (value:len()+1) * 2
+			self.file:write(string.pack("<H",0))
+			--self.file:write(table.concat(wstr) .. "\0\0")
+		else --Strings:
+			numBytes = value:len() + 1
+			self.file:write(value .. "\0\0")
+		end
+		
+		if doSkip then 
+			self.pos = self.pos + numBytes
+		end
+		
+		self.size = self.file:seek("end")
+		self.file:seek("set", self.pos)
+		
+		return self.pos
+	end,
+	
+	--[[
+	read = function(self, pos, numBytes, fmtString, doSkip)
+		if pos < self.size then
+			
+			self.file:seek("set", pos)
+			local strVal
+			if numBytes then
+				strVal = self.file:read(numBytes)
+			else
+				strVal = self.file:read(256)
+				if strVal then
+					if fmtString==false then --WStrings:
+						strVal = ((strVal and strVal:match("^(.-%z%z%z)")) or '')
+						numBytes = strVal:len()
+						strVal = strVal:gsub("%z$", "")
+						local unicodeStr, ctr = "", 0
+						for c in strVal:gmatch('.') do
+							ctr = ctr + 1
+							if ctr % 2 == 1 and ctr < strVal:len() then
+								unicodeStr = unicodeStr .. utf8.char(string.unpack("<H", strVal:sub(ctr, ctr+2)))
+							end
+						end
+						strVal = unicodeStr
 					else --Strings:
 						strVal = strVal:match("^(.-%z)")
 						numBytes = strVal:len()
@@ -182,9 +263,13 @@ BitStream = {
 		elseif fmtString==false then --WStrings:
 			local wstr = {}
 			for c in value:gmatch'.' do
-				wstr[#wstr+1] = c .. "\0"
+				local bytes, strVal = {string.byte(c, 1, -1)}, ""
+				for i=1, 2 do
+					strVal = strVal .. ((bytes[i] and string.format("%x", bytes[i])) or "\0")
+				end
+				wstr[#wstr+1] = strVal
 			end
-			numBytes = (value:len()+1) * 2
+			numBytes = (#wstr+1) * 2--value:len() + 1
 			self.file:write(table.concat(wstr) .. "\0\0")
 		else --Strings:
 			numBytes = value:len() + 1
@@ -195,11 +280,13 @@ BitStream = {
 			self.pos = self.pos + numBytes
 		end
 		
+		--string.format("%x", input 
+		
 		self.size = self.file:seek("end")
 		self.file:seek("set", self.pos)
 		
 		return self.pos
-	end,
+	end,]]
 	
 	-- Writes a stringbuffer (or creates one of the given size) to the given or current position
 	writeBytes = function(self, strBufferOrSize, pos)
@@ -386,13 +473,13 @@ BitStream = {
 	 
 	readGUID = function(self, pos)
 		local npos = pos or self.pos
-		log.info("reading GUID at " .. self:tell())
+		--log.info("reading GUID at " .. self:tell())
 		local output = self:read(npos, 16, nil, false)
 		if not pos then 
 			self.pos = self.pos+16
 		end
 		self:seek(self.pos)
-		log.info("now at " .. self:tell())
+		--log.info("now at " .. self:tell())
 		return output
 	end,
 	

@@ -3,20 +3,28 @@
 --by alphaZomega
 --July 27 2022
 
-local EMV 
-if not pcall(function() 
-	EMV = require("EMV Engine")
-end) then
-	log.info("Failed to start REResource:  EMV Engine was not found!")
-	return 
-end
+local EMV = require("EMV Engine")
 
 local bool_to_number = { [true]=1, [false]=0 }
 local number_to_bool = { [1]=true, [0]=false }
 local game_name = reframework.get_game_name()
 local tdb_ver = sdk.get_tdb_version()
+local isOldVer = tdb_ver <= 67
 local nativesFolderType = ((tdb_ver <= 67) and "x64") or "stm"
 local changed
+
+local CHINESE_GLYPH_RANGES = {
+    0x0020, 0x00FF, -- Basic Latin + Latin Supplement
+    0x2000, 0x206F, -- General Punctuation
+    0x3000, 0x30FF, -- CJK Symbols and Punctuations, Hiragana, Katakana
+    0x31F0, 0x31FF, -- Katakana Phonetic Extensions
+    0xFF00, 0xFFEF, -- Half-width characters
+    0x4e00, 0x9FAF, -- CJK Ideograms
+    0,
+}
+
+local utf16_font = imgui.load_font("NotoSansJP-Regular.otf", imgui.get_default_font_size()+3, CHINESE_GLYPH_RANGES)
+
 
 -- Core resource class with important file methods shared by all specific resource types:
 REResource = {
@@ -40,6 +48,7 @@ REResource = {
 	newResource = function(self, args, o)
 		
 		o = o or {}
+		
 		local newMT = {} --set mixed metatable of REResource and outer File class:
 		for key, value in pairs(self) do newMT[key] = value end
 		for key, value in pairs(getmetatable(o)) do newMT[key] = value end
@@ -61,6 +70,11 @@ REResource = {
 		end
 		
 		o.ext = o.extensions and o.extensions[game_name] or ".?"
+		if o.isRSZ and not rsz_parser then 
+			re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
+			o.bs = BitStream:new()
+		end
+		
 		return o
 	end,
 	
@@ -227,29 +241,34 @@ REResource = {
 	displayImgui = function(self)
 		
 		local display_struct
+		local font_succeeded = pcall(imgui.push_font, utf16_font)
 		
 		if self.filepath then
 			if imgui.button("Save File") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
 				self:save()
 			end
+			
 			imgui.same_line()
 			if EMV.editable_table_field("filepath", self.filepath, self, "FilePath")==1 and self.filepath:find("%$natives\\") and not self.filepath:find(nativesFolderType) then
 				self.filepath = self.filepath:gsub("%$natives\\", "$natives\\" .. nativesFolderType .. "\\")
 			end
 			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath")
 			
-			if imgui.button("Write & Reload Buffer") then
+			if imgui.button("Refresh") then
 				self:save(nil, true)
 				self:read()
 			end
+			
 			if self.saveAsPFB and not imgui.same_line() and imgui.button("Save as PFB") then
 				local path = self.filepath:match("^(.+)%.") .. ".pfb" .. PFBFile.extensions[game_name]
 				self:saveAsPFB(path:gsub("%.scn", ""))
 			end
+			
 			if self.saveAsSCN and not imgui.same_line() and imgui.button("Save as SCN") then
 				local path = self.filepath:match("^(.+)%.") .. ".scn" .. SCNFile.extensions[game_name]
 				self:saveAsSCN(path:gsub("%.pfb", ""))
 			end
+			
 			imgui.same_line()
 			if imgui.tree_node_str_id(self.filepath, "[Lua]") then 
 				EMV.read_imgui_element(self)
@@ -257,66 +276,82 @@ REResource = {
 			end
 		end
 		
-		for i, structName in ipairs(self.structs.structOrder) do 
+		local function display_struct(s, struct, structPrototype, structName, doExpand)
 			
+			local doExpand = doExpand or (#structPrototype == 1)
+			if doExpand or imgui.tree_node(s .. ". " .. (struct.name or "")) then
+				imgui.begin_rect()
+				imgui.push_id(s .. "Struct")
+				for f, fieldTbl in ipairs(structPrototype) do
+					local key = (fieldTbl[3] and fieldTbl[3][2]) or fieldTbl[2]
+					--imgui.text(structName .. ", " .. key .. ", " .. tostring(struct[key]))
+					if type(key)=="string" and not key:find("Offset$") then
+						EMV.editable_table_field(key, struct[key], struct, ((doExpand and s .. ". ") or "") .. key)
+					end
+				end
+				if self.customStructDisplayFunction then 
+					self:customStructDisplayFunction(struct)
+				end
+				imgui.pop_id()
+				imgui.end_rect(2)
+				if not doExpand then imgui.tree_pop() end
+			end
+		end
+		
+		local function displayStructList(structList, structPrototype, structName)
+			
+			local toRemoveIdx, toAddIdx
+			for s, struct in ipairs(structList or {}) do
+				imgui.push_id(s.."Del")
+					if imgui.button("-") then 
+						toRemoveIdx = s
+					end
+					imgui.same_line()
+					if imgui.button("+") then 
+						toAddIdx = s
+					end
+				imgui.pop_id()
+				imgui.same_line()
+				if not struct.name then 
+					if imgui.tree_node("Struct " .. s) then 
+						for ss, substruct in ipairs(struct) do 
+							display_struct(ss, substruct, structPrototype, structName)
+						end
+						imgui.tree_pop()
+					end
+				else
+					display_struct(s, struct, structPrototype, structName)
+				end
+			end
+			
+			if toRemoveIdx then 
+				table.remove(structList, toRemoveIdx)
+			end
+			
+			if toAddIdx or (#structList==0 and imgui.button("Add " .. structName)) then
+				local newStruct = structList[ #structList ] and EMV.merge_tables({}, (structList[ #structList ]))
+				if not newStruct then 
+					newStruct = {}
+					for i, tbl in ipairs(structPrototype) do
+						newStruct[ tbl[2] ] = (tbl[1]:find("tring") and "") or 0 
+						if tbl[3] then newStruct[ tbl[3][2] ] = "" end
+					end
+				end
+				table.insert(structList, toAddIdx, newStruct)
+			end
+		end	
+		
+		for i, structName in ipairs(self.structs.structOrder) do 
 			local structPrototype = self.structs[structName]
 			local pluralName = (self[structName] and structName) or structName.."s"
 			if pluralName and imgui.tree_node(pluralName) then
 				
-				display_struct = display_struct or function(s, struct, doExpand)
-					local doExpand = doExpand or (#structPrototype == 1)
-					if doExpand or imgui.tree_node(s .. ". " .. (struct.name or "")) then
-						imgui.begin_rect()
-						imgui.push_id(i .. s)
-						for f, fieldTbl in ipairs(structPrototype) do
-							local key = (fieldTbl[3] and fieldTbl[3][2]) or fieldTbl[2]
-							if type(key)=="string" and not key:find("Offset$") then
-								EMV.editable_table_field(key, struct[key], struct, ((doExpand and s .. ". ") or "") .. key)
-							end
-						end
-						if self.customStructDisplayFunction then 
-							self:customStructDisplayFunction(struct)
-						end
-						imgui.pop_id()
-						imgui.end_rect(2)
-						if not doExpand then imgui.tree_pop() end
-					end
-				end
-				
 				if pluralName==structName and structName ~= "objectTable" then
-					display_struct(pluralName, self[pluralName], true)
+					display_struct(pluralName, self[pluralName], structPrototype, structName, true)
 				else
-					local function displayStructList(structList)
-						if imgui.button("Add " .. structName) then
-							local newStruct = structList[ #structList ] and EMV.merge_tables({}, (structList[ #structList ]))
-							if not newStruct then 
-								newStruct = {}
-								for i, tbl in ipairs(structPrototype) do
-									newStruct[ tbl[2] ] = (tbl[1]:find("tring") and "") or 0 
-									if tbl[3] then newStruct[ tbl[3][2] ] = "" end
-								end
-							end
-							table.insert(structList, newStruct)
-						end
-						
-						local toRemoveIdx
-						for s, struct in ipairs(structList or {}) do
-							imgui.push_id(s.."Del")
-								if imgui.button("Del") then 
-									toRemoveIdx = s
-								end
-							imgui.pop_id()
-							imgui.same_line()
-							display_struct(s, struct)
-						end
-						
-						if toRemoveIdx then 
-							table.remove(structList, toRemoveIdx)
-						end
-					end	
-
 					local thisInfos, isList = self[pluralName], nil
-					if self.isMDF and thisInfos and thisInfos[ self.structs[structName][1][2] ] == nil then
+					displayStructList(thisInfos, structPrototype, structName)
+					--[[if self.isMDF and thisInfos and thisInfos[ self.structs[structName][1][2] ] == nil then
 						isList = true
 					end					
 					
@@ -329,15 +364,13 @@ REResource = {
 						end
 					else
 						displayStructList(thisInfos)
-					end
+					end]]
 				end
 				imgui.tree_pop()
 			end
 		end
 		
-		
-		
-		local RSZ = self.RSZ or self.isRSZ and self
+		local RSZ = self.RSZ or (self.isRSZ and self)
 		
 		if RSZ then
 			
@@ -350,22 +383,25 @@ REResource = {
 			
 			local function displayInstance(instance, displayName, parentField, parentFieldListIdx)
 				
-				if imgui.tree_node(displayName) then 
+				local id = imgui.get_id(parentFieldListIdx or "") .. displayName
+				if imgui.tree_node_str_id(id, displayName) then 
 					--[[if imgui.tree_node("[Lua]") then
 						EMV.read_imgui_element(instance)
 						imgui.tree_pop()
 					end]]
 					
 					if parentField then
-						if parentFieldListIdx then
-							changed, parentField.objectIndex[parentFieldListIdx] = imgui.combo("ObjectIndex", parentField.objectIndex[parentFieldListIdx], self.instanceNames)
-							if (parentField.isNative and EMV.editable_table_field(parentFieldListIdx, parentField.objectIndex[parentFieldListIdx], parentField.objectIndex, "ObjectIndex?")==1) or changed then
-								parentField.value[parentFieldListIdx] = RSZ.rawData[ parentField.objectIndex[parentFieldListIdx] ].sortedTbl
-								parentField.rawField.value[parentFieldListIdx] = parentField.objectIndex[parentFieldListIdx]
-							end
-						else
+						if parentFieldListIdx then --lists
+							imgui.push_id(id .. "f")
+								changed, parentField.objectIndex[parentFieldListIdx] = imgui.combo("ObjectIndex", parentField.objectIndex[parentFieldListIdx], self.instanceNames)
+								if (parentField.isNative and EMV.editable_table_field(parentFieldListIdx, parentField.objectIndex[parentFieldListIdx], parentField.objectIndex, "ObjectIndex?")==1) or changed then
+									parentField.value[parentFieldListIdx] = RSZ.rawData[ parentField.objectIndex[parentFieldListIdx] ].sortedTbl
+									parentField.rawField.value[parentFieldListIdx] = parentField.objectIndex[parentFieldListIdx]
+								end
+							imgui.pop_id()
+						else --singles
 							changed, parentField.objectIndex = imgui.combo("ObjectIndex", parentField.objectIndex, self.instanceNames)
-							if (parentField.isNative and EMV.editable_table_field("objectIndex", parentField.objectIndex, parentField, "ObjectIndex?")==1) or changed then 
+							if (EMV.editable_table_field("objectIndex", parentField.objectIndex, parentField, "ObjectIndex")==1) or changed then --parentField.isNative and 
 								parentField.value = RSZ.rawData[parentField.objectIndex].sortedTbl
 								parentField.rawField.value = parentField.objectIndex
 							end
@@ -388,7 +424,7 @@ REResource = {
 											local rawF = field.rawField
 											
 											for e, element in ipairs(field.value) do
-												imgui.push_id(e)
+												imgui.push_id(f .. e)
 													if imgui.button("+") then 
 														toInsert = e
 													end
@@ -584,34 +620,31 @@ REResource = {
 			end
 			
 			--RawData:
-			if imgui.tree_node("RSZ") then
-				if not self.isRSZ then
-					RSZ:displayImgui()
-				end
-				if imgui.tree_node("RawData") then --self.isRSZ or 
-					imgui.text("	")
-					imgui.same_line()
-					imgui.begin_rect()
-						showAddInstanceMenu(RSZ)
-					imgui.end_rect(2)
-					if imgui.tree_node("[Unformatted]") then
-						for i, instance in ipairs(RSZ.rawData) do
-							displayInstance(instance, i .. ". " .. instance.name)
-						end
-						imgui.tree_pop()
-					end
-					for i, instance in ipairs(RSZ.rawData) do
-						--[[if imgui.button("X") then 
-							--delete the instance
-						end
-						imgui.same_line()]]
-						displayInstance(instance.sortedTbl, i .. ". " .. instance.name)
-					end
-					--if not self.isRSZ then 
-						imgui.tree_pop() 
-					--end
-				end
+			if self.RSZ and imgui.tree_node("RSZ") then
+				self.RSZ:displayImgui()
 				imgui.tree_pop()
+			end
+			
+			if self.rawData and imgui.tree_node("RawData") then
+				imgui.text("	")
+				imgui.same_line()
+				imgui.begin_rect()
+					showAddInstanceMenu(RSZ)
+				imgui.end_rect(2)
+				if imgui.tree_node("[Unformatted]") then
+					for i, instance in ipairs(RSZ.rawData) do
+						displayInstance(instance, i .. ". " .. instance.name)
+					end
+					imgui.tree_pop()
+				end
+				for i, instance in ipairs(RSZ.rawData) do
+					--[[if imgui.button("X") then 
+						--delete the instance
+					end
+					imgui.same_line()]]
+					displayInstance(instance.sortedTbl, i .. ". " .. instance.name)
+				end
+				imgui.tree_pop() 
 			end
 			
 			--Organized Data:
@@ -640,11 +673,6 @@ REResource = {
 										gameObject.imguiParentIdx = i
 									end
 								end
-							end
-							
-							if imgui.tree_node(gameObject.name) then
-								EMV.read_imgui_element(gameObject)
-								imgui.tree_pop()
 							end
 							
 							-- change Gameobject parent:
@@ -676,6 +704,11 @@ REResource = {
 							end
 							
 							imgui.spacing()
+							
+							if imgui.tree_node("[Lua]") then
+								EMV.read_imgui_element(gameObject)
+								imgui.tree_pop()
+							end
 							
 							imgui.begin_rect()
 								displayInstance(gameObject.gameobj, "via.GameObject[" .. gameObject.gameobj.rawDataTbl.index .. "]")
@@ -724,6 +757,11 @@ REResource = {
 				end
 			end
 		end
+		
+		if font_succeeded then
+			imgui.pop_font()
+		end
+		
 	end,
 }
 
@@ -860,10 +898,6 @@ RSZFile = {
 		o.startOf = args.startOf
 		o.bs.alignShift = o.bs:getAlignedOffset(16, o.startOf) - o.startOf
 		
-		if not rsz_parser then 
-			re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
-		end
-		
 		if o.bs:fileSize() > 0 then
 			o:readBuffer()
 		end
@@ -892,7 +926,7 @@ RSZFile = {
 		self.header.userdataOffset = self:tell()
 		for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
 			self:writeStruct("RSZUserDataInfo", RSZUserDataInfo)
-		end 
+		end
 		
 		bs:align(16)
 		for i, wstringTbl in ipairs(self.stringsToWrite or {}) do
@@ -900,6 +934,19 @@ RSZFile = {
 			bs:writeWString(wstringTbl.string)
 		end
 		self.stringsToWrite = nil
+		
+		--embedded userdata
+		if tdb_ver <= 67 then 
+			for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
+				bs:align(16)
+				RSZUserDataInfo.RSZOffset = bs:tell()
+				RSZUserDataInfo.RSZData.startOfs = bs:tell() + self.startOfs
+				RSZUserDataInfo.RSZData:writeBuffer()
+				bs:writeBytes(RSZUserDataInfo.RSZData.bs:getBuffer())
+				bs:writeUInt64(RSZUserDataInfo.RSZOffset, RSZUserDataInfo.startOf+16)
+			end
+		end
+		
 		bs:align(16)
 		self.header.dataOffset = self:tell()
 		for i, instance in ipairs(self.rawData) do
@@ -915,6 +962,7 @@ RSZFile = {
 		self.header.userdataCount = #self.RSZUserDataInfos
 		self:seek(0)
 		self:writeStruct("header", self.header)
+		
 		return bs
 	end,
 	
@@ -948,10 +996,10 @@ RSZFile = {
 		--embedded userdatas:
 		if self.header.userdataCount > 0 and tdb_ver <= 67 then
 			for i, rszInfo in ipairs(self.RSZUserDataInfos) do
-				test = {self, rszInfo, self.bs:readString(rszInfo.RSZOffset)}
+				--test = {self, rszInfo, self.bs:readString(rszInfo.RSZOffset)}
 				self:seek(rszInfo.RSZOffset)
 				local stream = self.bs:extractStream(rszInfo.dataSize)--rszInfo.RSZOffset, rszInfo.dataSize)
-				rszInfo.RSZData = RSZFile:new({file=stream, startOf=0})
+				rszInfo.RSZData = RSZFile:new({file=stream, startOf=rszInfo.RSZOffset + self.startOf})
 			end
 		end
 		
@@ -1044,6 +1092,10 @@ RSZFile = {
 			sortField(field, sortedField)
 		end
 		
+		if not instance.title and field.fieldTypeName=="String" and type(field.value)=="string" and field.value:len() > 1 then
+			instance.title = field.value
+		end
+		
 		return sortedField
 	end,
 	
@@ -1058,32 +1110,40 @@ RSZFile = {
 		end
 		
 		sortedInstance.name = instance.name
+		if instance.title then 
+			sortedInstance.name = sortedInstance.name .. " -- " .. instance.title
+		end
 		return setmetatable(sortedInstance, {name=instance.name})
 	end,
 	
 	-- Writes a RSZ field with proper alignment from a Lua field table in rawData
 	writeRSZField = function(self, field, bs)
 		bs = bs or self.bs
+		
+		--field.elementSize = REResource.typeNamesToSizes[field.fieldTypeName] or field.elementSize
+		
 		local function writeFieldValue(value)
-			log.info("writing value " .. tostring(value) .. " at " .. bs:tell() .. " using " .. ("write" .. field.LuaTypeName))
+			local absStart = self.bs:getAlignedOffset(((field.isList and 4) or field.alignment), self:tell() + self.startOf)
 			local pos = bs:tell()
+			--log.info("Writing  " .. field.name .. " value " .. tostring(value) .. " at " .. pos .. " using " .. ("write" .. field.LuaTypeName) .. ", elemSize: " .. field.elementSize) 
 			if field.is4ByteArray then
 				bs:writeArray(value, field.LuaTypeName)
 			elseif field.LuaTypeName == "WString" then 
-				--if value=="\0\0" or value=="" then
 				if value:len() <= 1 then
 					bs:writeUInt(0)
 				else
-					log.info("writing string " .. value .. " @ " .. self.startOf+bs:tell() .. " " .. value:len()+1)
+					--log.info("writing string " .. value .. " @ " .. self.startOf+bs:tell() .. " " .. value:len()+1)
 					bs:writeUInt(value:len()+1)
 					bs:writeWString(value)
 				end
 			else
 				bs["write" .. field.LuaTypeName](bs, value)
 			end
+			
 			if field.LuaTypeName ~= "WString" then
 				self:seek(pos + field.elementSize)
 			end
+			
 		end
 		
 		if field.isList then 
@@ -1149,7 +1209,7 @@ RSZFile = {
 				local pos = self:tell()
 				fieldTbl.value = ''
 				if self.bs:readUByte(pos+1) ~= 0 then 
-					log.info("bad string at " .. pos .. " " .. EMV.logv(fieldTbl))
+					log.info("Broken string at " .. pos .. " " .. EMV.logv(fieldTbl))
 				end
 				if self.bs:readUShort(pos) > 0 and self.charCount > 0 then
 					fieldTbl.value = self.bs:readWString(pos)
@@ -1329,12 +1389,18 @@ RSZFile = {
 			
 			self.startOf = self.bs:getAlignedOffset(16, self.startOf) --make sure every RSZ buffer rewritten is 16 bytes aligned, and every container file
 			self:writeBuffer()
-			self.bs:save("test97.scn")
+			--self.bs:save("test97.scn")
 			self:readBuffer()
 			return objectTblInsertPt
 		end
 	end,
 	
+	customStructDisplayFunction = function(self, struct)
+		if struct.RSZData and imgui.tree_node("RSZ Data") then 
+			struct.RSZData:displayImgui()
+			imgui.tree_pop()
+		end
+	end,
 	
 	-- Structures comprising a RSZ file:
 	structs = {
@@ -1369,10 +1435,10 @@ RSZFile = {
 			{"UInt", "typeId"},
 			{"UInt", "jsonPathHash"},
 			{"UInt", "dataSize"},
-			{"UInt64", "RSZOffset", {"WString", "path"}},
+			{"UInt64", "RSZOffset"},
 		},
 		
-		structOrder = { "header", "objectTable", "instanceInfo", }	
+		structOrder = { "header", "objectTable", "instanceInfo", "RSZUserDataInfo" }	
 	},
 }
 
@@ -1527,6 +1593,7 @@ SCNFile = {
 		self:writeStruct("header", self.header)
 		
 		self:seek(self.header.dataOffset)
+		self.RSZ.startOfs = self.header.dataOffset
 		self.RSZ:writeBuffer()
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
 		
@@ -1616,6 +1683,10 @@ SCNFile = {
 	},
 }
 
+if tdb_ver <= 67 then
+	SCNFile.structs.header[5], SCNFile.structs.header[6] = SCNFile.structs.header[6], SCNFile.structs.header[5]
+end
+
 PFBFile = {
 	
 	--PFB file extensions by game
@@ -1703,7 +1774,7 @@ PFBFile = {
 		end
 		self.bs = BitStream:new()
 		
-		self.bs:writeBytes(56)
+		self.bs:writeBytes((isOldVer and 40) or 56)
 		
 		for i, gameObjectInfo in ipairs(self.gameObjectInfos) do
 			self:writeStruct("gameObjectInfo", gameObjectInfo)
@@ -1713,6 +1784,7 @@ PFBFile = {
 		self.header.resourceInfoOffset = self:tell()
 		for i, resourceInfo in ipairs(self.resourceInfos) do
 			self:writeStruct("resourceInfo", resourceInfo)
+			if isOldVer then self.bs:skip(-2) end
 		end
 		
 		self.bs:align(16)
@@ -1731,7 +1803,7 @@ PFBFile = {
 		self.bs:align(16)
 		self.header.dataOffset = self:tell()
 		
-		--self:seek(self.header.dataOffset)
+		self.RSZ.startOfs = self.header.dataOffset
 		self.RSZ:writeBuffer()
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
 		
@@ -1788,6 +1860,13 @@ PFBFile = {
 		structOrder = {"header", "gameObjectInfo", "resourceInfo", "userdataInfo"}
 	},
 }
+
+if tdb_ver <= 67 then 
+	table.remove(PFBFile.structs.header, 8)
+	table.remove(PFBFile.structs.header, 5)
+	table.remove(PFBFile.structs.structOrder, 4)
+	PFBFile.structs.resourceInfo = { {"WString", "resourcePath"}, }
+end
 
 --pfb = PFBFile:new("REResources\\em1240deadbody.pfb.17")
 
@@ -1874,7 +1953,7 @@ UserFile = {
 		self.bs:align(16)
 		self.header.dataOffset = self:tell()
 		
-		self:seek(self.header.dataOffset)
+		self.RSZ.startOfs = self.header.dataOffset
 		self.RSZ:writeBuffer()
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
 		
@@ -1958,7 +2037,7 @@ MDFFile = {
 		
 		self.texHeaders = {}
 		self.bs:seek(self.matHeaders[1].texHdrOffset)
-		last = self
+		
 		for m = 1, self.matCount do 
 			self.texHeaders[m] = {name=self.matHeaders[m].name}
 			for t = 1, self.matHeaders[m].texCount do 
@@ -1976,7 +2055,7 @@ MDFFile = {
 			for p = 1, self.matHeaders[m].paramCount do 
 				local paramHdr = self:readStruct("paramHeader")
 				paramHdr.paramAbsOffset = self.matHeaders[m].paramsOffset + paramHdr.paramRelOffset
-				log.info("Reading param " .. p .. " for mat " .. m .. " at " .. paramHdr.paramAbsOffset)
+				--log.info("Reading param " .. p .. " for mat " .. m .. " at " .. paramHdr.paramAbsOffset)
 				if paramHdr.componentCount == 4 then
 					paramHdr.parameter = { self.bs:readFloat(paramHdr.paramAbsOffset), self.bs:readFloat(paramHdr.paramAbsOffset+4), self.bs:readFloat(paramHdr.paramAbsOffset+8), self.bs:readFloat(paramHdr.paramAbsOffset+12) }
 				else

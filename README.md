@@ -416,7 +416,7 @@ This script for RE2R, RE3R and DMC5 (with other spawning features for the other 
 </details>
 
 # RE Engine Resource Editor
-RE Engine Resource Editor is a powerful script that can save and load PFB, SCN, and USER files for RE8 and all games after, and MDF2 files from all games.
+RE Engine Resource Editor is a powerful script that can save and load PFB, SCN, and USER files for all games except original RE7, and MDF2 files from all games.
 * Use the same JSON dumps as used in the [RSZ Template](https://github.com/alphazolam/RE_RSZ) to read and write important game files
 * Add components, instances, change Parents and recreate whole files entirely from Lua tables
 * Save Material edits from EMV directly to the corresponding MDF file
@@ -436,7 +436,6 @@ RE Engine Resource Editor is a powerful script that can save and load PFB, SCN, 
 
 #### RSZ Resources (PFB, SCN, USER)
 * RSZ resources require special JSON dumps to be read correctly. These dumps can be found at the [RSZ Template](https://github.com/alphazolam/RE_RSZ) repository, and must be placed in the `reframework\data\
-* Reading RSZ Resources from DMC5 and original RE2 and RE7 is not currently supported due to user.2 files being embedded
 * Features include changing all RSZ fields, swapping ObjectIDs (references), GameObject parents, inserting Instances, inserting Components, adding / removing all non-RSZ structs, and more
 * Save SCN files as PFB files and PFB files as SCN files
 * More guides soon, download this video for a demonstration:

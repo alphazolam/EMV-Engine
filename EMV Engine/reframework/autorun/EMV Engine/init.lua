@@ -1194,7 +1194,7 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 			tbl_obj.do_update = true
 		end
 		
-		if tbl_obj.do_update then
+		if tbl_obj.do_update and not SettingsCache.always_update_lists then
 			imgui.same_line()
 			imgui.text("UPDATING")
 		end
@@ -7526,7 +7526,7 @@ local BHVTNode = {
 		end
 		o.id = o.obj:get_id()
 		o.tree_idx = args.tree_idx or o.tree_idx
-		last = o
+		
 		local children = o.obj:get_children()--({pcall(o.obj.get_children, o.obj)})
 		if children then
 			for i, child in ipairs(children) do 
@@ -9447,16 +9447,18 @@ re.on_draw_ui(function()
 			ResourceEditor.textBox = ResourceEditor.textBox or ""
 			imgui.text((ResourceEditor.previousItems[ResourceEditor.textBox:lower()] and "  ") or " ?")
 			imgui.same_line()
-		
+			if not rsz_parser then 
+				imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0x000000FF)
+			end
 			if EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File")==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?%.") then 
 				local lowerC = ResourceEditor.textBox:lower()
 				currentItem = nil
-				if lowerC:find("%.pfb") then
+				if lowerC:find("%.mdf2") then 
+					currentItem = MDFFile:new(lowerC)
+				elseif lowerC:find("%.pfb") then
 					currentItem = PFBFile:new(lowerC)
 				elseif lowerC:find("%.scn") then
 					currentItem = SCNFile:new(lowerC)
-				elseif lowerC:find("%.mdf2") then 
-					currentItem = MDFFile:new(lowerC)
 				elseif lowerC:find("%.user") then 
 					currentItem = UserFile:new(lowerC)
 				end
