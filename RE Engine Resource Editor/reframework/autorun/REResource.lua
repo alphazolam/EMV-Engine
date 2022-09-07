@@ -13,6 +13,7 @@ local isOldVer = tdb_ver <= 67
 local addFontSize = 3
 local nativesFolderType = ((tdb_ver <= 67) and "x64") or "stm"
 local changed
+ResourceEditor = nil
 
 local CHINESE_GLYPH_RANGES = {
     0x0020, 0x00FF, -- Basic Latin + Latin Supplement
@@ -26,6 +27,18 @@ local CHINESE_GLYPH_RANGES = {
 
 local utf16_font = imgui.load_font("NotoSansJP-Regular.otf", imgui.get_default_font_size() + addFontSize, CHINESE_GLYPH_RANGES)
 
+local function generateRandomGuid()
+	local uptime = math.floor(os.clock() * 100)
+	local result = {}
+	for i=1, 16 do
+		math.randomseed(uptime + i)
+		if i==4 or i==6 or i==8 or i==10 then 
+			table.insert(result, "-")
+		end
+		table.insert(result, string.format("%x", math.random(128, 256)-1))
+	end
+	return table.concat(result)
+end
 
 -- Core resource class with important file methods shared by all specific resource types:
 REResource = {
@@ -44,6 +57,8 @@ REResource = {
 		Vec4=16,
 		GUID=16,
 	},
+	
+	validExtensions = {},
 	
 	-- Creates a new Resource with a potential bitstream, filepath (and file if it is found), and a managed object
 	newResource = function(self, args, o)
@@ -164,7 +179,7 @@ REResource = {
 				end
 			else
 				--last = {struct, keyOrOffset, methodType, methodName, tableToWrite[keyOrOffset], structName, tableToWrite, startOf, bs, relativeOffset, doInsert}
-				local valueToWrite = tableToWrite[keyOrOffset] or 0
+				local valueToWrite = tableToWrite[keyOrOffset] or (fieldTbl[1] == "GUID" and generateRandomGuid()) or (fieldTbl[1] == "WString" and "") or 0
 				if fieldTbl[3] and type(tableToWrite[ fieldTbl[3][2] ])=="string" then
 					self.stringsToWrite = self.stringsToWrite or {}
 					table.insert(self.stringsToWrite, {offset=bs:tell(), string=tableToWrite[ fieldTbl[3][2] ]})
@@ -238,6 +253,64 @@ REResource = {
 		end
 	end,
 	
+	checkOpenResource = function(self, path, fieldTbl, fieldIdx)
+		if type(path) ~= "string" then return end
+		path = path:lower():gsub("/", "\\")
+		local ext = type(path)=="string" and path:match("^.+%.(.+)$")
+		if ext and REResource.validExtensions[ext] then 
+			if not tonumber(ext) and REResource.validExtensions[ext] then
+				path = path .. REResource.validExtensions[ext].extensions[game_name]
+			end
+			fieldTbl.cleanPath = "$natives\\" .. nativesFolderType .. "\\" .. path
+			if not ResourceEditor.previousItems[fieldTbl.cleanPath] and BitStream.checkFileExists(fieldTbl.cleanPath) then
+				if fieldIdx then 
+					fieldTbl.canOpen = fieldTbl.canOpen or {}
+					fieldTbl.canOpen[fieldIdx] = fieldTbl.cleanPath
+				else
+					fieldTbl.canOpen = fieldTbl.cleanPath
+				end
+			end
+		end
+	end,
+	
+	openResource = function(path, force)
+		
+		if not path then return end
+		local lowerC = path:lower():gsub("/", "\\")
+		local ext = lowerC:match("^.+%.(.+)$")
+		local numberExt = ""
+		if not tonumber(ext) and REResource.validExtensions[ext] then
+			numberExt = REResource.validExtensions[ext].extensions[game_name]
+			lowerC = lowerC .. numberExt
+		end
+		
+		local currentItem = nil
+		if lowerC:find("%.mdf2") then 
+			currentItem = MDFFile:new(lowerC)
+		elseif lowerC:find("%.pfb") then
+			currentItem = PFBFile:new(lowerC)
+		elseif lowerC:find("%.scn") then
+			currentItem = SCNFile:new(lowerC)
+		elseif lowerC:find("%.user") then 
+			currentItem = UserFile:new(lowerC)
+		end
+		
+		currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
+		ResourceEditor.textBox = lowerC
+		
+		if currentItem then --(force or not ResourceEditor.previousItems[currentItem.filepath])
+			ResourceEditor.previousItems[currentItem.filepath] = currentItem
+			if EMV.insert_if_unique(ResourceEditor.recentFiles, currentItem.filepath:match("^.+" .. nativesFolderType .. "\\(.+)$") .. numberExt) then
+				ResourceEditor.recentItemIdx = #ResourceEditor.recentFiles
+			end
+			json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
+			re.msg("Opened File: " .. currentItem.filepath)
+			return true
+		else
+			re.msg("File not found!")
+		end
+	end,
+	
 	displayInstance = function(self, instance, displayName, parentField, parentFieldListIdx, rszBufferFile)
 		
 		local id = imgui.get_id(parentFieldListIdx or "") .. displayName
@@ -270,6 +343,9 @@ REResource = {
 				if instance.fields and instance.fields[1] then
 					for f, field in ipairs(instance.fields) do 
 						imgui.push_id(field.name .. f)
+							
+							local rawF = field.rawField
+							
 							if field.count then 
 								if imgui.tree_node("List (" .. field.fieldTypeName .. ") " .. field.name) then
 									-- Add/Remove List operations:
@@ -278,7 +354,6 @@ REResource = {
 									if not field.value[1] and imgui.button("+") then 
 										toInsert = 1
 									end
-									local rawF = field.rawField
 									
 									for e, element in ipairs(field.value) do
 										imgui.push_id(f .. e)
@@ -294,10 +369,19 @@ REResource = {
 										if type(element)=="table" and field.objectIndex then
 											--local dispName = element.name--(e .. ". " .. field.fieldTypeName .. " " .. field.name)
 											self:displayInstance(element, element.name, field, e, rszBufferFile)
-										elseif EMV.editable_table_field(e, element, field.value, e .. ". " .. field.fieldTypeName .. " " .. field.name)==1 then
-											if rawF then rawF.value[e] = field.value[e] end
+										else
+											if rawF.canOpen and rawF.canOpen[e] and not ResourceEditor.previousItems[ rawF.canOpen[e] ] then
+												if imgui.button("Open") then 
+													REResource.openResource(rawF.canOpen[e])
+												end
+												imgui.same_line()
+											end
+											if EMV.editable_table_field(e, element, field.value, e .. ". " .. field.fieldTypeName .. " " .. field.name)==1 then
+												rawF.value[e] = field.value[e]
+											end
 										end
 									end
+									
 									if toInsert or toRemove then
 										if toInsert then 
 											local newItem = rawF.value[toInsert]
@@ -324,34 +408,55 @@ REResource = {
 												table.remove(rawF.value, toRemove)
 											end
 										end
-										if rawF then rawF.value = field.objectIndex or field.value end
+										rawF.value = field.objectIndex or field.value
 										field.count = #rawF.value
 									end
 									imgui.tree_pop()
 								end
 							elseif field.objectIndex then
 								self:displayInstance(field.value, field.fieldTypeName .. " " .. field.name, field, nil, rszBufferFile)
-							elseif rawF and rawF.is4ByteArray and #field.value <= 4 and (rawF.LuaTypeName=="Float" or rawF.LuaTypeName=="Int") then
-								field.vecType = field.vecType or "Vector" .. #field.value .. "f"
-								field.vecValue = field.vecValue or _G[field.vecType].new(table.unpack(field.value))
-								changed, field.vecValue = EMV.show_imgui_vec4(field.vecValue, field.name, (field.LuaTypeName=="Int"), 0.01)
-								if changed then 
-									field.value = {field.vecValue.x, field.vecValue.y, field.vecValue.z, field.vecValue.w}
-									rawF.value = field.value
+							elseif rawF.is4ByteArray and (rawF.LuaTypeName=="Float" or rawF.LuaTypeName=="Int") then
+								if #field.value <= 4 then 
+									field.vecType = field.vecType or ("Vector" .. #field.value .. "f")
+									field.vecValue = field.vecValue or _G[field.vecType].new(table.unpack(field.value))
+									changed, field.vecValue = EMV.show_imgui_vec4(field.vecValue, field.name, (field.LuaTypeName=="Int"), 0.01)
+									if changed then 
+										field.value = {field.vecValue.x, field.vecValue.y, field.vecValue.z, field.vecValue.w}
+										rawF.value = field.value
+									end
+								elseif imgui.tree_node(field.fieldTypeName .. " " .. field.name) then --OBBs and other unusual sized values
+									local increment = (rawF.LuaTypeName=="Float" and 0.01) or 1
+									local methodName = "drag_" .. rawF.LuaTypeName:lower()
+									for ff, elem in ipairs(field.value) do
+										changed, field.value[ff] = imgui[methodName](ff, elem, increment, -10000000, 10000000)
+										if changed then
+											rawF.value = field.value
+										end
+									end
+									imgui.tree_pop()
 								end
-							elseif rawF and (rawF.fieldTypeName=="Vec4" or rawF.fieldTypeName=="Data16") then
+							elseif (rawF.fieldTypeName=="Vec4" or rawF.fieldTypeName=="Quaternion" or rawF.fieldTypeName=="Data16") then
 								changed, field.value = EMV.show_imgui_vec4(field.value, field.name, false, 0.01)
-							elseif rawF and rawF.fieldTypeName=="Vec3" then
+							elseif rawF.fieldTypeName=="Vec3" then
 								field.vecValue = field.vecValue or field.value:to_vec3()
 								changed, field.vecValue = EMV.show_imgui_vec4(field.vecValue, field.name, false, 0.01)
 								if changed then field.value = field.vecValue:to_vec4() end
-							elseif rawF and rawF.fieldTypeName=="Vec2" then
+							elseif rawF.fieldTypeName=="Vec2" then
 								field.vecValue = field.vecValue or field.value:to_vec2()
 								changed, field.vecValue = EMV.show_imgui_vec4(field.vecValue, field.name, false, 0.01)
 								if changed then field.value = field.vecValue:to_vec4() end
-							elseif EMV.editable_table_field("value", field.value, field, field.fieldTypeName .. " " .. field.name)==1 then
-								if rawF then rawF.value = field.value end
+							else
+								if rawF.canOpen and not ResourceEditor.previousItems[rawF.canOpen] then
+									if imgui.button("Open") then 
+										REResource.openResource(rawF.canOpen)
+									end
+									imgui.same_line()
+								end
+								if EMV.editable_table_field("value", field.value, field, field.fieldTypeName .. " " .. field.name)==1 then
+									rawF.value = (type(field.value)=="boolean" and bool_to_number[field.value]) or field.value
+								end
 							end
+							
 						imgui.pop_id()
 					end
 				elseif instance.userdataFile then
@@ -493,7 +598,7 @@ REResource = {
 	
 		if imgui.tree_node(displayName) then 
 			
-			local gameObjectInfo = gameObject.gInfo or gameObject.fInfo --GameObject or Folder
+			local gameObjectInfo = gameObject.gInfo or gameObject.fInfo --or {idx=-1} --GameObject or Folder
 			
 			-- set Gameobject parent:
 			if not gameObject.parents_list or not gameObject.imguiParentIdx or self.gameobjTableResetAction then 
@@ -501,7 +606,7 @@ REResource = {
 				local function setupParent(infosList)
 					for i, gInfo in ipairs(infosList) do 
 						
-						local listName = (gInfo==gameObjectInfo and " ") or (gInfo.name ) or "" --.. "[" .. (gInfo.gameObject or gInfo.folder).idx .. "]"
+						local listName = (gInfo==gameObjectInfo and " ") or (gInfo.name .. "[" .. (gInfo.gameObject or gInfo.folder).idx .. "]") or "" --
 						local parentGInfo, isParentOfThis = self.gameObjectInfosIdMap[gInfo.objectId], false
 						
 						while self.gameObjectInfosIdMap[parentGInfo.parentId] and parentGInfo.parentId~=parentGInfo.objectId do 
@@ -578,7 +683,7 @@ REResource = {
 					
 					self:displayInstance(gameObject.gameobj, "via.GameObject[" .. gameObject.gameobj.rawDataTbl.index .. "]", nil, nil, rszBufferFile)
 					for i, sortedInstance in ipairs(gameObject.components) do
-						self:displayInstance(sortedInstance, i .. ". " .. sortedInstance.name)
+						self:displayInstance(sortedInstance, i .. ". " .. sortedInstance.name, nil, nil, rszBufferFile)
 					end
 
 					if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
@@ -589,16 +694,18 @@ REResource = {
 					end
 				imgui.end_rect(2)
 				
-			elseif gameObject.fInfo and ((gameObject.folders and gameObject.folders[1]) or (gameObject.gameObjects and gameObject.gameObjects[1])) then --Folders
+			elseif gameObject.fInfo then --Folders
 				imgui.text("	")
 				imgui.same_line()
 				imgui.begin_rect()
 					self:displayInstance(gameObject.instance, gameObject.instance.name, nil, nil, rszBufferFile) --"via.Folder[" .. gameObject.instance.rawDataTbl.index .. "]"
-					if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
-						for c, childFolder in ipairs(gameObject.children) do
-							self:displayGameObject(childFolder, c .. ". " .. childFolder.name, rszBufferFile)
+					if gameObject.children and gameObject.children[1] then
+						if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
+							for c, childFolder in ipairs(gameObject.children) do
+								self:displayGameObject(childFolder, c .. ". " .. childFolder.name, rszBufferFile)
+							end
+							imgui.tree_pop()
 						end
-						imgui.tree_pop()
 					end
 				imgui.end_rect(2)
 			end
@@ -613,28 +720,66 @@ REResource = {
 		local font_succeeded = pcall(imgui.push_font, utf16_font)
 		
 		if self.filepath then
-			if imgui.button("Save File") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
-				self:save()
+			
+			if EMV.editable_table_field("filepath", self.filepath, self, "FilePath")==1 then
+				self.filepath = self.filepath:lower():gsub("/", "\\")
+				if self.filepath:find("%$natives\\") and not self.filepath:find(nativesFolderType) then
+					self.filepath = self.filepath:gsub("%$natives\\", "$natives\\" .. nativesFolderType .. "\\")
+				end
 			end
 			
-			imgui.same_line()
-			if EMV.editable_table_field("filepath", self.filepath, self, "FilePath")==1 and self.filepath:find("%$natives\\") and not self.filepath:find(nativesFolderType) then
-				self.filepath = self.filepath:gsub("%$natives\\", "$natives\\" .. nativesFolderType .. "\\")
-			end
 			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath")
 			
-			if imgui.button("Refresh") then
+			if imgui.button("Save") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
+				self:save(nil, nil, true)
+			end
+			imgui.tooltip("Save to the same filepath, overwriting", "foverw")
+			imgui.same_line()
+			
+			if imgui.button("Save Copy") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
+				self:save()
+			end
+			imgui.tooltip("Save to a new filepath", "fsave")
+			imgui.same_line()
+			
+			local fullExt = self.ext2 .. self.ext
+			local backupPath = self.filepath:gsub(fullExt, ".BAK" .. fullExt)
+			
+			if imgui.button("Backup") then
+				if BitStream:copyFile(self.filepath, backupPath) and BitStream.checkFileExists(backupPath) then 
+					re.msg("Backed up to " .. backupPath)
+				end
+			end
+			imgui.tooltip("Make a backup copy of this file", "fbak")
+			imgui.same_line()
+			
+			if imgui.button("Restore") and BitStream.checkFileExists(backupPath) then
+				if BitStream.copyFile(backupPath, self.filepath) then
+					re.msg("Restored from " .. backupPath)
+				end
+			end
+			imgui.tooltip("Restore this file from an existing backup", "frest")
+			imgui.same_line()
+			
+			if imgui.button("Reload") then
+				REResource.openResource(self.filepath, true)
+			end
+			imgui.tooltip("Reload this file from disk", "freload")
+			imgui.same_line()
+			
+			if imgui.button("Refresh Buffer") then
 				self:save(nil, true)
 				self:read()
 			end
+			imgui.tooltip("Update the file's internal buffer and rebuild Lua data", "frefresh")
 			
 			if self.saveAsPFB and not imgui.same_line() and imgui.button("Save as PFB") then
-				local path = self.filepath:match("^(.+)%.") .. ".pfb" .. PFBFile.extensions[game_name]
+				local path = self.filepath:match("^(.+)%.") .. ".NEW.pfb" .. PFBFile.extensions[game_name]
 				self:saveAsPFB(path:gsub("%.scn", ""))
 			end
 			
 			if self.saveAsSCN and not imgui.same_line() and imgui.button("Save as SCN") then
-				local path = self.filepath:match("^(.+)%.") .. ".scn" .. SCNFile.extensions[game_name]
+				local path = self.filepath:match("^(.+)%.") .. ".NEW.scn" .. SCNFile.extensions[game_name]
 				self:saveAsSCN(path:gsub("%.pfb", ""))
 			end
 			
@@ -643,6 +788,7 @@ REResource = {
 				EMV.read_imgui_element(self)
 				imgui.tree_pop()
 			end
+			imgui.tooltip("View debug information", "fdebug")
 		end
 		
 		local function display_struct(s, struct, structPrototype, structName, doExpand)
@@ -714,22 +860,27 @@ REResource = {
 			end
 		end	
 		
-		for i, structName in ipairs(self.structs.structOrder) do 
-			local structPrototype = self.structs[structName]
-			local pluralName = (self[structName] and structName) or structName.."s"
-			if pluralName and imgui.tree_node(pluralName) then
-				
-				if pluralName==structName and structName ~= "objectTable" then
-					display_struct(pluralName, self[pluralName], structPrototype, structName, true)
-				else
-					local thisInfos, isList = self[pluralName], nil
-					displayStructList(thisInfos, structPrototype, structName)
+		local RSZ = self.RSZ or (self.isRSZ and self)
+		
+		if not RSZ or imgui.tree_node("Infos") then
+			for i, structName in ipairs(self.structs.structOrder) do 
+				local structPrototype = self.structs[structName]
+				local pluralName = (self[structName] and structName) or structName.."s"
+				if pluralName and imgui.tree_node(pluralName) then
+					
+					if pluralName==structName and structName ~= "objectTable" then
+						display_struct(pluralName, self[pluralName], structPrototype, structName, true)
+					else
+						local thisInfos, isList = self[pluralName], nil
+						displayStructList(thisInfos, structPrototype, structName)
+					end
+					imgui.tree_pop()
 				end
+			end
+			if RSZ then 
 				imgui.tree_pop()
 			end
 		end
-		
-		local RSZ = self.RSZ or (self.isRSZ and self)
 		
 		if RSZ then
 			
@@ -1218,7 +1369,6 @@ RSZFile = {
 	readRSZField = function(self, typeId, index, parentListField)
 		
 		if parentListField then 
-			
 			if parentListField.LuaTypeName == "WString" then 
 				local charCount = self.bs:readUInt()
 				local stringStart = self:tell()
@@ -1227,7 +1377,6 @@ RSZFile = {
 					value = self.bs:readWString()
 					self:seek(stringStart + charCount * 2)
 				end
-				
 				return value
 			else
 				local startPos = self:tell()
@@ -1251,6 +1400,7 @@ RSZFile = {
 				if fieldTbl.count <= 1024 then
 					for i=1, fieldTbl.count do 
 						fieldTbl.value[i] = self:readRSZField(typeId, index, fieldTbl)
+						self:checkOpenResource(fieldTbl.value[i], fieldTbl)
 					end
 				end
 			end
@@ -1263,14 +1413,19 @@ RSZFile = {
 				self.charCount = self.bs:readUInt()
 				local pos = self:tell()
 				fieldTbl.value = ''
+				
 				if self.bs:readUByte(pos+1) ~= 0 then 
-				--	log.info("Broken string at " .. pos .. " " .. EMV.logv(fieldTbl))
+					log.info("Broken string at " .. pos .. " " .. EMV.logv(fieldTbl))
 				end
+				
 				if self.bs:readUShort(pos) > 0 and self.charCount > 0 then
 					fieldTbl.value = self.bs:readWString(pos)
 					--log.info("read wstring " .. fieldTbl.value .. " @ position " .. pos .. ", " .. self.charCount .. " chars")
 				end
+				
+				self:checkOpenResource(fieldTbl.value, fieldTbl)
 				self:seek(pos + self.charCount * 2)
+				
 			elseif fieldTbl.LuaTypeName then 
 				--if "read" .. fieldTbl.LuaTypeName == "readGUID" then re.msg("guid at " .. self:tell()) end
 				fieldTbl.value = self.bs["read" .. fieldTbl.LuaTypeName](self.bs)
@@ -1329,6 +1484,8 @@ RSZFile = {
 				fieldTbl.LuaTypeName = "Mat4"
 			elseif fieldTbl.elementSize == 16 then 
 				if fieldTbl.alignment == 8 then fieldTbl.LuaTypeName = "GUID" else fieldTbl.LuaTypeName = "Vec4" end
+			elseif fieldTbl.elementSize == 8 then
+				if fieldTbl.alignment == 8 then fieldTbl.LuaTypeName = "Int64" else fieldTbl.LuaTypeName = "Vec2" end
 			elseif fieldTbl.elementSize == 4 or fieldTbl.elementSize % 4 == 0 then 
 				fieldTbl.LuaTypeName = (self:tell() +4 <= self:fileSize()) and (self.bs:detectedFloat() and "Float") or "Int"
 				if fieldTbl.elementSize > 4 then 
@@ -1514,6 +1671,8 @@ SCNFile = {
 	},
 	
 	isSCN = true,
+	
+	ext2 = ".scn",
 
 	-- Creates a new REResource SCNFile
 	new = function(self, args, o)
@@ -1577,14 +1736,18 @@ SCNFile = {
 	end,
 	
 	-- Updates the SCNFile and RSZFile bitstreams from data in owned Lua tables and saves the result to a new file
-	save = function(self, filepath, onlyUpdateBuffer)
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite)
 		
-		if not filepath or filepath == self.filepath then 
+		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.scn", ".NEW.scn")
 		end
-		self.bs = BitStream:new()
+		filepath = filepath or self.filepath
 		
-		self.bs:writeBytes(64)
+		self.bs = BitStream:new()
+		self.bs.filepath = onlyUpdateBuffer and self.filepath or filepath
+		self.bs.fileExists = BitStream.checkFileExists(filepath)
+		
+		self.bs:writeBytes(64) --header
 		
 		for i, gameObjectInfo in ipairs(self.gameObjectInfos) do
 			self:writeStruct("gameObjectInfo", gameObjectInfo)
@@ -1636,7 +1799,7 @@ SCNFile = {
 		self.header.resourceCount = #self.resourceInfos
 		self.header.folderCount = self.folderInfos and #self.folderInfos
 		self.header.prefabCount = self.prefabInfos and #self.prefabInfos
-		self.header.userdataCount = #self.userdataInfos
+		self.header.userdataCount = self.userdataInfos and #self.userdataInfos
 		self:writeStruct("header", self.header)
 		
 		self:seek(self.header.dataOffset)
@@ -1827,6 +1990,8 @@ PFBFile = {
 	},
 	
 	isPFB = true,
+	
+	ext2 = ".pfb",
 
 	-- Creates a new REResource PFBFile
 	new = function(self, args, o)
@@ -1877,13 +2042,16 @@ PFBFile = {
 	end,
 	
 	-- Updates the PFBFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
-	save = function(self, filepath, onlyUpdateBuffer)
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite)
 		
-		if not filepath or filepath == self.filepath then 
+		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.pfb", ".NEW.pfb")
 		end
 		
 		self.bs = BitStream:new()
+		self.bs.filepath = onlyUpdateBuffer and self.filepath or filepath
+		self.bs.fileExists = BitStream.checkFileExists(filepath)
+		
 		self.bs:writeBytes(PFBFile.structSizes["header"])
 		
 		for i, gameObjectInfo in ipairs(self.gameObjectInfos) do
@@ -1995,6 +2163,8 @@ UserFile = {
 	},
 	
 	isUser = true,
+	
+	ext2 = ".user",
 
 	-- Creates a new REResource.UserFile
 	new = function(self, args, o)
@@ -2034,12 +2204,15 @@ UserFile = {
 	end,
 	
 	-- Updates the UserFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
-	save = function(self, filepath)
+	save = function(self, filepath, doOverwrite)
 		
-		if not filepath or filepath == self.filepath then 
+		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.user", ".NEW.user")
 		end
+		
 		self.bs = BitStream:new()
+		self.bs.filepath = onlyUpdateBuffer and self.filepath or filepath
+		self.bs.fileExists = BitStream.checkFileExists(filepath)
 		
 		self.bs:writeBytes(40)
 		
@@ -2121,6 +2294,8 @@ MDFFile = {
 	
 	isMDF = true,
 	
+	ext2 = ".mdf2",
+	
 	-- Creates a new REResource.MDFFile
 	new = function(self, args, o)
 		o = o or {}
@@ -2184,13 +2359,16 @@ MDFFile = {
 	end,
 	
 	-- Saves a new MDF file using data from owned Lua tables
-	save = function(self, filepath, mesh)
+	save = function(self, filepath, mesh, doOverwrite)
 		
-		if not filepath or filepath == self.filepath then
+		if not doOverwrite and (not filepath or filepath == self.filepath) then
 			filepath = (filepath or self.filepath):gsub("%.mdf2", ".NEW.mdf2")
 		end
 		
 		self.bs = BitStream:new()
+		self.bs.filepath = onlyUpdateBuffer and self.filepath or filepath
+		self.bs.fileExists = BitStream.checkFileExists(filepath)
+		
 		self:writeStruct("header", self.header, 0)
 		self.bs:align(16, 1)
 		
@@ -2556,34 +2734,130 @@ MeshFile = {
 }
 ]]
 
---MDF = MDFFile:new("REResources/ch02_0201_gpucloth.mdf2.19")
+REResource.validExtensions = {
+	["scn"] = SCNFile,
+	["pfb"] = PFBFile,
+	["user"] = UserFile,
+	["mdf2"] = MDFFile,
+}
 
-
---[[
 local function imgui_file_picker()
 	imgui.begin_window("File Picker")
 		local current_dir = ""
 	imgui.end_window()
 	local glob = fs.glob
-end]]
+end
 
+-- Resource Editor UI
+ResourceEditor = {
+	textBox = "",
+	currentItemIdx = nil,
+	recentItemIdx = nil,
+	previousItems = {},
+	paths = json.load_file("rsz\\resource_list.json") or {},
+	recentFiles = json.load_file("rsz\\recent_files.json") or {""}
+}
 
-
---re.on_frame(function()
-	--[[if imgui.tree_node(scn.filepath) then
-		scn:displayImgui()
-		--imgui_file_picker()
-		imgui.tree_pop()
-	end]]
+EMV.displayResourceEditor = function()
 	
-	--[[if imgui.tree_node(MDF.filepath) then
-		MDF:displayImgui()
-		--imgui_file_picker()
-		imgui.tree_pop()
-	end]]
-	--[[if not folderTree then
-		for i, filepath in pairs(fs.glob(".*")) do
+	imgui.begin_rect()
+	--imgui.push_font(utf16_font)
+		ResourceEditor.textBox = ResourceEditor.textBox or ""
+		--imgui.text((ResourceEditor.previousItems[ResourceEditor.textBox:lower()] and "  ") or " ?")
+		--imgui.same_line()
+		if not rsz_parser then 
+			imgui.text_colored("Failed to locate reframework\\data\\plugins\\rsz_parser_REF.dll!", 0x000000FF)
+		elseif not rsz_parser.IsInitialized() then 
+			imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0x000000FF)
+		end
+		
+		local lastIdx, doOpen = ResourceEditor.recentItemIdx
+		changed, ResourceEditor.recentItemIdx = imgui.combo("Recent Files", ResourceEditor.recentItemIdx or 1, ResourceEditor.recentFiles)
+		
+		if changed and lastIdx ~= ResourceEditor.recentItemIdx then 
+			ResourceEditor.textBox = "$natives\\" .. nativesFolderType .. "\\" .. ResourceEditor.recentFiles[ResourceEditor.recentItemIdx]
+			ResourceEditor.currentItemIdx = EMV.find_index(ResourceEditor.paths, ResourceEditor.recentFiles[ResourceEditor.recentItemIdx]) or ResourceEditor.currentItemIdx
+			doOpen = true
+		end
+		
+		if ResourceEditor.recentFiles[2] then 
+			if not imgui.same_line() and imgui.button("Clear") then 
+				ResourceEditor.recentFiles = {""}
+				ResourceEditor.recentItemIdx = 1
+				json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
+			end
+			if not imgui.same_line() and imgui.button("Sort") then 
+				local last = ResourceEditor.recentFiles[ResourceEditor.recentItemIdx]
+				table.sort(ResourceEditor.recentFiles)
+				ResourceEditor.recentItemIdx = EMV.find_index(ResourceEditor.recentFiles, last)
+			end
+		end
+		
+		lastIdx = ResourceEditor.currentItemIdx
+		changed, ResourceEditor.currentItemIdx = imgui.combo("Path", ResourceEditor.currentItemIdx or 1, ResourceEditor.paths)
+		
+		imgui.tooltip("Edit \"reframework\\data\\rsz\\resource_list.json\" to make this list have files from your natives folder", "pths")
+		
+		if changed and lastIdx ~= ResourceEditor.currentItemIdx then 
+			ResourceEditor.textBox = "$natives\\" .. nativesFolderType .. "\\" .. ResourceEditor.paths[ResourceEditor.currentItemIdx]
+			doOpen = true
+		end
+
+		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File")==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
+			REResource.openResource(ResourceEditor.textBox)
+		end
+		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath2")
+		
+		if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 
+			for path, item in orderedPairs(ResourceEditor.previousItems) do
+				local id = imgui.get_id(path)
+				imgui.push_id(id)
+					local do_clear = imgui.button("X")
+				imgui.pop_id()
+				imgui.same_line()
+				if imgui.tree_node(path) then
+					item:displayImgui()
+					imgui.tree_pop()
+				end
+				if do_clear then
+					ResourceEditor.previousItems[path] = nil
+				end
+			end
+			imgui.tree_pop()
+		end
+	--imgui.pop_font()
+	imgui.end_rect()
+end
+
+local folderTree
+
+local function generateFolderTree(filepath)
+    local parts = {}
+    for part in filepath:gmatch("[^\\]+") do
+        table.insert(parts, part)
+    end
+    local global = folderTree
+    for i, part in ipairs(parts) do
+        if not global[part] then
+            global[part] = {}
+        end
+        global = global[part]
+    end
+    if global ~= folderTree then
+        local static_class = static_class or generateFolderTree(filepath)
+        for k, v in pairs(static_class) do
+            global[k] = v
+			if not dont_double then 
+				global[v] = k
+			end
+        end
+    end
+end
+
+re.on_frame(function()
+	if not folderTree then
+		for i, filepath in pairs(fs.glob("$natives.*")) do
 			generateFolderTree(filepath)
 		end
-	end]]
---end)
+	end
+end)

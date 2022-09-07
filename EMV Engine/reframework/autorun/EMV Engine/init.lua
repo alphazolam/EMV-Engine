@@ -1001,6 +1001,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 						--re.msg("CMD " .. cmd .. " " .. tostring(try) .. " " .. tostring(out))
 						if out==false then 
 							owner_tbl[key] = false 
+							output = 1
 						elseif try and (out ~= nil) and (((og_override~=false) and override_same_type_check) or (out=="") or type(out)==type(value)) 
 						and (not m_subtbl.is_obj or (sdk.is_managed_object(out) and out:get_type_definition():is_a(value:get_type_definition())) ) then 
 							local final_value
@@ -2083,10 +2084,12 @@ local function create_resource(resource_path, resource_type, force_create)
 	resource_path = resource_path:lower()
 	resource_path = resource_path:match("^.+%[@?(.+)%]") or resource_path
 	--log.info("creating resource " .. resource_path)
+	
 	local ext = resource_path:match("^.+%.(.+)$")
 	if not ext or (not force_create and (ext=="motbank") and EMVSettings and (EMVSettings.special_mode > 1)) then 
 		return
 	end
+	
 	RSCache[ext .. "_resources"] = RSCache[ext .. "_resources"] or {}
 	force_create = force_create or (type(RSCache[ext .. "_resources"][resource_path])=="string") or force_create
 	
@@ -9325,13 +9328,6 @@ re.on_frame(function()
 	end
 end)
 
--- Resource Editor UI
-local ResourceEditor = {
-	textBox = "",
-	currentItemIdx = nil,
-	previousItems = {},
-}
-
 --On Draw UI (Show Settings) ---------------------------------------------------------------------------------------------------------------------------------------
 re.on_draw_ui(function()
 	
@@ -9441,56 +9437,8 @@ re.on_draw_ui(function()
 		imgui.tree_pop()
 	end
 	
-	if REResource and imgui.tree_node("Resource Editor") then --, {check_add_func=(function(str) return str:lower():find("%.[psm][fcd][bnf]2?%.") end)} --tdb_ver >= 69 and 
-		imgui.begin_rect()
-		
-			ResourceEditor.textBox = ResourceEditor.textBox or ""
-			imgui.text((ResourceEditor.previousItems[ResourceEditor.textBox:lower()] and "  ") or " ?")
-			imgui.same_line()
-			if not rsz_parser then 
-				imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0x000000FF)
-			end
-			if EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File")==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?%.") then 
-				local lowerC = ResourceEditor.textBox:lower()
-				currentItem = nil
-				if lowerC:find("%.mdf2") then 
-					currentItem = MDFFile:new(lowerC)
-				elseif lowerC:find("%.pfb") then
-					currentItem = PFBFile:new(lowerC)
-				elseif lowerC:find("%.scn") then
-					currentItem = SCNFile:new(lowerC)
-				elseif lowerC:find("%.user") then 
-					currentItem = UserFile:new(lowerC)
-				end
-				currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
-				if currentItem and not ResourceEditor.previousItems[currentItem.filepath] then -- EMV.insert_if_unique(ResourceEditor.previousItems, ResourceEditor.currentItem, "filepath")
-					ResourceEditor.previousItems[currentItem.filepath] = currentItem
-					re.msg("Opened File: " .. currentItem.filepath)
-				else
-					re.msg("File not found!")
-				end
-			end
-			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath2")
-			
-			if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 
-				for path, item in orderedPairs(ResourceEditor.previousItems) do
-					local id = imgui.get_id(path)
-					imgui.push_id(id)
-						local do_clear = imgui.button("X")
-					imgui.pop_id()
-					imgui.same_line()
-					if imgui.tree_node(path) then
-						item:displayImgui()
-						imgui.tree_pop()
-					end
-					if do_clear then
-						ResourceEditor.previousItems[path] = nil
-					end
-				end
-				imgui.tree_pop()
-			end
-			
-		imgui.end_rect()
+	if EMV.displayResourceEditor and imgui.tree_node("Resource Editor") then --, {check_add_func=(function(str) return str:lower():find("%.[psm][fcd][bnf]2?%.") end)} --tdb_ver >= 69 and 
+		EMV.displayResourceEditor()
 		imgui.tree_pop()
 	end
 	
