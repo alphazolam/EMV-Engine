@@ -168,7 +168,7 @@ BitStream = {
 							end
 							tempStr = tempStr .. utf8.char(temp1)
 						end
-						strVal = tempStr
+						strVal = tempStr:gsub("%z", "")
 						--strVal = strVal:gsub("%z", "")
 					else --Strings:
 						strVal = strVal:match("^(.-%z)")
@@ -470,17 +470,19 @@ BitStream = {
 		local npos = pos or self.pos
 		return self:read(npos, nil, false, not pos)
 	end,
-	 
+	
 	readGUID = function(self, pos)
 		local npos = pos or self.pos
-		--log.info("reading GUID at " .. self:tell())
-		local output = self:read(npos, 16, nil, false)
+		local bytes = self:read(npos, 16, nil, false)
+		local output = {}
+		for c in bytes:gmatch'.' do 
+			table.insert(output, string.byte(c))
+		end
 		if not pos then 
 			self.pos = self.pos+16
 		end
 		self:seek(self.pos)
-		--log.info("now at " .. self:tell())
-		return output
+		return string.format("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", table.unpack(output))
 	end,
 	
 	--Reads an array of 'numVars' variables of the same format from position 'pos' or the current position
@@ -586,12 +588,20 @@ BitStream = {
 	end,
 	
 	writeGUID = function(self, value, pos)
+		
 		local npos = pos or self.pos
+		local old_pos = self.pos
 		self:seek(npos)
-		self.file:write(value)
-		if not pos then 
-			self.pos = self.pos+16
+		--log.info("writing GUID at " .. self:tell())
+		for c in value:gsub("%-", ""):gmatch'..' do
+			self:writeUByte(tonumber("0x"..c))
 		end
+		--self:seek(npos)
+		--log.info("finished GUID at " .. self:tell())
+		if not pos then 
+			self.pos = old_pos+16
+		end
+		--log.info("finished GUID struct at " .. self:tell())
 		return self:seek(self.pos)
 	end,
 	
