@@ -64,12 +64,15 @@ BitStream = {
 				o.file:seek("set", 0)
 				o.fileExists = true
 			end
+			self.fileSize(o)
 		end
+		--o.file = o.file or io.tmpfile()
+		--if not o.file then re.msg("test " .. tostring(io.tmpfile())) end
+		
 		o.name = (o.filepath and (o.filepath:match("^.+/(.+)") or o.filepath))
-		self.fileSize(o)
 		o.pos = 0
 		self.__index = self
-		return setmetatable(o, self)
+		return o.file and setmetatable(o, self)
 	end,
 	
 	-- Moves to the given position in the stream, skips if relative, and inserts 00s up to 'pos' if insertIfEOF is true and 'pos' > fileSize
@@ -237,6 +240,7 @@ BitStream = {
 		local strBuffer = self.file:read(npos)
 		self.file:seek("cur", numBytes)
 		strBuffer = strBuffer .. self.file:read("*a")
+		io.close(self.file)
 		self.file = io.tmpfile():write(strBuffer)
 		self.size = self.file:seek("end")
 		self.file:seek("set", npos)
@@ -248,6 +252,7 @@ BitStream = {
 		local npos = pos or self.pos
 		self.file:seek("set", 0) 
 		local strBuffer = self.file:read(npos) .. string.pack("c" .. numBytes, "\0") .. self.file:read("*a")
+		io.close(self.file)
 		self.file = io.tmpfile():write(strBuffer)
 		self.size = self.file:seek("end")
 		if not pos then

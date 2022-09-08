@@ -41,6 +41,15 @@ local function generateRandomGuid()
 	return table.concat(result)
 end
 
+local function getWStringSize(value)
+	local ctr = 1
+	for p, c in utf8.codes(value) do 
+		if not c or c==0 then break end
+		ctr = ctr + 1
+	end
+	return ctr
+end
+
 -- Core resource class with important file methods shared by all specific resource types:
 REResource = {
 	
@@ -57,6 +66,7 @@ REResource = {
 		Vec3=16,
 		Vec4=16,
 		GUID=16,
+		
 	},
 	
 	validExtensions = {},
@@ -305,7 +315,7 @@ REResource = {
 		
 		if currentItem and currentItem.filepath ~= "" then --(force or not ResourceEditor.previousItems[currentItem.filepath])
 			ResourceEditor.previousItems[currentItem.filepath] = currentItem
-			if EMV.insert_if_unique(ResourceEditor.recentFiles, (currentItem.filepath:match("^.+" .. nativesFolderType .. "\\(.+)$") or currentItem.filepath) .. numberExt) then
+			if EMV.insert_if_unique(ResourceEditor.recentFiles, ((currentItem.filepath:match("^.+" .. nativesFolderType .. "\\(.+)$") or currentItem.filepath) .. numberExt)) then
 				ResourceEditor.recentItemIdx = #ResourceEditor.recentFiles
 			end
 			json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
@@ -318,7 +328,7 @@ REResource = {
 	
 	displayInstance = function(self, instance, displayName, parentField, parentFieldListIdx, rszBufferFile)
 		
-		local id = imgui.get_id(parentFieldListIdx or "") .. displayName
+		local id = imgui.get_id(parentFieldListIdx or "") .. (displayName or "[Invalid ObjectId]")
 		if imgui.tree_node_str_id(id, displayName) then 
 			--[[if imgui.tree_node("[Lua]") then
 				EMV.read_imgui_element(instance)
@@ -483,14 +493,15 @@ REResource = {
 			if imgui.menu_item("Copy") then 
 				copyBuffer.instance = instance
 			end 
-			if imgui.menu_item("Paste") and copyBuffer.instance then 
+			if imgui.menu_item("Paste" .. (EMV.check_key_released(via.hid.KeyboardKey.Shift, 0.0) and " after" or "")) and copyBuffer.instance then 
 				local owner = self.owner or self
 				local instance = instance.rawDataTbl or instance
 				local newInstance = EMV.merge_tables({}, copyBuffer.instance.rawDataTbl or copyBuffer.instance)
 				local name = rsz_parser.GetRSZClassName(newInstance.typeId)
 				local isRSZObject = EMV.find_index(rszBufferFile.objectTable, newInstance.index, "objectId")
-				local objectTblInsertPt = rszBufferFile:addInstance(name, instance.index+1, newInstance, isRSZObject)
-				owner:updateSCNObjectIds(objectTblInsertPt, instance.index, isRSZObject) --sdk.find_type_definition(name):is_a("via.Component"))
+				local addAmt = EMV.check_key_released(via.hid.KeyboardKey.Shift, 0.0) and 1 or 0 --self.backup
+				local objectTblInsertPt = rszBufferFile:addInstance(name, instance.index+addAmt, newInstance, isRSZObject)
+				owner:updateSCNObjectIds(objectTblInsertPt, instance.index+addAmt, isRSZObject) --sdk.find_type_definition(name):is_a("via.Component"))
 				owner:save(nil, true)
 				owner:read()
 			end 
@@ -528,7 +539,7 @@ REResource = {
 				if fInfo.parentId >= objectTblInsertPt-1 then fInfo.parentId = fInfo.parentId+1 end
 			end
 			for f, uInfo in ipairs(self.userdataInfos or {}) do 
-				if uInfo.id >= objectTblInsertPt-1 then uInfo.id = uInfo.id+1 end
+				if uInfo.typeId >= objectTblInsertPt-1 then uInfo.typeId = uInfo.typeId+1 end
 			end
 			for f, pInfo in ipairs(self.prefabInfos or {}) do 
 				if pInfo.parentId >= objectTblInsertPt-1 then pInfo.parentId = pInfo.parentId+1 end
@@ -807,6 +818,15 @@ REResource = {
 			end
 			imgui.tooltip("Update the file's internal buffer and rebuild Lua data", "frefresh")
 			
+			--[[if self.backup then
+				if not imgui.same_line() and imgui.button("Undo") then
+					self.bs = self.backup
+					self:save(nil, true)
+					self:read()
+				end
+				imgui.tooltip("Revert the file to its previous state", "fundo")
+			end]]
+			
 			if spawn_pfb and self.isPFB and not imgui.same_line() and imgui.button("Spawn PFB") then 
 				local path = self.filepath:match("^(.+)%."):gsub(".pfb", "") .. ".NEW.pfb"
 				if self.saveAsPFB then
@@ -917,6 +937,7 @@ REResource = {
 					if pluralName==structName and structName ~= "objectTable" then
 						display_struct(pluralName, self[pluralName], structPrototype, structName, true)
 					else
+						test = {self, pluralName}
 						local thisInfos, isList = self[pluralName], false
 						displayStructList(thisInfos, structPrototype, structName)
 					end
@@ -1073,6 +1094,7 @@ RSZFile = {
 		local bs = BitStream:new()
 		self.bs = bs
 		
+		test = bs
 		bs:writeBytes(self.structSizes["header"])
 		for i, objectTblObj in ipairs(self.objectTable) do
 			bs:writeInt(objectTblObj.objectId)
@@ -1106,6 +1128,7 @@ RSZFile = {
 				RSZUserDataInfo.RSZData.startOfs = bs:tell() + (self.startOfs or 0)
 				RSZUserDataInfo.RSZData:writeBuffer()
 				bs:writeBytes(RSZUserDataInfo.RSZData.bs:getBuffer())
+				bs:writeInt(RSZUserDataInfo.RSZData:fileSize(), RSZUserDataInfo.startOf+12) 
 				bs:writeUInt64(RSZUserDataInfo.RSZOffset, RSZUserDataInfo.startOf+16)
 			end
 		end
@@ -1183,10 +1206,13 @@ RSZFile = {
 					index = i,
 				}
 				if instance.RSZUserDataIdx then 
-					instance.userdataFile = ((tdb_ver > 67) and self.RSZUserDataInfos[instance.RSZUserDataIdx].path) or self.RSZUserDataInfos[instance.RSZUserDataIdx].RSZData
+					instance.userdataFile = (not isOldVer and self.RSZUserDataInfos[instance.RSZUserDataIdx].path) or self.RSZUserDataInfos[instance.RSZUserDataIdx].RSZData
 				else
 					instance.fields = {}
 					for index=1, instance.fieldCount do 
+						if self.bs:tell() >= self.bs:fileSize()-16 then 
+							self.bs:save("test92.scn")
+						end
 						local field = self:readRSZField(typeId, index-1)
 						if index == 1 then instance.startOf = field.startOf or instance.startOf end
 						table.insert(instance.fields, field)
@@ -1301,12 +1327,7 @@ RSZFile = {
 					bs:writeUInt(0)
 				else
 					--log.info("writing string " .. value .. " @ " .. self.startOf+bs:tell() .. " " .. value:len()+1)
-					local ctr = 1
-					for p, c in utf8.codes(value) do 
-						if not c or c==0 then break end
-						ctr = ctr + 1
-					end
-					bs:writeUInt(ctr) --value:len()+1
+					bs:writeUInt(getWStringSize(value)) --value:len()+1
 					bs:writeWString(value)
 				end
 			else
@@ -1397,7 +1418,6 @@ RSZFile = {
 				self:seek(pos + self.charCount * 2)
 				
 			elseif fieldTbl.LuaTypeName then 
-				--if "read" .. fieldTbl.LuaTypeName == "readGUID" then re.msg("guid at " .. self:tell()) end
 				fieldTbl.value = self.bs["read" .. fieldTbl.LuaTypeName](self.bs)
 			else
 				fieldTbl.value = self.bs:readBytes(fieldTbl.elementSize)
@@ -1525,9 +1545,9 @@ RSZFile = {
 	end,
 	
 	addInstance = function(self, typeName, atIndex, newInstance, isRSZObject)
-		if not RSZFile.json_dump_names then 
-			self:loadJson()
-		end
+		--if not RSZFile.json_dump_names then 
+		--	self:loadJson()
+		--end
 		
 		typeName = (newInstance and newInstance.typeName) or typeName
 		local typeId = (newInstance and newInstance.typeId) or RSZFile.json_dump_map[typeName]
@@ -1547,7 +1567,7 @@ RSZFile = {
 			objectTblInsertPt = objectTblInsertPt or #self.objectTable+1
 			for i, instance in ipairs(self.rawData) do
 				for f, field in ipairs(instance.fields or {}) do 
-					if field.fieldTypeName:find("Object^(Ref)") then 
+					if field.fieldTypeName:find("Object^(Ref)") or field.fieldTypeName == "UserData" then 
 						if type(field.value)=="table" then
 							for o, objId in ipairs(field.value) do
 								if objId >= atIndex then 
@@ -1560,6 +1580,12 @@ RSZFile = {
 							end
 						end
 					end
+				end
+			end
+			
+			for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
+				if RSZUserDataInfo.instanceId >= atIndex then 
+					RSZUserDataInfo.instanceId = RSZUserDataInfo.instanceId + 1
 				end
 			end
 			
@@ -1722,9 +1748,12 @@ SCNFile = {
 		
 		for i, gameObjectInfo in ipairs(self.gameObjectInfos) do
 			self:writeStruct("gameObjectInfo", gameObjectInfo)
+			if self.isPFB then 
+				self.bs:writeInt(-1, gameObjectInfo.startOf+28)
+			end
 		end
 		
-		if self.folderInfos and self.folderInfos[1] then
+		if self.folderInfos then --and self.folderInfos[1] then
 			self.bs:align(16)
 			self.header.folderInfoOffset = self:tell()
 			for i, folderInfo in ipairs(self.folderInfos or {}) do
@@ -1738,7 +1767,7 @@ SCNFile = {
 			self:writeStruct("resourceInfo", resourceInfo)
 		end
 		
-		if self.prefabInfos and self.prefabInfos[1] then
+		if self.prefabInfos then --and self.prefabInfos[1] then
 			self.bs:align(16)
 			self.header.prefabInfoOffset = self:tell()
 			for i, prefabInfo in ipairs(self.prefabInfos or {}) do
@@ -1746,7 +1775,7 @@ SCNFile = {
 			end
 		end
 		
-		if self.userdataInfos and self.userdataInfos[1] then
+		if self.userdataInfos then-- and self.userdataInfos[1] then
 			self.bs:align(16)
 			self.header.userdataInfoOffset = self:tell()
 			for i, userdataInfo in ipairs(self.userdataInfos) do
@@ -1777,6 +1806,7 @@ SCNFile = {
 		self.RSZ.startOfs = self.header.dataOffset
 		self.RSZ:writeBuffer()
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
+		--self.backup = self.bs
 		
 		if not onlyUpdateBuffer then
 			self.bs:save(filepath)
@@ -1787,11 +1817,10 @@ SCNFile = {
 	end,
 	
 	saveAsPFB = function(self, filepath, noPrompt)
-		
-		if self.folders and self.folders[1] then 
-			re.msg("Cannot convert a file with via.Folders!")
-			return nil
-		end
+		--if self.folders and self.folders[1] then 
+			--re.msg("Cannot convert a file with via.Folders!")
+			--return nil
+		--end
 		self.structs = PFBFile.structs
 		self.header.magic = 4343376 --"PFB"
 		PFBFile.save(self, filepath, nil, nil, noPrompt)
@@ -2016,13 +2045,9 @@ PFBFile = {
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset, owner=self})
 		
 		if self.RSZ.objectTable then
-			for i = 1, self.header.uknPFBInfoCount or 0 do 
-				self.uknPFBInfos[i].instance = self.RSZ.rawData[ self.RSZ.objectTable[self.uknPFBInfos[i].typeId].objectId ] --self.RSZ.rawData[ self.uknPFBInfos[i].typeId ]
-				self.uknPFBInfos[i].name = self.uknPFBInfos[i].instance.name
-			end
 			SCNFile.setupGameObjects(self)
 		end
-		--self.RSZ.bs:save("test93.pfb")
+		self.RSZ.bs:save("test93.pfb")
 	end,
 	
 	-- Updates the PFBFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
@@ -2090,12 +2115,15 @@ PFBFile = {
 			if not noPrompt then re.msg("Saved to " .. filepath) end
 			ResourceEditor.textBox = filepath
 		end
-		--self.RSZ.bs:save("test94.pfb")
+		--self.backup = self.bs
+		self.RSZ.bs:save("test94.pfb")
 	end,
 	
 	saveAsSCN = function(self, filepath)
 		self.structs = SCNFile.structs
+		self.header.magic = 5129043 --"SCN"
 		SCNFile.save(self, filepath)
+		self.header.magic = 4343376 --"PFB"
 		self.structs = nil
 	end,
 	
@@ -2122,7 +2150,7 @@ PFBFile = {
 		},
 		
 		uknPFBInfo = {
-			{"UInt", "typeId"},
+			{"UInt", "ID"},
 			{"UShort", "uknShortA"},
 			{"UShort", "uknShortB"},
 			{"Int", "unkInt"},
@@ -2143,10 +2171,10 @@ PFBFile = {
 	},
 }
 
-if tdb_ver <= 67 then 
+if isOldVer then 
 	table.remove(PFBFile.structs.header, 8)
 	table.remove(PFBFile.structs.header, 5)
-	table.remove(PFBFile.structs.structOrder, 4)
+	table.remove(PFBFile.structs.structOrder, 5)
 	PFBFile.structs.resourceInfo = { {"WString", "resourcePath"}, }
 end
 
@@ -2248,6 +2276,7 @@ UserFile = {
 		self.header.resourceCount = #self.resourceInfos
 		self.header.userdataCount = #self.userdataInfos
 		self:writeStruct("header", self.header)
+		--self.backup = self.bs
 		
 		if (self.bs:save(filepath) and filepath) then
 			if not noPrompt then re.msg("Saved to " .. filepath) end
@@ -2439,6 +2468,7 @@ MDFFile = {
 			end
 			self:writeStruct("matHeader", self.matHeaders[m], self.matHeaders[m].startOf)
 		end
+		--self.backup = self.bs
 		
 		if not onlyUpdateBuffer and (self.bs:save(filepath) and filepath) then
 			if not noPrompt then re.msg("Saved to " .. filepath) end
