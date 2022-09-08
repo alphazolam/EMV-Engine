@@ -284,6 +284,10 @@ REResource = {
 			lowerC = lowerC .. numberExt
 		end
 		
+		if lowerC:sub(1,1)=="$" and not BitStream.checkFileExists(lowerC) and BitStream.checkFileExists(lowerC:sub(14,-1)) then 
+			lowerC = lowerC:sub(14,-1)
+		end
+		
 		local currentItem = nil
 		if lowerC:find("%.mdf2") then 
 			currentItem = MDFFile:new(lowerC)
@@ -298,9 +302,9 @@ REResource = {
 		currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
 		ResourceEditor.textBox = lowerC
 		
-		if currentItem then --(force or not ResourceEditor.previousItems[currentItem.filepath])
+		if currentItem and currentItem.filepath ~= "" then --(force or not ResourceEditor.previousItems[currentItem.filepath])
 			ResourceEditor.previousItems[currentItem.filepath] = currentItem
-			if EMV.insert_if_unique(ResourceEditor.recentFiles, currentItem.filepath:match("^.+" .. nativesFolderType .. "\\(.+)$") .. numberExt) then
+			if EMV.insert_if_unique(ResourceEditor.recentFiles, (currentItem.filepath:match("^.+" .. nativesFolderType .. "\\(.+)$") or currentItem.filepath) .. numberExt) then
 				ResourceEditor.recentItemIdx = #ResourceEditor.recentFiles
 			end
 			json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
@@ -773,9 +777,19 @@ REResource = {
 			end
 			imgui.tooltip("Update the file's internal buffer and rebuild Lua data", "frefresh")
 			
+			if spawn_pfb and self.isPFB and not imgui.same_line() and imgui.button("Spawn PFB") then 
+				local path = self.filepath:match("^(.+)%."):gsub(".pfb", "") .. ".NEW.pfb"
+				if self.saveAsPFB then
+					self:saveAsPFB(path .. PFBFile.extensions[game_name], true)
+				else
+					self:save(path .. PFBFile.extensions[game_name], nil, nil, true)
+				end
+				spawn_pfb(path:sub(14,-1))
+			end
+			
 			if self.saveAsPFB and not imgui.same_line() and imgui.button("Save as PFB") then
 				local path = self.filepath:match("^(.+)%.") .. ".NEW.pfb" .. PFBFile.extensions[game_name]
-				self:saveAsPFB(path:gsub("%.scn", ""))
+				self:saveAsPFB(path:gsub("%.scn", ""), false)
 			end
 			
 			if self.saveAsSCN and not imgui.same_line() and imgui.button("Save as SCN") then
@@ -871,7 +885,7 @@ REResource = {
 					if pluralName==structName and structName ~= "objectTable" then
 						display_struct(pluralName, self[pluralName], structPrototype, structName, true)
 					else
-						local thisInfos, isList = self[pluralName], nil
+						local thisInfos, isList = self[pluralName], false
 						displayStructList(thisInfos, structPrototype, structName)
 					end
 					imgui.tree_pop()
@@ -971,99 +985,6 @@ REResource = {
 -- Class for managing embedded files with "RSZ" magic:
 RSZFile = {
 	
-	--[[typeIds = {
-		ukn_error = {"", 1},
-		ukn_type = {"", 1},
-		not_init = {"", 1},
-		class_not_found = {"", 1},
-		out_of_range = {"", 1},
-		Undefined_tid = {"", 1},
-		Object_tid = {"", 1},
-		Action_tid = {"", 1},
-		Struct_tid = {"", 1},
-		NativeObject_tid = {"", 1},
-		Resource_tid = {"", 1},
-		UserData_tid = {"", 1},
-		Bool_tid = {"UByte", 1},
-		C8_tid = {"", 1},
-		C16_tid = {"", 1},
-		S8_tid = {"Byte", 1},
-		U8_tid = {"UByte", 1},
-		S16_tid = {"Short", 1},
-		U16_tid = {"UShort", 1},
-		S32_tid = {"Int", 1},
-		U32_tid = {"UInt", 1},
-		S64_tid = {"Int64", 1},
-		U64_tid = {"UInt64", 1},
-		F32_tid = {"Float", 1},
-		F64_tid = {"Double", 1},
-		String_tid = {"String", 1},
-		MBString_tid = {"", 1},
-		Enum_tid = {"UInt", 1},
-		Uint2_tid = {"UInt", 2},
-		Uint3_tid = {"UInt", 3},
-		Uint4_tid = {"Uint", 4},
-		Int2_tid = {"Int", 2},
-		Int3_tid = {"Int", 3},
-		Int4_tid = {"Int", 4},
-		Float2_tid = {"Float", 2},
-		Float3_tid = {"Float", 3},
-		Float4_tid = {"Float", 4},
-		Float3x3_tid = {"Float", 9},
-		Float3x4_tid = {"Float", 12},
-		Float4x3_tid = {"Float", 12},
-		Float4x4_tid = {"Float", 16},
-		Half2_tid = {"", 1},
-		Half4_tid = {"", 1},
-		Mat3_tid = {"Float", 12},
-		Mat4_tid = {"Mat4", 1},
-		Vec2_tid = {"Vec2", 1},
-		Vec3_tid = {"Vec3", 1},
-		Vec4_tid = {"Vec4", 1},
-		VecU4_tid = {"", 1},
-		Quaternion_tid = {"Vec4", 1},
-		Guid_tid = {"", 1},
-		Color_tid = {"UInt", 1},
-		DateTime_tid = {"", 1},
-		AABB_tid = {"", 1},
-		Capsule_tid = {"", 1},
-		TaperedCapsule_tid = {"", 1},
-		Cone_tid = {"", 1},
-		Line_tid = {"", 1},
-		LineSegment_tid = {"", 1},
-		OBB_tid = {"", 1},
-		Plane_tid = {"", 1},
-		PlaneXZ_tid = {"", 1},
-		Point_tid = {"", 1},
-		Range_tid = {"", 1},
-		RangeI_tid = {"", 1},
-		Ray_tid = {"", 1},
-		RayY_tid = {"", 1},
-		Segment_tid = {"", 1},
-		Size_tid = {"UInt", 1},
-		Sphere_tid = {"", 1},
-		Triangle_tid = {"", 1},
-		Cylinder_tid = {"", 1},
-		Ellipsoid_tid = {"", 1},
-		Area_tid = {"", 1},
-		Torus_tid = {"", 1},
-		Rect_tid = {"", 1},
-		Rect3D_tid = {"", 1},
-		Frustum_tid = {"", 1},
-		KeyFrame_tid = {"", 1},
-		Uri_tid = {"", 1},
-		GameObjectRef_tid = {"", 1},
-		RuntimeType_tid = {"String", 1},
-		Sfix_tid = {"", 1},
-		Sfix2_tid = {"", 1},
-		Sfix3_tid = {"", 1},
-		Sfix4_tid = {"", 1},
-		Position_tid = {"", 1},
-		F16_tid = {"", 1},
-		End_tid = {"", 1},
-		Data_tid
-	} ]]
-
 	typeNames = {
 		Object = "UInt",
 		UserData = "UInt",
@@ -1103,6 +1024,7 @@ RSZFile = {
 		
 		if o.bs:fileSize() > 0 then
 			o:readBuffer()
+			o:writeBuffer()
 		end
 		
 		o.save = o.writeBuffer
@@ -1114,10 +1036,11 @@ RSZFile = {
 	
 	-- Recreates the RSZ file buffer using data from owned Lua tables
 	writeBuffer = function(self)
+		
 		local bs = BitStream:new()
 		self.bs = bs
 		
-		bs:writeBytes(48)
+		bs:writeBytes(self.structSizes["header"])
 		for i, objectTblObj in ipairs(self.objectTable) do
 			bs:writeInt(objectTblObj.objectId)
 		end 
@@ -1129,14 +1052,15 @@ RSZFile = {
 		end 
 		
 		bs:align(16)
-		self.header.userdataOffset = self:tell()
+		log.info("Pos " .. bs:tell() .. ", " .. (bs:tell()%16))
+		self.header.userdataOffset = bs:tell()
 		for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
 			self:writeStruct("RSZUserDataInfo", RSZUserDataInfo)
 		end
 		
 		bs:align(16)
 		for i, wstringTbl in ipairs(self.stringsToWrite or {}) do
-			bs:writeUInt64(self:tell(), wstringTbl.offset)
+			bs:writeUInt64(bs:tell(), wstringTbl.offset)
 			bs:writeWString(wstringTbl.string)
 		end
 		self.stringsToWrite = nil
@@ -1154,7 +1078,7 @@ RSZFile = {
 		end
 		
 		bs:align(16)
-		self.header.dataOffset = self:tell()
+		self.header.dataOffset = bs:tell()
 		for i, instance in ipairs(self.rawData) do
 			if not instance.userdataFile then 
 				for f, field in ipairs(instance.fields) do 
@@ -1168,6 +1092,10 @@ RSZFile = {
 		self.header.userdataCount = #self.RSZUserDataInfos
 		self:seek(0)
 		self:writeStruct("header", self.header)
+		
+		if self.header.userdataOffset == 6998 then 
+			re.msg(6998)
+		end
 		
 		return bs
 	end,
@@ -1204,8 +1132,7 @@ RSZFile = {
 			for i, rszInfo in ipairs(self.RSZUserDataInfos) do
 				--test = {self, rszInfo, self.bs:readString(rszInfo.RSZOffset)}
 				self:seek(rszInfo.RSZOffset)
-				local stream = self.bs:extractStream(rszInfo.dataSize)--rszInfo.RSZOffset, rszInfo.dataSize)
-				rszInfo.RSZData = RSZFile:new({file=stream, startOf=rszInfo.RSZOffset + self.startOf})
+				rszInfo.RSZData = RSZFile:new({file=self.bs:extractStream(), startOf=rszInfo.RSZOffset + self.startOf})
 			end
 		end
 		
@@ -1235,6 +1162,8 @@ RSZFile = {
 				end
 				self.rawData[i] = instance
 			end
+			
+			self.bs = BitStream:new(self.bs:extractStream(self:tell(), 0)) 
 			
 			for i, rd in ipairs(self.rawData) do
 				rd.sortedTbl = self:sortRSZInstance(rd)
@@ -1388,6 +1317,7 @@ RSZFile = {
 		
 		local fieldTbl = self:makeFieldTable(typeId, index)
 		
+		--fieldTbl.startOf =  self.bs:getAlignedOffset(((fieldTbl.isList and 4) or fieldTbl.alignment), self:tell())
 		fieldTbl.startOfAbs = self.bs:getAlignedOffset(((fieldTbl.isList and 4) or fieldTbl.alignment), self:tell() + self.startOf)
 		self:skip(fieldTbl.startOfAbs  - self.startOf - self:tell())
 		
@@ -1405,7 +1335,7 @@ RSZFile = {
 				end
 			end
 		else
-			--last = {fieldTbl, typeId, index, parentListField}
+			
 			local startPos = self:tell()
 			if fieldTbl.is4ByteArray then
 				fieldTbl.value = self.bs:readArray(math.floor(fieldTbl.elementSize / 4), fieldTbl.LuaTypeName, self:tell(), true)
@@ -1417,6 +1347,8 @@ RSZFile = {
 				if self.bs:readUByte(pos+1) ~= 0 then 
 					log.info("Broken string at " .. pos .. " " .. EMV.logv(fieldTbl))
 				end
+				
+				last = {fieldTbl, typeId, index, parentListField, pos, self}
 				
 				if self.bs:readUShort(pos) > 0 and self.charCount > 0 then
 					fieldTbl.value = self.bs:readWString(pos)
@@ -1730,13 +1662,16 @@ SCNFile = {
 		local stream = self.bs:extractStream()
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset})
 		
+		
 		if self.RSZ.objectTable then
 			self:setupGameObjects()
 		end
+		
+		--self.RSZ.bs:save("test93.scn")
 	end,
 	
 	-- Updates the SCNFile and RSZFile bitstreams from data in owned Lua tables and saves the result to a new file
-	save = function(self, filepath, onlyUpdateBuffer, doOverwrite)
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.scn", ".NEW.scn")
@@ -1809,18 +1744,21 @@ SCNFile = {
 		
 		if not onlyUpdateBuffer then
 			self.bs:save(filepath)
-			re.msg("Saved to " .. filepath)
+			if not noPrompt then re.msg("Saved to " .. filepath) end
+			ResourceEditor.textBox = filepath
 		end
+		--self.RSZ.bs:save("test94.scn")
 	end,
 	
-	saveAsPFB = function(self, filepath)
+	saveAsPFB = function(self, filepath, noPrompt)
+		
 		if self.folders and self.folders[1] then 
 			re.msg("Cannot convert a file with via.Folders!")
 			return nil
 		end
 		self.structs = PFBFile.structs
 		self.header.magic = 4343376 --"PFB"
-		PFBFile.save(self, filepath)
+		PFBFile.save(self, filepath, nil, nil, noPrompt)
 		self.header.magic = 5129043 --"SCN"
 		self.structs = nil
 	end,
@@ -2016,6 +1954,11 @@ PFBFile = {
 			self.gameObjectInfosIdMap[self.gameObjectInfos[i].objectId] = self.gameObjectInfos[i]
 		end
 		
+		self.uknPFBInfos = {}
+		for i = 1, self.header.uknPFBInfoCount or 0 do 
+			self.uknPFBInfos[i] = self:readStruct("uknPFBInfo")
+		end
+		
 		self:seek(self.header.resourceInfoOffset)
 		self.resourceInfos = {}
 		for i = 1, self.header.resourceCount do 
@@ -2037,12 +1980,17 @@ PFBFile = {
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset})
 		
 		if self.RSZ.objectTable then
+			for i = 1, self.header.uknPFBInfoCount or 0 do 
+				self.uknPFBInfos[i].instance = self.RSZ.rawData[ self.RSZ.objectTable[self.uknPFBInfos[i].typeId].objectId ] --self.RSZ.rawData[ self.uknPFBInfos[i].typeId ]
+				self.uknPFBInfos[i].name = self.uknPFBInfos[i].instance.name
+			end
 			SCNFile.setupGameObjects(self)
 		end
+		--self.RSZ.bs:save("test93.pfb")
 	end,
 	
 	-- Updates the PFBFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
-	save = function(self, filepath, onlyUpdateBuffer, doOverwrite)
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.pfb", ".NEW.pfb")
@@ -2058,11 +2006,19 @@ PFBFile = {
 			self:writeStruct("gameObjectInfo", gameObjectInfo)
 		end
 		
+		if self.header.uknPFBInfoCount and self.header.uknPFBInfoCount > 0 then 
+			self.bs:align(16)
+			self.header.uknPFBInfoOffset = self:tell()
+			for i, uknPFBInfo in ipairs(self.uknPFBInfos) do
+				self:writeStruct("uknPFBInfo", uknPFBInfo)
+			end
+		end
+		
 		self.bs:align(16)
 		self.header.resourceInfoOffset = self:tell()
 		for i, resourceInfo in ipairs(self.resourceInfos) do
 			self:writeStruct("resourceInfo", resourceInfo)
-			if isOldVer then self.bs:skip(-2) end
+			--if isOldVer then self.bs:skip(-2) end
 		end
 		
 		if self.userdataInfos and self.userdataInfos[1] then
@@ -2091,12 +2047,14 @@ PFBFile = {
 		self.header.infoCount = #self.gameObjectInfos
 		self.header.resourceCount = #self.resourceInfos
 		self.header.uknPFBInfoCount = self.uknPFBInfos and #self.uknPFBInfos
-		self.header.userdataCount = #self.userdataInfos
+		self.header.userdataCount = self.userdataInfos and #self.userdataInfos
 		self:writeStruct("header", self.header)
 		if not onlyUpdateBuffer then
 			self.bs:save(filepath)
-			re.msg("Saved to " .. filepath)
+			if not noPrompt then re.msg("Saved to " .. filepath) end
+			ResourceEditor.textBox = filepath
 		end
+		--self.RSZ.bs:save("test94.pfb")
 	end,
 	
 	saveAsSCN = function(self, filepath)
@@ -2127,6 +2085,14 @@ PFBFile = {
 			{"Int", "componentCount"},
 		},
 		
+		uknPFBInfo = {
+			{"UInt", "typeId"},
+			{"UShort", "uknShortA"},
+			{"UShort", "uknShortB"},
+			{"Int", "unkInt"},
+			{"UInt", "gameObjectId"},
+		},
+		
 		resourceInfo = {
 			{"UInt64", "pathOffset", {"WString", "resourcePath"}},
 		},
@@ -2137,7 +2103,7 @@ PFBFile = {
 			{"UInt64", "pathOffset", {"WString", "userdataPath"}},
 		},
 		
-		structOrder = {"header", "gameObjectInfo", "resourceInfo", "userdataInfo"}
+		structOrder = {"header", "gameObjectInfo", "uknPFBInfo", "resourceInfo", "userdataInfo"}
 	},
 }
 
@@ -2204,7 +2170,7 @@ UserFile = {
 	end,
 	
 	-- Updates the UserFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
-	save = function(self, filepath, doOverwrite)
+	save = function(self, filepath, doOverwrite, noPrompt)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.user", ".NEW.user")
@@ -2248,7 +2214,8 @@ UserFile = {
 		self:writeStruct("header", self.header)
 		
 		if (self.bs:save(filepath) and filepath) then
-			re.msg("Saved to " .. filepath)
+			if not noPrompt then re.msg("Saved to " .. filepath) end
+			ResourceEditor.textBox = filepath
 			return true
 		end
 	end,
@@ -2359,7 +2326,7 @@ MDFFile = {
 	end,
 	
 	-- Saves a new MDF file using data from owned Lua tables
-	save = function(self, filepath, mesh, doOverwrite)
+	save = function(self, filepath, mesh, doOverwrite, noPrompt)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then
 			filepath = (filepath or self.filepath):gsub("%.mdf2", ".NEW.mdf2")
@@ -2438,7 +2405,8 @@ MDFFile = {
 		end
 		
 		if (self.bs:save(filepath) and filepath) then
-			re.msg("Saved to " .. filepath)
+			if not noPrompt then re.msg("Saved to " .. filepath) end
+			ResourceEditor.textBox = filepath
 			return true
 		end
 	end,
@@ -2754,9 +2722,11 @@ ResourceEditor = {
 	currentItemIdx = nil,
 	recentItemIdx = nil,
 	previousItems = {},
-	paths = json.load_file("rsz\\resource_list.json") or {},
+	paths = json.load_file("rsz\\resource_list.json"),
 	recentFiles = json.load_file("rsz\\recent_files.json") or {""}
 }
+
+ResourceEditor.paths = ResourceEditor.paths and ResourceEditor.paths[game_name] or {}
 
 EMV.displayResourceEditor = function()
 	
@@ -2766,9 +2736,9 @@ EMV.displayResourceEditor = function()
 		--imgui.text((ResourceEditor.previousItems[ResourceEditor.textBox:lower()] and "  ") or " ?")
 		--imgui.same_line()
 		if not rsz_parser then 
-			imgui.text_colored("Failed to locate reframework\\data\\plugins\\rsz_parser_REF.dll!", 0x000000FF)
+			imgui.text_colored("Failed to locate reframework\\data\\plugins\\rsz_parser_REF.dll!", 0xFF0000FF)
 		elseif not rsz_parser.IsInitialized() then 
-			imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0x000000FF)
+			imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0xFF0000FF)
 		end
 		
 		local lastIdx, doOpen = ResourceEditor.recentItemIdx
@@ -2803,9 +2773,10 @@ EMV.displayResourceEditor = function()
 			doOpen = true
 		end
 
-		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File")==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
+		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File", {always_show=true})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
 			REResource.openResource(ResourceEditor.textBox)
 		end
+		
 		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath2")
 		
 		if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 

@@ -952,7 +952,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 			end
 		end
 		
-		if m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value) then 
+		if args.always_show or (m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value)) then 
 			imgui.push_id(key)
 				if imgui.button("Set") then
 					
@@ -1031,8 +1031,8 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 					_G.to_load = tmp
 					m_subtbl = nil
 				end
-				imgui.same_line()
-				if imgui.button("X") then
+				
+				if (not args.always_show or (m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value))) and not imgui.same_line() and imgui.button("X") then
 					m_subtbl = nil
 				end
 			imgui.pop_id()
@@ -1826,6 +1826,7 @@ Hotkey = {
 	display_imgui_button = function(self, button_txt)
 		button_txt = button_txt or self.button_txt
 		if imgui.button_w_hotkey(button_txt, self.imgui_keyname, self.dfcall, self.dfcall and self.dfcall.args, self.dfcall_json) then
+			self.button_pressed = true
 			self:update(true)
 			return true
 		end
@@ -1908,7 +1909,9 @@ for key_name, key_id in orderedPairs(via.hid.KeyboardKey) do
 end
 
 MoveSequencer = {
+
 	items = {},
+	
 	new = function(self, args, o)
 		
 		o = o or {}
@@ -1924,12 +1927,20 @@ MoveSequencer = {
 			o.last_frame = 0
 			o.Hotkeys = {} --args.Hotkeys or {}
 			o.movedata = {} --args.movedata or o.movedata or {}
+			
 			for name, Hotkey in pairs(Hotkey.used or {}) do 
 				if name:find(o.name) and name:find("MotionFsm2") then
 					o.Hotkeys[name] = Hotkey
 					o.movedata[name] = {}
 				end
 			end
+			
+			--[[for name, Hotkey in pairs(Hotkeys) do 
+				if Hotkey.button_pressed then
+					o.Hotkeys[name] = Hotkey
+					Hotkey.button_pressed = nil
+				end
+			end]]
 			
 			self.items[o.name] = o
 			self.__index = self  
