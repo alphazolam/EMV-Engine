@@ -193,12 +193,13 @@ BitStream = {
 			self.file:write(string.pack(fmtString, value))
 		elseif fmtString==false then --WStrings:
 			local wstr = {}
-			local p,c
-			for p,c in utf8.codes(value) do
+			local ctr = 1
+			for p, c in utf8.codes(value) do
 				if(not c or c == 0)then break end
 				self.file:write(string.pack("<H",tonumber(c)))
+				ctr = ctr + 1
 			end
-			numBytes = (value:len()+1) * 2
+			numBytes = ctr * 2 --(value:len()+1) * 2
 			self.file:write(string.pack("<H",0))
 			--self.file:write(table.concat(wstr) .. "\0\0")
 		else --Strings:

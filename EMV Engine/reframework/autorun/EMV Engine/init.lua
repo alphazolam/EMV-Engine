@@ -952,7 +952,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 			end
 		end
 		
-		if args.always_show or (m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value)) then 
+		if m_subtbl.value ~= nil and (args.always_show or (m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value))) then 
 			imgui.push_id(key)
 				if imgui.button("Set") then
 					
@@ -1032,7 +1032,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 					m_subtbl = nil
 				end
 				
-				if (not args.always_show or (m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value))) and not imgui.same_line() and imgui.button("X") then
+				if (not args.always_show or (m_subtbl and m_subtbl.value ~= nil and m_subtbl.value ~= tostring(converted_value))) and not imgui.same_line() and imgui.button("X") then
 					m_subtbl = nil
 				end
 			imgui.pop_id()
