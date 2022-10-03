@@ -44,7 +44,6 @@ end
 local filter_info = nil
 
 --global variables
-scene = (scene_manager and sdk.call_native_func(scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene"))
 touched_gameobjects = {}
 go = nil
 
@@ -52,6 +51,7 @@ go = nil
 last_grabbed_object = nil
 last_impact_pos = Vector4f.new(0, 0, 0, 0)
 
+local scene = (scene_manager and sdk.call_native_func(scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene"))
 local grav_objs = {}
 local d_grav_objs = {}
 local active_objects = EMV.active_objects

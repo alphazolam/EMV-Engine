@@ -84,7 +84,7 @@ local uptime = os.clock()
 local tics, toks = 0, 0
 local changed, was_changed, try, out, value
 local game_name = reframework.get_game_name()
-local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
+scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene")
 local msg_ids = {}
 saved_mats = {files=fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]]), names_map={}, names_indexed={}} --Collection of auto-applied altered material settings for GameObjects (by name)
 local created_resources = {}
@@ -153,7 +153,8 @@ if static_objs.main_view ~= nil then
 end
 
 misc_vars = {
-	tooltip_timers = {},
+	tooltip_timers = 0,
+	hovered_this_frame = 0,
 }
 
 local cog_names = { 
@@ -391,15 +392,24 @@ local function merge_tables(table_a, table_b, no_overwrite)
 end
 
 local function deep_copy(tbl)
-	local new_tbl = {}
-	for key, value in pairs(tbl or {}) do
-		if type(value) == "table" then
-			new_tbl[key] = deep_copy(value)
-		else
-			new_tbl[key] = value
+	local loops, loops2 = {}, {}
+	local function recurse(sub_tbl)
+		local new_tbl = {}
+		for key, value in pairs(sub_tbl or {}) do
+			if type(value) == "table" then
+				if not loops[value] then
+					loops[value] = merge_tables({}, value)
+					loops[value] = recurse(loops[value]) 
+				end
+				new_tbl[key] = loops[value]
+				--log.debug()
+			else
+				new_tbl[key] = value
+			end
 		end
+		return new_tbl
 	end
-	return new_tbl
+	return recurse(tbl)
 end
 
 --Reverse a table order
@@ -446,9 +456,30 @@ local function resolve_duplicate_names(names_table, name, key)
 	return new_name
 end
 
+--[[
+-- Run in the console to detect when any component on "player" has been enabled or disabled:
+enableds = enableds or {} 
+for i, component in ipairs(player.components) do 
+	ts_name=component:call("ToString()") or i 
+	if enableds[ts_name]==nil then enableds[ts_name]=component:call("get_Enabled") end 
+	if enableds[ts_name]~=component:call("get_Enabled") then enableds[ts_name]=component:call("get_Enabled") re.msg("Component "..ts_name.." now "..tostring(enableds[ts_name])) end 
+end 
+enableds = enableds 
+]]
+
 --Sort any table by a given key
 local function qsort(tbl, key, ascending)
-	if can_index(tbl) and tbl[1] and (tbl[1][key] ~= nil) and isArray(tbl) then --(({ pcall(function() local test = (tbl[1][key] < tbl[1][key]) end) })[2] == true)
+	if type(tbl)~="table" then return end
+	local testkey, test = next(tbl)
+	if test and test[key]~=nil then
+		local arrayOutput = not isArray(tbl) and {}
+		if arrayOutput then 
+			for key, value in pairs(tbl) do
+				local copy = merge_tables({__key=key}, value)
+				table.insert(arrayOutput, copy)
+			end
+			tbl = arrayOutput
+		end
 		if ascending then
 			if type(tbl[1][key]) == "table" then 
 				if isArray(tbl[1][key]) then
@@ -460,8 +491,8 @@ local function qsort(tbl, key, ascending)
 				table.sort (tbl, function (obj1, obj2) return obj1[key] < obj2[key] end)
 			end
 		else
-			if type(tbl[1][key]) == "table" then 
-				if isArray(tbl[1][key]) then 
+			if type(test[key]) == "table" then 
+				if isArray(test[key]) then 
 					table.sort (tbl, function (obj1, obj2) return #obj1[key] > #obj2[key]  end)
 				else
 					table.sort (tbl, function (obj1, obj2) return get_table_size(obj1[key]) > get_table_size(obj2[key]) end)
@@ -535,6 +566,7 @@ end
 
 --Call re.msg without displaying every single frame -----------------------------------------------------------------------------------------
 function re.msg_safe(msg, msg_id, frame_limit) 
+	re.msgs_this_frame = re.msgs_this_frame or 0
 	re.msgs_this_frame = re.msgs_this_frame + 1
 	frame_limit = frame_limit or 15
 	if re.msgs_this_frame > 10 then
@@ -832,16 +864,34 @@ local function run_command(input)
 end
 
 --Shows a floating message over an imgui element when hovered:
-imgui.tooltip = function(msg, key, delay)
-	delay = key and (delay or 0.5)
-	if not imgui.is_item_hovered() then 
-		if delay then misc_vars.tooltip_timers[key] = nil end
-	else
-		if delay then misc_vars.tooltip_timers[key] = misc_vars.tooltip_timers[key] or uptime end
-		if (not delay or (not misc_vars.tooltip_timers[key] or ((uptime - misc_vars.tooltip_timers[key]) > delay))) then
+imgui.tooltip = function(msg, delay)
+	delay = delay or 0.5
+	if imgui.is_item_hovered() then
+		if delay then 
+			misc_vars.tooltip_timers = misc_vars.tooltip_timers or uptime 
+			misc_vars.hovered_this_frame = tics
+		end
+		if not delay or not misc_vars.tooltip_timers or ((uptime - misc_vars.tooltip_timers) > delay) then
 			imgui.set_tooltip(msg or "")
 		end
+		
+	elseif delay and misc_vars.hovered_this_frame < tics-1 then 
+		misc_vars.tooltip_timers = nil 
 	end
+end
+
+function imgui.tree_node_colored(key, white_text, color_text, color)
+	local output = imgui.tree_node_str_id(key or 'a', white_text or "")
+	imgui.same_line()
+	imgui.text_colored(color_text or "", color or 0xFFE0853D)
+	return output
+end
+
+function imgui.input_text_colored(white_text, color_text, color, text)
+	local changed, value = imgui.input_text(white_text or "", text)
+	imgui.same_line()
+	imgui.text_colored(color_text or "", color or 0xFFE0853D)
+	return changed, value
 end
 
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
@@ -1039,7 +1089,15 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 			imgui.same_line() 
 		end
 		
-		local changed, new_value = imgui.input_text(tostring(display_name) .. " (" .. type(value) .. ")", m_subtbl and m_subtbl.value or tostring(converted_value))
+		local changed, new_value 
+		if args.color_text and type(args.color_text)~="table" then
+			args.color_text = {"", args.color_text}
+		end
+		if args.color_text then 
+			changed, new_value = imgui.input_text_colored(args.color_text[1], args.color_text[2], args.color_text[3], m_subtbl and m_subtbl.value or tostring(converted_value))
+		else
+			changed, new_value = imgui.input_text(tostring(display_name) .. (args.hide_type and "" or " (" .. type(value) .. ")"), m_subtbl and m_subtbl.value or tostring(converted_value))
+		end
 		if changed then
 			m_subtbl.value = new_value
 		end
@@ -1315,7 +1373,7 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 									end
 									imgui.tree_pop()
 								end
-							else--if not editable or not editable_table_field(elem_key, element, tbl, nil, edit_args) then 
+							elseif not editable or not editable_table_field(elem_key, element, tbl, nil, edit_args) then 
 								imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
 							end
 							tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, }
@@ -1476,6 +1534,13 @@ local function get_trs(object)
 	return object:call("get_Position"), object:call("get_Rotation"), object:call("get_LocalScale")
 end
 
+--Convert a float to a byte, meant for colors:
+local function convert_color_float_to_byte(flt)
+	local integer = math.floor(flt * 255 + 0.5)
+	if integer > 255 then integer = 255 end
+	return integer
+end
+
 --Limit a variable's range
 local function clamp(val, lowerlimit, upperlimit)
 	if val < lowerlimit then
@@ -1484,13 +1549,6 @@ local function clamp(val, lowerlimit, upperlimit)
 		val = upperlimit
 	end
 	return val
-end
-
---Convert a float to a byte, meant for colors:
-local function convert_color_float_to_byte(flt)
-	local integer = math.floor(flt * 255 + 0.5)
-	if integer > 255 then integer = 255 end
-	return integer
 end
 
 local function smoothstep(edge0, edge1, x)
@@ -1558,7 +1616,11 @@ local wanted_static_classes = {
 	"via.hid.KeyboardKey",
 	sdk.game_namespace("Collision.CollisionSystem.Layer"),
 	sdk.game_namespace("Collision.CollisionSystem.Filter"),
-	sdk.game_namespace("gimmick.CheckCondition.CheckLogic")
+	sdk.game_namespace("gimmick.CheckCondition.CheckLogic"),
+	
+	"app.PadInput.GameAction",
+	"app.fsm2.player.ButtonCheckCondition.CheckType",
+	
 	--"via.dynamics.RigidBodyState",
     
 	--sdk.game_namespace("InputDefine.Kind"),
@@ -2115,13 +2177,11 @@ local function create_resource(resource_path, resource_type, force_create)
 	local new_rs_address = new_resource and new_resource:get_address()
 	if type(new_rs_address) == "number" then
 		local holder = sdk.create_instance(resource_type .. "Holder", true)
-		if holder then
+		if holder and is_valid_obj(holder) then
 			holder:call(".ctor()")
 			holder:write_qword(0x10, new_rs_address)
-			if is_valid_obj(holder) then
-				RSCache[ext .. "_resources"][resource_path] = holder:add_ref()
-				return holder
-			end
+			RSCache[ext .. "_resources"][resource_path] = holder:add_ref()
+			return holder
 		end
 	end
 	return RSCache[ext .. "_resources"][resource_path]
@@ -2877,11 +2937,11 @@ end
 local function look_at(self, xform_or_joint, matrix)
 	xform_or_joint = (self.joints and self.joints[self.lookat_joint_index]) or xform_or_joint
 	matrix = matrix or (static_objs.cam:call("get_WorldMatrix"))
-	if xform_or_joint and matrix then 
+	--[[if xform_or_joint and matrix then 
 		xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, 0, -matrix[3].z), Vector3f.new(0, 1, 0)) 
 		--xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, -matrix[3].y, -matrix[3].z), Vector3f.new(0, 1, 0)) 
 		return 
-	end
+	end]]
 end
 
 --Resource Management functions -----------------------------------------------------------------------------------------------------------------------------------
@@ -2962,7 +3022,7 @@ end
 --Get the local player -----------------------------------------------------------------------------------------------------------------
 local function get_player(as_GameObject)
 	static_objs.playermanager = sdk.get_managed_singleton(sdk.game_namespace((isMHR and "player." or "") .. "PlayerManager"))
-	if static_objs.playermanager or isRE8 then 
+	if static_objs.playermanager or isRE8 or isRE7 then 
 		local player, xform
 		if isDMC then 
 			player = static_objs.playermanager:call("get_manualPlayer")
@@ -2971,13 +3031,17 @@ local function get_player(as_GameObject)
 			player = static_objs.playermanager:call("findMasterPlayer")
 		elseif isRE8 then
 			xform = find("app.PlayerUpdater")[1]
-			player = get_GameObject(xform)
+			player = xform and get_GameObject(xform)
+		elseif isRE7 then
+			xform = find("app.PlayerCamera")[1]
+			player = xform and get_GameObject(xform)
 		else
 			player = static_objs.playermanager:call("get_CurrentPlayer")
 		end
 		if player and as_GameObject then 
 			xform = xform or player and player:call("get_Transform")
 			player = xform and GameObject:new{xform=xform, gameobj=player}
+			if isRE7 and player then player.isRE7player = true end
 		end
 		return player
 	end
@@ -3626,6 +3690,7 @@ local function log_transform(pos, rot, scale, xform)
 		rot = rot or xform:call("get_Rotation")
 		scale = scale or xform:call("get_LocalScale")
 	end
+	if not pos and rot and scale then return "nil" end
 	return "[" .. tostring(pos.x) .. ", " .. tostring(pos.y) .. ", " .. tostring(pos.z) .. "]\n"
 		.. "[" .. tostring(rot.x) .. ", " .. tostring(rot.y) .. ", " .. tostring(rot.z) .. ", " .. tostring(rot.w) .. "]\n"
 		.. "[" .. tostring(scale.x) .. ", " .. tostring(scale.y) .. ", " .. tostring(scale.z) .. "]"
@@ -4336,7 +4401,7 @@ local VarData = {
 		if SettingsCache.use_pcall then
 			if self.field then
 				try, out = pcall(self.field.get_data, self.field, obj)
-			elseif excepted and EMVSettings.show_all_fields then
+			elseif excepted and SettingsCache.show_all_fields then
 				try, out = pcall(obj.call, obj, self.full_name, index or 0)
 			elseif index then
 				try, out = pcall(obj.call, obj, self.full_name, index)
@@ -4346,7 +4411,7 @@ local VarData = {
 		else
 			if self.field then
 				out = self.field:get_data(obj)
-			elseif excepted and EMVSettings.show_all_fields then
+			elseif excepted and SettingsCache.show_all_fields then
 				out = obj:call(self.full_name, 0)
 			elseif index then
 				out = obj:call(self.full_name, index)
@@ -4708,7 +4773,7 @@ local REMgdObj = {
 			
 			--Update owner
 			if o_tbl.xform then 
-				o_tbl.go = touched_gameobjects[o_tbl.xform] or held_transforms[o_tbl.xform]
+				o_tbl.go = touched_gameobjects[o_tbl.xform] or held_transforms[o_tbl.xform] or o_tbl.go
 			elseif o_tbl.owner and o_tbl.owner._ then 
 				o_tbl.xform = o_tbl.owner._.xform
 				o_tbl.gameobj = o_tbl.gameobj or o_tbl.owner._.gameobj
@@ -5930,8 +5995,10 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 						o_tbl.clear = true 
 						o_tbl.clear_next_frame = nil
 					end
+					imgui.tooltip("Update the fields and properties of this class")
 					imgui.same_line()
 					imgui_changed, o_tbl.keep_updating = imgui.checkbox("", SettingsCache.objs_to_update[o_tbl.name_full])
+					imgui.tooltip("Keep updating all instances of this class every frame")
 					if imgui_changed then 
 						SettingsCache.objs_to_update[o_tbl.name_full] = o_tbl.keep_updating
 					end
@@ -6058,6 +6125,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					 o_tbl.go:imgui_xform()
 				end
 			elseif o_tbl.name == "Mesh" then
+				imgui.text(tostring(o_tbl.go) .. " " .. tostring(o_tbl.go and o_tbl.go.materials) )
 				if o_tbl.go and o_tbl.go.materials and imgui.tree_node_ptr_id(o_tbl.go.mesh:get_address() - 1234, "Materials") then
 					show_imgui_mats(o_tbl.go) 
 					imgui.tree_pop()
@@ -6732,7 +6800,7 @@ show_imgui_mats = function(anim_object)
 	
 	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
 	if _G.REResource and _G.BitStream and mesh then
-		if anim_object.materials.save_path_exists then
+		if _G.MDFFile and anim_object.materials.save_path_exists then
 			if imgui.button("Save") then
 				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
 				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
@@ -6744,13 +6812,13 @@ show_imgui_mats = function(anim_object)
 			imgui.same_line()
 		end
 		if anim_object.materials.save_path_text==nil then
-			anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. (MDFFile.extensions[game_name] or "")
+			anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. ((MDFFile and MDFFile.extensions[game_name]) or "")
 		end
 		changed, anim_object.materials.save_path_text = imgui.input_text("Modify File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text) --
 		if changed or anim_object.materials.save_path_exists==nil then
 			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
 		end
-		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh", "fpath3")
+		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh")
 		if anim_object.materials.mdfFile and imgui.tree_node("[MDF Lua]") then 
 			--read_imgui_element(anim_object.materials.mdfFile)
 			anim_object.materials.mdfFile:displayImgui()
@@ -8005,7 +8073,8 @@ GameObject = {
 				local typedef = component:get_type_definition()
 				local fname = typedef:get_full_name()
 				o.components_named[typedef:get_name()] = component
-				o.is_light = o.is_light or (typedef:get_name() == "IBL") or (not not (fname:find("Light[Shaft]-$") and fname:find("^via%.render"))) or nil
+				o.IBL = typedef:get_name() == "IBL" and component or nil
+				o.is_light = o.is_light or o.IBL or (not not (fname:find("Light[Shaft]-$") and fname:find("^via%.render"))) or nil
 				if typedef:is_a("via.behaviortree.BehaviorTree") then 
 					o.behaviortrees = o.behaviortrees or {}
 					local bhvt = {obj=component, xform=o.xform, object=o, index=#o.behaviortrees+1}
@@ -8014,6 +8083,8 @@ GameObject = {
 				end
 			end
 		end
+		
+		--o.isRE7player = (isRE7 and o.name:find("[Pp]l%d000")==1 and o.components_named.Humanoid and o.components_named.CharacterController and true) or nil
 		
 		if not o.layer and o.components_named.Motion and o.components_named.Motion:call("getLayerCount") > 0 then 
 			o.layer = o.components_named.Motion:call("getLayer", 0)
@@ -8077,13 +8148,34 @@ GameObject = {
 			end
 		end
 		
-		if (touched_gameobjects[self.xform]) and (touched_gameobjects[self.xform]~=self) then
-			self = merge_tables(self, touched_gameobjects[self.xform], true)
-			touched_gameobjects[self.xform] = self
+		if (touched_gameobjects[o.xform]) and (touched_gameobjects[o.xform]~=o) then
+			o = merge_tables(o, touched_gameobjects[o.xform], true)
+			touched_gameobjects[o.xform] = o
 		end
-		if (held_transforms[self.xform]) and (held_transforms[self.xform]~=self) then
-			self = merge_tables(self, held_transforms[self.xform], true)
-			held_transforms[self.xform] = self
+		
+		if (held_transforms[o.xform]) and (held_transforms[o.xform]~=o) then
+			o = merge_tables(o, held_transforms[o.xform], true)
+			held_transforms[o.xform] = o
+		end
+		
+		if o.children and (o.components_named.DummySkeleton or o.components_named.CharacterController or (o.mesh and o.components_named.FigureObjectBehavior)) then
+			
+			local candidate
+			for i, child in ipairs(o.children) do  
+				held_transforms[child] = held_transforms[child] or GameObject:new_AnimObject{xform=child} 
+				local other = held_transforms[child] 
+				if other and other.gameobj and (other.layer or (other.mpaths and not o.mpaths)) then --(other.body_part == "Body")
+					candidate = other 
+					if candidate.body_part == "Body" and candidate.gameobj:call("get_Draw") then 
+						break 
+					end
+				end
+			end
+			
+			if candidate and not candidate.pairing then
+				o.pairing = candidate
+				candidate.pairing = o
+			end
 		end
 		
         return setmetatable(o, self)
@@ -8468,7 +8560,7 @@ GameObject = {
 			end
 			self.forced_mode_center = self.xform:call("get_WorldMatrix")
 		end
-		--tbl = {}; for i, comp in ipairs(findc("via.timeline.Timeline")) do tbl[get_GameObject(comp):call("get_Transform")]={obj=comp, amt=comp:call("get_BindGameObjects"):get_size()} end; result = qsort(tbl, "amt")
+		--tbl = {}; for i, comp in ipairs(findc("via.timeline.Timeline")) do tbl[EMV.get_GameObject(comp):call("get_Transform")]={obj=comp, amt=comp:call("get_BindGameObjects"):get_size()} end; result = qsort(tbl, "amt") 
 		
 		self.parent = self.xform:call("get_Parent")
 		self.parents_list = self.parents_list or {names={}, names_to_xforms={}, edited_names={}}
@@ -8617,7 +8709,7 @@ GameObject = {
 		end
 		
 		if not self.same_joints_constraint or not self.parent then
-			imgui_changed, self.lookat_enabled = imgui.checkbox("LookAt", self.lookat_enabled)
+			--[[imgui_changed, self.lookat_enabled = imgui.checkbox("LookAt", self.lookat_enabled)
 			if self.lookat_enabled then 
 				if self.joints and not self.same_joints_constraint then
 					if not self.joints_names then 
@@ -8632,9 +8724,9 @@ GameObject = {
 							self.joints[self.lookat_joint_index].frozen = not not not self.joints[self.lookat_joint_index].frozen
 							self.lookat_joints = self.lookat_joints or {}
 							if self.joints[self.lookat_joint_index].frozen then
-								self.lookat_joints[self.joints[self.lookat_joint_index]] = self.joints[self.lookat_joint_index]:call("get_LocalRotation")
+								self.lookat_joints[self.joints[self.lookat_joint_index] ] = self.joints[self.lookat_joint_index]:call("get_LocalRotation")
 							else
-								self.lookat_joints[self.joints[self.lookat_joint_index]] = nil
+								self.lookat_joints[self.joints[self.lookat_joint_index] ] = nil
 							end
 						end
 						imgui.same_line()
@@ -8646,7 +8738,7 @@ GameObject = {
 				self.lookat_enabled = not not self.lookat_obj
 			else
 				self.lookat_joints = nil
-			end
+			end]]
 		end
 		
 		if imgui.tree_node("GameObject") then
@@ -8982,6 +9074,18 @@ GameObject = {
 				self = merge_tables(self, Collection[SettingsCache.Collection_data.collection_xforms[self.xform] ], true)
 				Collection[SettingsCache.Collection_data.collection_xforms[self.xform] ] = self
 			end
+			
+			if self.isRE7player then 
+				local wasCutscene = self.isRE7cutscene
+				self.isRE7cutscene = not (self.components_named.Humanoid:call("get_Enabled") and self.components_named.CharacterController:call("get_Enabled"))
+				player = self
+				if wasCutscene and not self.isRE7cutscene and is_skipping_cs then 
+					scene:call("set_TimeScale(System.Single)", 1.0)
+					is_skipping_cs = nil
+					if stop_wwise then stop_wwise() end
+				end
+			end
+			
 			return true
 		else
 			clear_object(self.xform)
@@ -9094,11 +9198,15 @@ end)
 --On UpdateMotion -------------------------------------------------------------------------------------------------------------------------------------------
 re.on_application_entry("UpdateMotion", function() 
 	
-	--if not EMVSettings then --Enhanced Model Viewer will update it
-		for xorm, obj in pairs(held_transforms) do 
+	if figure_mode or forced_mode or cutscene_mode then --Enhanced Model Viewer will update it
+		for xform, obj in pairs(held_transforms) do 
 			obj:update_AnimObject()
 		end
-	--end
+	else
+		for xform, obj in pairs(held_transforms) do 
+			obj:update()
+		end
+	end
 	
 	--if not isMHR and not isDMC then 
 	--	GameObject.update_all_joint_positions()
@@ -9223,6 +9331,35 @@ re.on_frame(function()
 	end
 	
 	player = player or get_player(true)
+	
+	if isRE7 and reframework:is_drawing_ui() then 
+		if player and player.isRE7cutscene then
+			imgui.begin_window("RE7 Cutscene Skipper", nil, 0)
+				if imgui.button("Skip Cutscene") or is_skipping_cs then 
+					stop_wwise = stop_wwise or function()
+						for i, wwise in ipairs(findc("via.wwise.WwiseContainer")) do 
+							wwise:call("stopAll()")
+							--for c=0, wwise:call("getContainableAssetCount")-1 do
+								--local asset = wwise:call("getContainableAsset", c)
+								--local asset_path = asset and asset:call("get_ResourcePath")
+								--if asset_path and asset_path:lower():find("event") then 
+								--	wwise:call("stopAll()")
+								--	break
+								--end
+							--end
+						end
+						stop_wwise = nil
+					end
+					scene:call("set_TimeScale(System.Single)", 100.0)
+					is_skipping_cs = true
+				end
+			imgui.end_window()
+		elseif is_skipping_cs then --if a cutscene ends with no player:
+			scene:call("set_TimeScale(System.Single)", 1.0)
+			is_skipping_cs = nil
+			stop_wwise()
+		end
+	end
 	
 	for xform, object in pairs(shown_transforms) do 
 		if xform:read_qword(0x10) == 0 then 
@@ -9569,7 +9706,6 @@ EMV = {
 	--imgui_behaviortrees = imgui_behaviortrees,
 	imgui_saved_materials_menu = imgui_saved_materials_menu,
 	draw_material_variable = draw_material_variable,
-	change_multi = change_multi,
 	show_imgui_mats = show_imgui_mats,
 	is_unique_name = is_unique_name,
 	contains_xform = contains_xform,

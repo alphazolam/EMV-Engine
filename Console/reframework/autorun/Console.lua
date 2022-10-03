@@ -75,6 +75,7 @@ local force_autocomplete
 local cheats = {
 	["god"] = table.pack({ comp="HitPointController", method="set_NoDamage", get_method="get_NoDamage"}),
 	["God"] = table.pack({ comp="HitPointController", method="set_Invincible", get_method="get_Invincible"}),
+	["hp"] = table.pack({ comp="HitPointController", args_method="set_CurrentHitPoint"}),
 	--["noclip"] = table.pack({ comp="CharacterController", method="set_Enabled", active=false }, { comp="GroundFixer", method="set_Enabled", active=false }),
 }
 
@@ -92,25 +93,32 @@ end
 --Exectutes a string command input, dividing it up into separate sub-commands:
 local run_command = function(input)
 	input = input:gsub(" +$", "")
-	if cheats[input] then 
+	local cht_part =  input:match("^(.+) ")
+	local splitted = (cht_part and cheats[cht_part] and EMV.split(input, " ")) or {}
+	if cheats[splitted[1] or input] then 
 		local active
-		for i, cheat in ipairs(cheats[input]) do
+		for i, cheat in ipairs(cheats[splitted[1] or input]) do
 			local player = EMV.get_player(true) 
 			local component = player.components_named[cheat.comp]
 			if component and cheat.sub_obj then 
 				component = component:call(cheat.sub_obj)
 			end
 			if component then 
-				cheat.active = active or not not ((cheat.field and component:get_field(cheat.field)) or (cheat.method and component:call(cheat.get_method)))
-				if cheat.field then
-					component:set_field(cheat.field, not cheat.active)
-					cheat.active = not component:get_field(cheat.field)
-				else
-					component:call(cheat.method, not cheat.active)
-					--re.msg("Called method " .. cheat.method .. " " .. tostring(not cheat.active))
-					cheat.active = not component:call(cheat.get_method)
+				if cheat.args_method and tonumber(splitted[2]) then
+					return component:call(cheat.args_method, tonumber(splitted[2]))
 				end
-				active = active or cheat.active
+				if cheat.get_method then 
+					cheat.active = active or not not ((cheat.field and component:get_field(cheat.field)) or (cheat.method and component:call(cheat.get_method)))
+					if cheat.field then
+						component:set_field(cheat.field, not cheat.active)
+						cheat.active = not component:get_field(cheat.field)
+					else
+						component:call(cheat.method, not cheat.active)
+						--re.msg("Called method " .. cheat.method .. " " .. tostring(not cheat.active))
+						cheat.active = not component:call(cheat.get_method)
+					end
+					active = active or cheat.active
+				end
 			end
 		end
 		return active ~= nil and tostring(active)
@@ -349,7 +357,7 @@ local function autocomplete()
 		else
 			special_split = nil
 		end
-		local globals = merge_tables({}, _G) --makes a copy to not mess with the original _G
+		local globals = merge_tables({}, _G)
 		
 		local function check_sub_table(key, value, level, key_prefix, is_metadata_func)
 			
@@ -429,6 +437,7 @@ local function autocomplete()
 			end
 			test_cmd = indexed_matches[idx]  or indexed_matches[1]
 		end
+		
 		cmd = test_cmd
 		if split_spaces[2] and not history_key then 
 			local reassembled_cmd = split_spaces[1]
@@ -439,6 +448,7 @@ local function autocomplete()
 		else
 			command = cmd
 		end
+		
 		if og_cmd:find("%(  %)") or purify_key(og_cmd, true):find("{ *}") then split_ending_parens = split_ending_parens:sub(3, -1) end
 		command = command .. ((split_spaces[2] and split_ending_parens) and (" " .. split_ending_parens) or "")
 		if og_cmd ~= command then 

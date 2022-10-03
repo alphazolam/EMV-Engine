@@ -7,6 +7,7 @@ local game_name = reframework.get_game_name()
 local create_resource = EMV.create_resource
 local orderedPairs = EMV.orderedPairs
 local loaded_resources = false
+local bgs = {}
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
 local alt_names = {
@@ -126,7 +127,6 @@ re.on_application_entry("BeginRendering", function()
 			end
 		end]]
 		
-		local bgs = {}
 		if true then			
 			table.insert(bgs, "escape/light/ibl/ibl_ev580_sunrise.tex")
 			table.insert(bgs, "escape/light/ibl/ibl_moon2.tex")
@@ -157,6 +157,7 @@ local function reset()
 end
 
 return {
+	backgrounds = bgs,
 	alt_names = alt_names,
 	finished = finished,
 	reset = reset,

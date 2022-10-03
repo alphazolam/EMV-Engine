@@ -7,6 +7,7 @@ local game_name = reframework.get_game_name()
 local create_resource = EMV.create_resource
 local orderedPairs = EMV.orderedPairs
 local loaded_resources = false
+local bgs = {}
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
 local alt_names = { 
@@ -32,7 +33,7 @@ re.on_pre_application_entry("LockScene", function()
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
 		local all_motbanks = {}
-		local bgs = {}
+		
 		EMVSettings.init_EMVSettings()
 		if true then			
 			table.insert(bgs, "sectionroot/light/ibl/ibl_morning00.tex")
@@ -1301,6 +1302,7 @@ local function reset()
 end
 
 return {
+	backgrounds = bgs,
 	alt_names = alt_names,
 	finished = finished,
 	reset = reset,

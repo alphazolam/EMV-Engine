@@ -8,6 +8,7 @@ local ran_once = false
 local create_resource = EMV.create_resource
 local orderedPairs = EMV.orderedPairs
 local loaded_resources = false
+local bgs = {}
 
 --a dictionary of tables with 2-3 tables each, one for Body and one for Face and sometimes one to exclude
 local alt_names = { 
@@ -228,7 +229,6 @@ re.on_application_entry("UpdateMotion", function()
 			global_motbanks[bank_name] = bank
 		end
 		
-		local bgs = {}
 		if true then
 			table.insert(bgs, "scene/menu/gallery/viewer/greenscreen.tex")
 			table.insert(bgs, "light/shop/cubemap/ibl_shop_bright.tex")
@@ -311,6 +311,7 @@ local function reset()
 end
 
 return {
+	backgrounds = bgs,
 	alt_names = alt_names,
 	finished = finished,
 	reset = reset,
