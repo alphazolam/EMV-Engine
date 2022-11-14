@@ -27,6 +27,8 @@ local scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"),
 local reverse_table = EMV.reverse_table
 local get_GameObject = EMV.get_GameObject
 
+local do_multiline = false
+
 --EMV Global shortcut functions, for use in the Console
 _G.read_bytes = EMV.read_bytes
 _G.to_obj = EMV.to_obj
@@ -50,7 +52,7 @@ _G.get_table_size = EMV.get_table_size
 _G.isArray = EMV.isArray
 _G.random = EMV.random
 _G.random_range = EMV.random_range
-_G.lua_get_system_array = EMV.lua_get_system_array
+--_G.lua_get_system_array = EMV.lua_get_system_array
 _G.jsonify_table = EMV.jsonify_table
 _G.get_folders = EMV.get_folders
 _G.log_value = EMV.log_value
@@ -61,11 +63,6 @@ _G.searchf = EMV.searchf
 _G.create_gameobj = EMV.create_gameobj
 SettingsCache.deferred_console = true
 
---[[
-
-folders; f, final = folders.RopewayContents; while f do final=f f=(f:call("get_Next") or f:call("get_Child")) end; final
-
-]]
 local toks
 local cached_command_text = {}
 local command_metadata = {}
@@ -161,7 +158,18 @@ local function show_history(do_minimal, new_first_history_idx)
 					end 
 				imgui.pop_id()
 				imgui.same_line()
-				changed, command = imgui.input_text(" ", command)
+				if do_multiline then
+					changed, command = imgui.input_text_multiline(" ", command)
+				else
+					changed, command = imgui.input_text(" ", command)
+				end
+				
+				if imgui.begin_popup_context_item("Ctx") then
+					if imgui.menu_item(do_multiline and "Single-line" or "Multi-line") then 
+						do_multiline = not do_multiline
+					end 
+					imgui.end_popup() 
+				end
 			end
 			if History.first_history_idx ~= #History.history_idx + 1 then
 				imgui.begin_rect()
@@ -238,7 +246,20 @@ local function show_history(do_minimal, new_first_history_idx)
 			end 
 		imgui.pop_id()
 		imgui.same_line()
-		changed, command = imgui.input_text(" ", command)
+		
+		if do_multiline then
+			changed, command = imgui.input_text_multiline(" ", command)
+		else
+			changed, command = imgui.input_text(" ", command)
+		end
+		
+		if imgui.begin_popup_context_item("ctx") then
+			if imgui.menu_item(do_multiline and "Single-line" or "Multi-line") then 
+				do_multiline = not do_multiline
+			end 
+			imgui.end_popup() 
+		end
+		
 		if not SettingsCache.use_child_windows then 
 			--imgui.text(History.command_output)
 			imgui.text(logv(History.command_output, nil, 1))
@@ -482,7 +503,7 @@ local function dump_history()
 end
 
 --Main console display function:
-local function show_console_window()
+function show_console_window()
 	
 	if (imgui.begin_window("Console", true, SettingsCache.transparent_bg and 128 or 0) == false) then 
 		SettingsCache.show_console = false 
