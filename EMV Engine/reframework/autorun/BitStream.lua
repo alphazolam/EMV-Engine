@@ -64,12 +64,16 @@ BitStream = {
 				o.file:seek("set", 0)
 				o.fileExists = true
 			end
+		end
+		
+		if o.file then 
 			self.fileSize(o)
 		end
-		--o.file = o.file or io.tmpfile()
-		--if not o.file then re.msg("test " .. tostring(io.tmpfile())) end
 		
-		o.name = (o.filepath and (o.filepath:match("^.+/(.+)") or o.filepath))
+		--o.file = o.file or io.tmpfile()
+		--if not o.file then re.msg("io.tmpfile failed to generate file: " .. tostring(io.tmpfile())) end
+		
+		o.name = (o.filepath and o.filepath:match("^.+/(.+)")) or o.filepath
 		o.pos = 0
 		self.__index = self
 		return o.file and setmetatable(o, self)
@@ -136,8 +140,9 @@ BitStream = {
 	end,
 	
 	-- Saves the BitStream to a given filepath
-	save = function(self, filepath)
+	save = function(self, filepath, mode)
 		filepath = filepath or self.filepath
+		mode = mode or 'w+b'
 		if not filepath then return false end
 		local file = io.open(filepath, 'w+b')
 		self.file:seek("set", 0)
@@ -233,6 +238,10 @@ BitStream = {
 		self.file:seek("set", self.pos)
 	end,
 	
+	close = function(self)
+		self.file:close()
+	end,
+	
 	-- Deletes 'numBytes' bytes at the given position 'pos' or current position
 	removeBytes = function(self, numBytes, pos)
 		local npos = pos or self.pos
@@ -292,13 +301,17 @@ BitStream = {
 		return self:extractBytes(numBytes, pos, true)
 	end,
 	
-	copyFile = function(self, oldLocation, newLocation)
-		oldLocation = oldLocation or self.filepath
+	copyFile = function(oldLocation, newLocation)
 		local bs = BitStream:new(oldLocation)
 		if bs and bs.fileExists then 
-			return bs:save(newLocation) 
+			bs.filepath = newLocation
+			return bs:save() 
 		end
 	end,
+	
+	--deleteFile = function(location) --not possible in REF
+	--	os.remove(location)
+	--end,
 	
 	--[[extractTable = function(self, numBytes, pos)
 		local fullTbl = self:getBuffer(true)
@@ -344,7 +357,7 @@ BitStream = {
 	detectedFloat = function(self, pos)
 		local npos = pos or self.pos
 		local float = self:readFloat(npos)
-		lastPos = {self, npos}
+		--lastPos = {self, npos}
 		return (self:readUByte(npos+3) < 255 and (float==0 or (math.abs(float) > 0.0000001 and math.abs(float) < 10000000)))
 	end,
 	
@@ -526,8 +539,13 @@ BitStream = {
 		local npos = pos or self.pos
 		local old_pos = self.pos
 		self:seek(npos)
-		for c in value:gsub("%-", ""):gmatch'..' do
-			self:writeUByte(tonumber("0x"..c))
+		if value == 0 then
+			self:writeUInt64(0)
+			self:writeUInt64(0)
+		else
+			for c in value:gsub("%-", ""):gmatch'..' do
+				self:writeUByte(tonumber("0x"..c))
+			end
 		end
 		if not pos then 
 			self.pos = old_pos+16

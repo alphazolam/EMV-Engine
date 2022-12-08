@@ -2,26 +2,37 @@
 --by alphaZomega
 
 local EMV = require("EMV Engine")
---if true then return end
+
 local game_name = reframework.get_game_name()
 local create_resource = EMV.create_resource
 local orderedPairs = EMV.orderedPairs
 local loaded_resources = false
-local bgs = {}
 
 --a dictionary of tables with 2-3 tables each, one for body and one for face and sometimes one to exclude
 local alt_names = { 
-	--["ch13_01"]= { Body=table.pack("ch13_00"), Face=table.pack("asdf"), exclude=table.pack("ch07_20") }
+	--[[["ch02_00"]= { body=table.pack("ch02_050"), face=table.pack("em1262") }, 		--Bela RE8
+	["ch02_01"]= { body=table.pack("ch02_050"), face=table.pack("em1261") }, 		--Cassandra
+	["ch02_02"]= { body=table.pack("ch02_050"), face=table.pack("em1260") }, 		--Daniela
+	["ch09_40"]= { body=table.pack("ch07_20"), face=table.pack("em133", "em132") },  --Miranda
+	["ch07_20"]= { body=table.pack("ch09_40"), face=table.pack("em132", "em133") },  --Miranda
+	["ch10_33"]= { body=table.pack("ch10_30") },
+	["ch03_06"]= { body=table.pack("ch13_10") },
+	["ch03_02"]= { body=table.pack("ch03_01") }, --Hauler 
+	["ch13_01"]= { body=table.pack("ch13_00"), exclude=table.pack("ch07_20") },									--Lycan
+	["ch09_32"]= { body=table.pack("ch09_30"), face=table.pack("em414", "em115") },	--Chris (Jacket)
+	["ch09_30"]= { body=table.pack("ch09_32"), face=table.pack("em115", "em414") },	--Chris B
+	["ch09_01"]= { face=table.pack("em440") }, --Rosemary (Adult)
+	["ch09_05"]= { exclude=table.pack("ch09_00") }, --Mia]]
 }
 
 re.on_application_entry("UpdateMotion", function()
 	if not loaded_resources and game_name == "re2" and EMVSettings and RSCache and (figure_mode or forced_mode) then 
-		--local dlc_folder = scene:call("findFolder", "RopewayContents_Rogue")
-		--if dlc_folder and dlc_folder:call("get_Active") == false then 
-		--	dlc_folder:call("activate")
-		--end
-		EMVSettings.init_EMVSettings()
-		global_motbanks = global_motbanks or {}
+		
+		local dlc_folder = scene:call("findFolder", "RopewayContents_Rogue")
+		if dlc_folder and dlc_folder:call("get_Active") == false then 
+			dlc_folder:call("activate")
+		end
+		
 		RSCache.motbank_resources = RSCache.motbank_resources or {}
 		RSCache.tex_resources = RSCache.tex_resources or {}
 		local all_motbanks = {}
@@ -58,8 +69,8 @@ re.on_application_entry("UpdateMotion", function()
 			table.insert(all_motbanks, "sectionroot/animation/player/common/pl_common_facial.motbank")
 			--]]
 			
-			--table.insert(all_motbanks, "sectionroot/animation/player/outer/pl20/ada_leading/bank/barehand.motbank")
-			--table.insert(all_motbanks, "sectionroot/animation/player/outer/pl30/sherry_scare/bank/barehand.motbank")
+			table.insert(all_motbanks, "sectionroot/animation/player/outer/pl20/ada_leading/bank/barehand.motbank")
+			table.insert(all_motbanks, "sectionroot/animation/player/outer/pl30/sherry_scare/bank/barehand.motbank")
 			
 			--[[
 			table.insert(all_motbanks, "sectionroot/animation/player/pl10/pl10face.motbank")
@@ -521,20 +532,16 @@ re.on_application_entry("UpdateMotion", function()
 		
 		for i, bank_string in ipairs(all_motbanks) do 
 			local bank
-			local bank_name = bank_string:lower() --bank_string:match("^.+/(.+)%.motbank") or bank_string
-			--if pcall(function()
-				bank = create_resource(bank_name, "via.motion.MotionBankResource", (EMVSettings.special_mode > 1) )
-			--end) and bank then
+			local bank_name = bank_string --bank_string:match("^.+/(.+)%.motbank") or bank_string
+			pcall(function()
+				bank = create_resource(bank_string, "via.motion.MotionBankResource")
+			end)
 			if bank then
-				global_motbanks[bank_name] = bank
 				RSCache.motbank_resources[bank_name] = bank
 			end
 		end
 		
-		for bank_name, bank in pairs(RSCache.motbank_resources) do 
-			global_motbanks[bank_name] = bank
-		end
-		
+		local bgs = {}
 		if true then			
 			table.insert(bgs, "sectionroot/light/ibl/ibl_morning00.tex")
 			table.insert(bgs, "sectionroot/light/ibl/ibl_20160419_0700_06.tex")
@@ -594,17 +601,13 @@ re.on_application_entry("UpdateMotion", function()
 				RSCache.tex_resources[bg_name] = tex_resource
 			end
 		end
-		--re.msg("Loaded resources from script")
+		
 		loaded_resources = true
 	end
 end)
 
 local function finished()
 	return loaded_resources
-end
-
-local function reset()
-	loaded_resources = false
 end
 
 return {

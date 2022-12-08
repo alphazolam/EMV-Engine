@@ -86,7 +86,7 @@ local pairs = pairs
 local uptime = os.clock()
 local tics, toks = 0, 0
 local changed, was_changed, try, out, value
-local game_name = reframework.get_game_name()
+
 
 scene_timer = 0
 while scene_timer < 100 and not pcall(function()
@@ -95,8 +95,11 @@ while scene_timer < 100 and not pcall(function()
 end) do scene_timer = scene_timer + 1 end
 
 _G.isSF6 = not not scene:call("findGameObject(System.String)", "ResidentCFNTableHolder")
+local game_name = isSF6 and "sf6" or reframework.get_game_name()
+
+
 local msg_ids = {}
-saved_mats = {files=fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]]), names_map={}, names_indexed={}} --Collection of auto-applied altered material settings for GameObjects (by name)
+local saved_mats = {files=fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]]), names_map={}, names_indexed={}} --Collection of auto-applied altered material settings for GameObjects (by name)
 local created_resources = {}
 local chain_bone_names = {}
 local CachedActions = {}
@@ -114,7 +117,7 @@ local tds = {
 	via_hid_mouse_typedef = sdk.find_type_definition("via.hid.Mouse"),
 	via_hid_keyboard_typedef = sdk.find_type_definition("via.hid.Keyboard"),
 	guid = sdk.find_type_definition(sdk.game_namespace("GuidExtention")),
-	mathex = sdk.find_type_definition(({mhrise="via.MathEx", re2="app.MathEx"})[game_name] or sdk.game_namespace("MathEx")),
+	mathex = sdk.find_type_definition(({mhrise="via.MathEx", sf6="via.MathEx", re2="app.MathEx"})[game_name] or sdk.game_namespace("MathEx")),
 }
 
 static_objs = {
@@ -149,6 +152,18 @@ local static_funcs = {
 	mk_gameobj_w_fld = sdk.find_type_definition("via.GameObject"):get_method("create(System.String, via.Folder)"),
 	string_hashing_method = sdk.find_type_definition("via.murmur_hash"):get_method("calc32"),
 }
+
+--Convert a float to a byte, meant for colors:
+static_funcs.convert_color_float_to_byte = function(flt)
+	local int = math.floor(flt * 255 + 0.5)
+	if int > 255 then int = 255 end
+	return int
+end
+
+--Calculate a color adjusted for gamma
+static_funcs.calc_color = function(emv_color) 
+	return math.floor(255*(static_funcs.convert_color_float_to_byte(emv_color)/255)^(5/11) + 0.5) 
+end
 
 local statics = {
 	width=1920,
@@ -189,6 +204,7 @@ local cog_names = {
 	["re8"] = "Hip", 
 	["dmc5"] = "Hip", 
 	["mhrise"] = "Cog", 
+	["sf6"] = "C_Hip", 
 }
 local mat_types = {
 	[1] = "MaterialFloat",
@@ -782,8 +798,18 @@ local function closest(position)
 end
 
 --Call a native function:
-local function calln(object_name, method_name, args)
-	return sdk.call_native_func(sdk.get_native_singleton(object_name), sdk.find_type_definition(object_name), method_name)
+local function calln(object_name, method_name, args, arg2, arg3)
+	if type(args)=="table" then
+		return sdk.call_native_func(sdk.get_native_singleton(object_name), sdk.find_type_definition(object_name), method_name, table.unpack(args))
+	elseif arg3 ~= nil then
+		return sdk.call_native_func(sdk.get_native_singleton(object_name), sdk.find_type_definition(object_name), method_name, args, arg2, arg3)
+	elseif arg2 ~= nil then
+		return sdk.call_native_func(sdk.get_native_singleton(object_name), sdk.find_type_definition(object_name), method_name, args, arg2)
+	elseif args ~= nil then
+		return sdk.call_native_func(sdk.get_native_singleton(object_name), sdk.find_type_definition(object_name), method_name, args)
+	else
+		return sdk.call_native_func(sdk.get_native_singleton(object_name), sdk.find_type_definition(object_name), method_name)
+	end
 end
 
 --Methods to check if managed objects are valid / usable --------------------------------------------------------------------------------------------------
@@ -827,11 +853,11 @@ get_GameObject = function(component, name_or_xform)
 				end
 				return component:call("get_GameObject()"):call("get_Name()")
 			end
-			return component:call("get_GameObject()")
+			try, out = pcall(component.call, component, "get_GameObject()")
+			return try and out
 		elseif tostring(component):find("sol%.RE") then
 			clear_object(component)
 		end
-		
 	end
 end
 
@@ -933,7 +959,7 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 	if not key or ((type(key)=="string") and ( (args.skip_underscores and (key:sub(1,2)=="__")) or (not override_same_type_check and (key:sub(1,3)=="___")) ) ) then 
 		return
 	end
-	local 
+	local output = true	 
 	check_add_func = args.check_add_func
 	local og_override = override_same_type_check
 	local owner_key = owner_tbl or key
@@ -1012,11 +1038,10 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 			__temptxt[owner_key] = __temptxt[owner_key] and m_tbl
 			imgui.tree_pop()
 		end
-		return true
+		return output
 	elseif type(value) ~= "function" then
 		display_name = display_name or key
-		
-		local output = true		
+			
 		local m_tbl = __temptxt[owner_key] or {}
 		m_tbl[key] = m_tbl[key] or {}
 		local m_subtbl = m_tbl[key]
@@ -1127,6 +1152,11 @@ local function editable_table_field(key, value, owner_tbl, display_name, args)
 		if args.color_text and type(args.color_text)~="table" then
 			args.color_text = {"", args.color_text}
 		end
+		
+		if args.width then
+			imgui.set_next_item_width(args.width)
+		end
+		
 		if args.color_text then 
 			changed, new_value = imgui.input_text_colored(args.color_text[1], args.color_text[2], args.color_text[3], m_subtbl and m_subtbl.value or tostring(converted_value))
 		else
@@ -1311,6 +1341,7 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 				imgui.same_line()
 				if imgui.button("X") then
 					tbl_obj.sorted_once = nil
+					G_ordered[key] = nil
 				end
 				imgui.same_line()
 				changed, tbl_obj.show_closest = imgui.checkbox("Show Closest", tbl_obj.show_closest) 
@@ -1525,14 +1556,16 @@ local function mat4_to_trs(mat4, as_tbl)
 end
 
 --Manually write a matrix4, or not manually if no offset is provided
-local function write_mat4(managed_object, mat4, offset, is_known_valid)
+local function write_mat4(managed_object, mat4, offset, is_known_valid, is_4x3)
 	is_known_valid = is_known_valid or tostring(managed_object):find("ValueType")
 	if mat4 and (is_known_valid or sdk.is_managed_object(managed_object)) then 
 		if offset then 
-			write_vec34(managed_object, offset, 	 mat4[0], is_known_valid)
-			write_vec34(managed_object, offset + 16, mat4[1], is_known_valid)
-			write_vec34(managed_object, offset + 32, mat4[2], is_known_valid)
-			write_vec34(managed_object, offset + 48, mat4[3], is_known_valid)
+			write_vec34(managed_object, offset, 	 mat4[0], true)
+			write_vec34(managed_object, offset + 16, mat4[1], true)
+			write_vec34(managed_object, offset + 32, mat4[2], true)
+			if not is_4x3 then
+				write_vec34(managed_object, offset + 48, mat4[3], true)
+			end
 		elseif tostring(managed_object):find("RETransform") then
 			local pos, rot, scale = mat4_to_trs(mat4)
 			managed_object:call("set_Position", pos)
@@ -1565,13 +1598,6 @@ local function get_trs(object)
 		return object.xform:call("get_Position"), object.xform:call("get_Rotation"), object.xform:call("get_LocalScale")
 	end
 	return object:call("get_Position"), object:call("get_Rotation"), object:call("get_LocalScale")
-end
-
---Convert a float to a byte, meant for colors:
-local function convert_color_float_to_byte(flt)
-	local integer = math.floor(flt * 255 + 0.5)
-	if integer > 255 then integer = 255 end
-	return integer
 end
 
 --Limit a variable's range
@@ -2185,14 +2211,11 @@ end
 
 --Create a Resource (file) ------------------------------------------------------------------------------------------------------------------------
 local function create_resource(resource_path, resource_type, force_create)
-	--if type(resource_path)=="table" then 
-	--	return create_resource(table.unpack(resource_path)) 
-	--end
-	static_funcs.init_resources()
 	
+	static_funcs.init_resources()
 	resource_path = resource_path:lower()
 	resource_path = resource_path:match("^.+%[@?(.+)%]") or resource_path
-	--log.info("creating resource " .. resource_path)
+	log.info("creating resource " .. resource_path)
 	
 	local ext = resource_path:match("^.+%.(.+)$")
 	if not ext or (not force_create and (ext=="motbank") and EMVSettings and (EMVSettings.special_mode > 1)) then 
@@ -2208,10 +2231,6 @@ local function create_resource(resource_path, resource_type, force_create)
 	--	return {resource_path, resource_type} --keep the info ready for when its time to load the resource
 	end
 	resource_type = (resource_type.get_full_name and resource_type:get_full_name() or resource_type):gsub("Holder", "") 
-	--local settingname = split(resource_type, "Holder."); settingname = settingname[#settingname]
-	--if settingname == "Setting" then resource_type = resource_type .. settingname end
-	--EMV.create_resource("product/charparam/esf/esf021/action/021.fchar", "app.battle.assets.FighterActionHolder")
-	--sdk.create_resource("app.battle.assets.FighterActionHolder", "product/charparam/esf/esf021/action/021.fchar")
 	
 	local new_resource = sdk.create_resource(resource_type, resource_path)
 	new_resource = new_resource and new_resource:add_ref()
@@ -2221,6 +2240,7 @@ local function create_resource(resource_path, resource_type, force_create)
 	if type(new_rs_address) == "number" then
 		local holder = sdk.create_instance(resource_type .. "Holder", true)
 		if holder and is_valid_obj(holder) then
+			holder = holder:add_ref()
 			holder:call(".ctor()")
 			holder:write_qword(0x10, new_rs_address)
 			RSCache[ext .. "_resources"][resource_path] = holder:add_ref()
@@ -2478,6 +2498,7 @@ jsonify_table = function(tbl_input, go_back_to_table, args)
 				elseif is_mgd_obj and (not max_level or is_xform or (not (is_component or is_gameobj) or (level <= (max_level or 0)))) then 
 					local fname = is_mgd_obj:get_full_name()
 					if fname:find("Holder$") then 
+						--test = {tbl_input, tbl, value}
 						local path = value:call("ToString()"):match("^.+%[@?(.+)%]")
 						new_tbl[key] = path and "res:" .. value:call("ToString()"):match("^.+%[@?(.+)%]") .. " " .. fname
 					elseif fname == "via.Prefab" then
@@ -3015,6 +3036,7 @@ local function add_resource_to_cache(resource_holder, paired_resource_holder, da
 	
 	resource_path = resource_path and resource_path:lower()
 	local ext = resource_path:match("^.+%.(.+)$")
+	if not ext then return 1, " ", " " end
 	local rs_name = ext .. "_resources"
 	local rn_name = ext .. "_resource_names"
 	RSCache[rs_name] = RSCache[rs_name] or {}
@@ -3458,7 +3480,7 @@ local function evaluate_array_typedef_name(typedef, td_name)
 		elseif td_name:find("Generic%.") and not td_name:find("Enumerator") then --all other dictionaries and arrays
 			str = td_name:match("<(.+)>")
 			str = str and str:match("<(.+)>") or str
-			str = str:match(",(.+)$") or str
+			str = str and str:match(",(.+)$") or str
 		end
 		--str = ((str == "via.GameObjectRef") and "via.GameObject") or str
 		output = (str and sdk.find_type_definition(str))
@@ -3770,7 +3792,7 @@ local function log_transform(pos, rot, scale, xform)
 		rot = rot or xform:call("get_Rotation")
 		scale = scale or xform:call("get_LocalScale")
 	end
-	if not pos and rot and scale then return "nil" end
+	if not pos or not rot or not scale then return "nil" end
 	return "[" .. tostring(pos.x) .. ", " .. tostring(pos.y) .. ", " .. tostring(pos.z) .. "]\n"
 		.. "[" .. tostring(rot.x) .. ", " .. tostring(rot.y) .. ", " .. tostring(rot.z) .. ", " .. tostring(rot.w) .. "]\n"
 		.. "[" .. tostring(scale.x) .. ", " .. tostring(scale.y) .. ", " .. tostring(scale.z) .. "]"
@@ -3900,9 +3922,9 @@ local function log_value(value, value_name, layer_limit, layer, verbose, return_
 					table.insert(msg, log_method(value, indent))
 				elseif typename == "sdk::REField" then
 					table.insert(msg, log_field(value, indent))
-				--elseif typename == "sdk::ValueType" then
-				--	table.insert(msg, str_val .. " (" .. value.type:get_full_name() .. ") @ " .. tostring(value:address()))
-				elseif typename == "api::sdk::ValueType" or sdk.is_managed_object(value) then
+				elseif typename == "glm::mat<4,4,float,0>" then
+					table.insert(msg, (verbose and "[matrix]" or "") .. mat4_to_string(value, indent .. "	"))
+				elseif typename == "api::sdk::ValueType" or typename == "sdk::SystemArray" or sdk.is_managed_object(value) then
 					local og_value = value
 					if val_type == "number" then  
 						value = sdk.to_managed_object(value) 
@@ -3910,26 +3932,24 @@ local function log_value(value, value_name, layer_limit, layer, verbose, return_
 					local typedef = value:get_type_definition()
 					if not typedef then return "" end
 					msg = {typedef:get_full_name()}
-					--if verbose then 
-						if msg[1] == "via.GameObject" and value:call("get_Valid") then
-							msg[1] = value:call("get_Name")
-						elseif typedef:is_a("via.Component") then
-							local gameobj = get_GameObject(value) --({pcall(value.call, value, "get_GameObject")})
-							--gameobj = gameobj[1] and gameobj[2]
-							if gameobj then
-								table.insert(msg, 1, " " .. gameobj:call("get_Name") .. " -> ")
-							end
+					if msg[1] == "via.GameObject" and value:call("get_Valid") then
+						msg[1] = value:call("get_Name")
+					elseif typedef:is_a("via.Component") then
+						local gameobj = get_GameObject(value)
+						if gameobj then
+							table.insert(msg, 1, " " .. gameobj:call("get_Name") .. " -> ")
 						end
-					--end
+					end
 					if val_type ~= "number" then 
 						table.insert(msg, " @ " .. tostring(value:get_address()))
 					else 
 						table.insert(msg, " @ " .. tostring(og_value))
 					end
 				else
+					imgui.text_colored((str_val:find("REManagedObject") and "Broken REManagedObject") or ("Missing type: " .. typename), 0xFF0000FF)
 					table.insert(msg, str_val)
 				end
-			elseif value[0] and string.find(str_val, "mat<4") then
+			elseif string.find(str_val, "mat<4") then --value[0] and 
 				table.insert(msg, (verbose and "[matrix]" or "") .. mat4_to_string(value, indent .. "	"))
 			elseif value.x and string.find(str_val, "sol%.glm::") then --and not value.call then --via.Transforms getting in here??
 				table.insert(msg, vector_to_string(value))
@@ -4291,7 +4311,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 			name = (((o_tbl.is_vt or o_tbl.is_obj) and not o_tbl.is_lua_type) and (m_obj:get_type_definition():get_method("ToString()") and m_obj:call("ToString()"))) or typedef:get_name()
 		end)
 	elseif typedef:is_a("via.Component") then 
-		name = typedef:get_full_name()
+		name = typedef:get_full_name() .. ((typedef:is_a("via.Transform") and (" (" .. get_GameObject(m_obj, true) .. ")")) or "")
 	elseif typedef:is_a("via.GameObject") then
 		try, name = pcall(sdk.call_object_func, m_obj, "get_Name")
 		name = try and name
@@ -5285,6 +5305,10 @@ local function show_imgui_vec4(value, name, is_int, increment, normalize)
 		if value.w  then 
 			if name:find("olor") then
 				changed, value = imgui.color_edit4(name, value, (not SettingsCache.use_color_bytes and 17301504) or nil)
+				if SettingsCache.use_color_bytes then
+					imgui.text_colored("Adjusted for Gamma: [" 
+					.. static_funcs.calc_color(value.x) .. ", " .. static_funcs.calc_color(value.y) .. ", " .. static_funcs.calc_color(value.z) .. ", " .. static_funcs.calc_color(value.w) .. "]", 0xFFE0853D)
+				end
 			else
 				changed, value = imgui.drag_float4(name, value, increment, -10000.0, 10000.0)
 				--if changed and normalize or (value.__is_vec4==true) then -- (name:find("Rot") or (value - value:normalized()):length() < 0.001)  then -- and tostring(value):find("qua")
@@ -5296,6 +5320,10 @@ local function show_imgui_vec4(value, name, is_int, increment, normalize)
 				changed, value = imgui.drag_float3(name, value, 1.0, -16777216, 16777216)
 			elseif name:find("olor") then
 				changed, value = imgui.color_edit3(name, value, (not SettingsCache.use_color_bytes and 17301504) or nil)
+				if SettingsCache.use_color_bytes then
+					imgui.text_colored("Adjusted for Gamma: [" 
+					.. static_funcs.calc_color(value.x) .. ", " .. static_funcs.calc_color(value.y) .. ", " .. static_funcs.calc_color(value.z) .. "]", 0xFFE0853D)
+				end
 			else
 				changed, value = imgui.drag_float3(name, value, increment, -10000.0, 10000.0)
 			end
@@ -5455,7 +5483,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		if imgui.button("+") then 
 			vd.show_var_data = not vd.show_var_data or nil
 		end
-		imgui.tooltip("Advanced Field Options")
+		imgui.tooltip((field and "Advanced Field Options") or "Advanced Property Options")
 	imgui.pop_id()
 	
 	imgui.same_line()
@@ -5870,8 +5898,8 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				
 				if not vd.is_lua_type then
 					
-					local is_vt = vd.is_vt or vd.ret_type:is_value_type()
-					local can_create = not (is_vt or vd.ret_type:is_primitive() or vd.ret_type:is_a("via.Component") or vd.ret_type:is_a("via.GameObject") or vd.ret_type:get_full_name():find("Collections"))
+					local is_vt = vd.is_vt or vd.ret_type:is_value_type() or vd.ret_type:get_full_name():find("Collections")
+					local can_create = not (vd.ret_type:is_primitive() or vd.ret_type:is_a("via.Component") or vd.ret_type:is_a("via.GameObject")) --is_vt or 
 					
 					if type(vd.new_value) == "string" then 
 						vd.new_value = nil 
@@ -5894,7 +5922,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 									vd.value._ = vd.value._ or create_REMgdObj(vd.value)
 									vd.new_arr_elems = merge_indexed_tables({}, vd.value._.elements) or {}
 								else
-									vd.new_arr_elems = {sdk.create_instance(vd.item_type:get_full_name(), true):add_ref()} 
+									vd.new_arr_elems = {(is_lua_type(vd.item_type) and 0) or sdk.create_instance(vd.item_type:get_full_name(), true):add_ref()} 
 								end
 							end
 						else
@@ -5912,10 +5940,10 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 						editable_table_field("new_arr_elems", vd.new_arr_elems, vd, "New Array Elements", {always_show=true, new_key=vd.new_key})
 					end
 					
-					if vd.new_method then
+					--[[if vd.new_method then
 						editable_table_field("new_method", vd.new_method, vd, "New Method")
 						editable_table_field("new_target", vd.new_target, vd, "New Target")
-					end
+					end]]
 					
 					if vd.new_value then
 						imgui.same_line()
@@ -5976,29 +6004,28 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 	
 	if item_type and arr_tbl.element_names and arr_tbl.mysize > 0 and (is_elements or imgui.tree_node_str_id(display_name, display_name)) then
 		
-		for i, element in ipairs(tbl) do 
-			
+		local function display_element(element, idx)
 			local element_name = (sdk.is_managed_object(element) and element:get_type_definition():get_full_name()) or item_type:get_full_name()--arr_tbl.element_names[i]
 			
 			--local var_metadata = prop or (field and o_tbl.field_data[name:match("%<(.+)%>") or name]
 			--[[if not element_name:find(element:get_type_definition():get_full_name()) then
 				element_name = element:get_type_definition():get_name() .. "	\"" .. element_name .. "\""
-				arr_tbl.element_names[i] = element_name
+				arr_tbl.element_names[idx] = element_name
 			end]]
 			
-			local disp_name = i .. ". " .. (element_name or tostring(element)) .. ((arr_tbl.set or o_tbl.is_arr) and "" or "*") 
+			local disp_name = idx .. ". " .. (element_name or tostring(element)) .. ((arr_tbl.set or o_tbl.is_arr) and "" or "*") 
 			
 			if (not prop.is_lua_type and not is_lua_type(item_type)) then --special thing for reading elements that are objects (read_field could also work though)
 				imgui.text("")
 				imgui.same_line()
-				--if imgui.tree_node_str_id(key_name .. element_name .. i, disp_name ) then
+				--if imgui.tree_node_str_id(key_name .. element_name .. idx, disp_name ) then
 				arr_tbl.element_Names = arr_tbl.element_Names or {}
-				arr_tbl.element_Names[i] = arr_tbl.element_Names[i] or get_mgd_obj_name(element)
-				if imgui.tree_node_colored(i, disp_name, arr_tbl.element_Names[i] or "") then
-					tbl_changed, element = imgui.managed_object_control_panel(element, key_name .. element_name .. i, element_name)
+				arr_tbl.element_Names[idx] = arr_tbl.element_Names[idx] or get_mgd_obj_name(element)
+				if imgui.tree_node_colored(idx, disp_name, arr_tbl.element_Names[idx] or "") then
+					tbl_changed, element = imgui.managed_object_control_panel(element, key_name .. element_name .. idx, element_name)
 					--[[if element._ then
 						element._.Name = element._.Name or disp_name
-						arr_tbl.element_names[i] = element._.Name
+						arr_tbl.element_names[idx] = element._.Name
 						--element._.is_open = true
 					end]]
 					imgui.tree_pop()
@@ -6006,21 +6033,41 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 				--	element._.is_open = nil
 				end
 			else
-				tbl_changed, element = read_field(parent_managed_object, nil, prop, disp_name, item_type, key_name, element, i)
+				tbl_changed, element = read_field(parent_managed_object, nil, prop, disp_name, item_type, key_name, element, idx)
 			end
 			
 			if tbl_changed then 
 				tbl_was_changed = true
 				
 				if o_tbl.is_arr then 
-					parent_managed_object[i-1] = element
-					if o_tbl.item_data and o_tbl.item_data[i] then 
-						o_tbl.item_data[i].value = element 
+					parent_managed_object[idx-1] = element
+					if o_tbl.item_data and o_tbl.item_data[idx] then 
+						o_tbl.item_data[idx].value = element 
 					end
 				elseif (prop and prop.set) then
 					deferred_calls[parent_managed_object] = deferred_calls[parent_managed_object] or {}
-					table.insert(deferred_calls[parent_managed_object], {func=prop.set:get_name(), args={ i-1, element }, vardata=prop })
+					table.insert(deferred_calls[parent_managed_object], {func=prop.set:get_name(), args={ idx-1, element }, vardata=prop })
 				end
+			end
+		end
+		
+		local max_sz = SettingsCache.max_element_size
+		
+		if (#tbl > max_sz) then
+			for lv = 1, #tbl, max_sz do 
+				local this_limit = (#tbl < lv+max_sz and #tbl) or lv+max_sz
+				if #tbl < max_sz or imgui.tree_node("Elements " .. lv .. " - " .. this_limit) then
+					for i = lv, (this_limit==lv+max_sz and this_limit-1) or this_limit  do 
+						display_element(tbl[i], i)
+					end
+					if #tbl >= max_sz then
+						imgui.tree_pop()
+					end
+				end
+			end
+		else
+			for i, element in ipairs(tbl) do 
+				display_element(element, i)
 			end
 		end
 		
@@ -6358,14 +6405,13 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 			if is_xform then
 				o_tbl.go = o_tbl.go or held_transforms[m_obj] or GameObject:new{xform=m_obj}
 				if o_tbl.go and o_tbl.go.xform then 
-					 o_tbl.go:imgui_xform()
+					o_tbl.go:imgui_xform()
 				end
 			elseif o_tbl.name == "Mesh" then
 				--imgui.text(tostring(o_tbl.go) .. " " .. tostring(o_tbl.go and o_tbl.go.materials) .. " " .. tostring(o_tbl) .. " " .. " " .. tostring(m_obj._))
 				if not o_tbl.go or not o_tbl.go.materials then 
 					local gameobj = m_obj:call("get_GameObject")
 					o_tbl.go = held_transforms[gameobj:call("get_Transform")] or GameObject:new{gameobj=gameobj}
-					
 				end
 				if o_tbl.go and o_tbl.go.materials and imgui.tree_node_ptr_id(o_tbl.go.mesh:get_address() - 1234, "Materials") then
 					show_imgui_mats(o_tbl.go) 
@@ -6417,7 +6463,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 			
 			if o_tbl.do_auto_expand or ((o_tbl.fields or o_tbl.props) and imgui.tree_node_str_id(key_name .. "F", is_xform and "via.Transform" or "Fields & Properties")) then
 				
-				local max_elem_sz = SettingsCache.max_element_size or EMVSettings.max_element_size
+				local max_elem_sz = SettingsCache.max_element_size
 				
 				if o_tbl.fields then
 					imgui.text("   FIELDS:")
@@ -6902,11 +6948,15 @@ local Material = {
 	end,
 	
 	update = function(self)
+		
 		if self.var_num then 
 			for v=1, self.var_num do
-				self.mesh:call("get" .. mat_types[self.variable_types[v]], self.id, v-1)
+				pcall(function()
+					self.mesh:call("get" .. mat_types[self.variable_types[v]], self.id, v-1)
+				end) --random ass nonsense bug in RE7
 			end
 		end
+		
 		--[[if self.tex_num > 0 and not self.textures[1] then 
 			self.tex_idxes = {}
 			for i=1, self.tex_num do
@@ -7052,7 +7102,7 @@ show_imgui_mats = function(anim_object)
 				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
 				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
 				if mdfFile:save(real_path) then 
-				--	re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
+					re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
 				end
 				anim_object.materials.mdfFile = mdfFile
 			end
@@ -8242,13 +8292,13 @@ BHVT = {
 
 --Get which body part a GameObject represents (body, face, hair or item):
 local function get_body_part(str)
-	local body_part_name = str
+	local body_part_name
 	local lower_name = str:lower()
-	if lower_name:find("face") or lower_name:find("head") or lower_name:find("face") or (isRE8 and lower_name:find("20_")) or (isDMC and lower_name:find("%d%d%d%d_[01]1")) or (isRE3 and lower_name:find("[ep][ml]%d%d%d1")) then
+	if lower_name:find("face") or lower_name:find("head") or (isRE8 and lower_name:find("20_")) or (isDMC and lower_name:find("%d%d%d%d_[01]1")) or (isRE3 and lower_name:find("[ep][ml]%d%d%d1")) or (isSF6 and lower_name:find("v00_01")) then
 		body_part_name = "Face"
-	elseif (lower_name:find("hair") and not lower_name:find("chair")) or lower_name:find("entacle") then --no chairs pls
+	elseif (lower_name:find("hair") and not lower_name:find("chair")) or lower_name:find("entacle") or (isSF6 and lower_name:find("v00_02")) then --no chairs pls
 		body_part_name = "Hair"
-	elseif not lower_name:find("wp_") and (isDMC or not lower_name:find("%d%d%d%d_%d%d")) and (lower_name:find("body") or lower_name:find("ch%d%d_") or lower_name:find("[ep][ml]%d%d")) then
+	elseif not lower_name:find("wp_") and (isDMC or not lower_name:find("%d%d%d%d_%d%d")) and (lower_name:find("body") or lower_name:find("ch%d%d_") or lower_name:find("[ep][ml]%d%d") or (isSF6 and lower_name:find("v00_00"))) then
 		body_part_name = "Body"
 	else
 		body_part_name = "Other"
@@ -8407,7 +8457,7 @@ GameObject = {
 		end
 		held_transforms[o.xform] = o
 		
-		if o.children and (o.components_named.DummySkeleton or o.components_named.CharacterController or (o.mesh and o.components_named.FigureObjectBehavior)) then
+		if o.children and ((o.components_named.DummySkeleton or o.components_named.CustomSkeleton) or o.components_named.CharacterController or (o.mesh and o.components_named.FigureObjectBehavior)) then
 			
 			local candidate
 			for i, child in ipairs(o.children) do  
@@ -8457,6 +8507,7 @@ GameObject = {
 	
 	gather_all_children = function(self, tbl_to_insert_to)
 		tbl_to_insert_to = tbl_to_insert_to or {}
+		insert_if_unique(tbl_to_insert_to, self)
 		for i, child in ipairs(self.children or {}) do
 			local child_obj = held_transforms[child] or GameObject:new_AnimObject{xform=child}
 			if child_obj and insert_if_unique(tbl_to_insert_to, child_obj) then 
@@ -9424,19 +9475,23 @@ end
 
 local function dump_settings(no_resources)
 	if SettingsCache.load_json then 
-		if not no_resources then
-			json.dump_file("EMV_Engine\\RSCache.json", jsonify_table(RSCache))
-		end
 		json.dump_file("EMV_Engine\\SettingsCache.json", jsonify_table(SettingsCache))
 		json.dump_file("EMV_Engine\\CachedActions.json", jsonify_table(CachedActions))
 		CachedGlobals = {}
-		for key, value in pairs(_G) do 
-			if type(key) == "string" and ({pcall(sdk.is_managed_object, value)})[2] == true then 
-				CachedGlobals[key] = value
+		if not isRE7 then
+			for key, value in pairs(_G) do 
+				if type(key) == "string" and ({pcall(sdk.is_managed_object, value)})[2] == true then 
+					CachedGlobals[key] = value
+				end
 			end
+			json.dump_file("EMV_Engine\\CachedGlobals.json",  jsonify_table(CachedGlobals, false))
 		end
-		json.dump_file("EMV_Engine\\CachedGlobals.json",  jsonify_table(CachedGlobals, false))
 		json.dump_file("EMV_Engine\\Collection.json",  jsonify_table(Collection, false, {convert_lua_objs=true}))
+		pcall(function()
+			if not no_resources then
+				json.dump_file("EMV_Engine\\RSCache.json", jsonify_table(RSCache))
+			end
+		end)
 	end
 end
 
@@ -9617,7 +9672,7 @@ re.on_frame(function()
 	
 	player = player or get_player(true)
 	
-	if isRE7 and reframework:is_drawing_ui() then 
+	if isRE7 and not re7csettings and reframework:is_drawing_ui() then 
 		if player and player.isRE7cutscene then
 			imgui.begin_window("RE7 Cutscene Skipper", nil, 0)
 				if imgui.button("Skip Cutscene") or is_skipping_cs then 
@@ -9948,7 +10003,6 @@ EMV = {
 	trs_to_mat4 = trs_to_mat4,
 	mat4_to_trs = mat4_to_trs,
 	get_trs = get_trs,
-	convert_color_float_to_byte = convert_color_float_to_byte,
 	create_resource = create_resource,
 	get_folders = get_folders,
 	get_table_size = get_table_size,

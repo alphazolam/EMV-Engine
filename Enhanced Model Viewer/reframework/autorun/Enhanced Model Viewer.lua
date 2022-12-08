@@ -4,9 +4,9 @@
 
 log.info("Initializing Enhanced Model Viewer")
 log.debug("Initializing Enhanced Model Viewer")
-local game_name = reframework.get_game_name()
+local game_name = isSF6 and "sf6" or reframework.get_game_name()
 local EMV = require("EMV Engine")
-local res = require("Enhanced Model Viewer\\enhanced_model_viewer_" .. game_name .. "_resources")
+res = require("Enhanced Model Viewer\\enhanced_model_viewer_" .. game_name .. "_resources")
 
 --Global Persistent Settings
 EMVSettings = EMVSettings or {}
@@ -74,10 +74,10 @@ static_objs.via_app = sdk.get_native_singleton("via.Application")
 local static_funcs = EMV.static_funcs
 static_funcs.get_enum_names_func = sdk.find_type_definition("System.Enum"):get_method("GetNames")
 static_funcs.get_enum_values_func = sdk.find_type_definition("System.Enum"):get_method("GetValues")
-static_funcs.setup_mbank_method = sdk.find_type_definition("via.motion.Motion"):get_method("setupMotionBank")
+static_funcs.setup_mbank_method = sdk.find_type_definition("via.motion.Motion"):get_method("setupMotionBank()")
 
 local scene = static_objs.scene_manager and sdk.call_native_func(static_objs.scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene") 
-base_mesh = nil
+local base_mesh = nil
 local current_figure = nil
 local current_figure_name
 local current_frame = 0
@@ -90,10 +90,8 @@ local current_em_name
 local figure_start_time = nil
 local held_transforms_count = 0
 local ev_object = nil
-figure_settings = nil
+local figure_settings = nil
 local figure_behavior
-local current_fig_name = nil
-local fig_mgr_name
 local cutscene_cam
 local re2_figure_container_obj = nil
 local total_objects_names = {}
@@ -106,6 +104,9 @@ local motlist_mot_names = {}
 local lights = {}
 local non_lights = {}
 local lightsets = {}
+
+local current_fig_name = (isRE8 and "gl%d.+_Figure") or (isRE2 and "^Figure_%a%a%d") or (isRE3 and "^Figure_%d%d") or (isDMC and "ui5005GUI")
+local fig_mgr_name = (isRE8 and "GUIFigureList") or (isDMC and "GUIMesh") or "GuiBlackBox_Figure"
 
 -----------------------------------------------------------------------------------------------------------------EMV_Engine
 --EMV Classes
@@ -557,6 +558,10 @@ GameObject.new_AnimObject = function(self, args, o)
 	--self =  GameObject:new(args, o)
 	self = GameObject:new(args, o)--, o or (args.xform and touched_gameobjects[args.xform])) --args.xform and touched_gameobjects[args.xform] or 
 	if not self or not self.update or not self.xform then
+		log.info("Failed to create " .. tostring(self) .. " "  .. logv(args and args.xform))
+		if args and tostring(args.xform):find("^sol") then
+			GameObject.clear_AnimObject(nil, args.xform)
+		end
 		return nil
 	end
 	log.info("CREATING NEW ANIM OBJECT " .. self.name)
@@ -701,6 +706,7 @@ GameObject.new_AnimObject = function(self, args, o)
 	if (figure_mode or forced_mode) and self.layer and ((self.body_part == "Body") or (self.body_part == "Face") or self.is_wep) then 
 	-- and (self.body_part ~= "Hair") then --or cutscene_mode [cutscene_mode animations are controlled by ActorMotion, which is not handled by this script)
 		if not next(RSCache.motbank_resources or {})  then 
+			log.info("NO MOTBANK RESOURCES")
 			return --too early, abort
 		end
 		self.mbank_idx = args.mbank_idx or 1
@@ -1126,6 +1132,9 @@ GameObject.activate_forced_mode = function(self)
 		local object = held_transforms[child] or GameObject:new_AnimObject{xform=child}
 		table.insert(total_objects, object)
 	end
+	total_objects = self:gather_all_children(total_objects)
+	self:build_banks_list()
+	self = GameObject.new_AnimObject(nil, {xform=self.xform})
 	
 	--[[if not self.motbank_names then
 		self:update_components()
@@ -1529,6 +1538,7 @@ end
 GameObject.get_current_bank_name = function(self, no_check)
 	
 	if self.layer then
+		
 		local bank = self.motion:call("get_MotionBankAsset")
 		if not bank then 
 			--rando_bank = ({next(self.motbanks or {})})[2] or ({next(RSCache.motbank_resources or {})})[2] --NOT WORKING, FINDING DEAD BROKEN BANK OBJECTS SOMEHOW
@@ -1548,9 +1558,15 @@ GameObject.get_current_bank_name = function(self, no_check)
 				bank = self.motion:call("get_MotionBankAsset")
 			end
 		end
-		bank = bank and bank:add_ref()
-		self.current_bank_name = bank and bank:call("ToString()"):match("^.+%[@?(.+)%]")
-		self.current_bank_name = self.current_bank_name and self.current_bank_name:lower()
+		
+		if not pcall(function()
+			bank = bank and bank.add_ref and bank:add_ref()
+			self.current_bank_name = bank and bank:call("ToString()"):match("^.+%[@?(.+)%]")
+			self.current_bank_name = self.current_bank_name and self.current_bank_name:lower()
+		end) then 
+			--fail = {self, self.motion, bank} 
+		end
+		
 		if bank and not no_check then
 			RSCache.motbank_resources[self.current_bank_name] = RSCache.motbank_resources[self.current_bank_name] or bank
 			--self.motbanks = self.motbanks or {}
@@ -1572,6 +1588,9 @@ end
 
 GameObject.next_motion = function(self, mlist_idx, mot_idx)
 	--log.info("next motion " .. " " .. self.name .. " " .. tics)
+	
+	if not self.play_speed then return end
+	
 	self.anim_finished, self.anim_maybe_finished = nil
 	if not self.mbank_idx then
 		self:get_current_bank_name()
@@ -1584,6 +1603,7 @@ GameObject.next_motion = function(self, mlist_idx, mot_idx)
 	local do_set_motionbank
 	
 	local do_prev, do_next = self.do_prev, self.do_next
+	
 	if (self.play_speed < 0.0) then
 		do_prev, do_next = do_next, do_prev
 	end
@@ -1639,9 +1659,14 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 	if (figure_mode or forced_mode) and self.layer then 
 		
 		mbank_idx = mbank_idx or self.mbank_idx
-		local motbank_name = (is_pre_cache and RN.motbank_resource_names[mbank_idx]) or self.motbank_names[mbank_idx]
-		local mb_asset = RSCache.motbank_resources[motbank_name]
+		local motbank_name = (is_pre_cache and RN.motbank_resource_names[mbank_idx]) or self.motbank_names and self.motbank_names[mbank_idx]
+		local mb_asset = motbank_name and RSCache.motbank_resources[motbank_name]
 		if mb_asset then
+			if not pcall(function()
+				mb_asset = mb_asset:add_ref()
+			end) then 
+				--fail2 = {self, self.motion, motbank_name, mb_asset}; return nil 
+			end
 			--log.info("Setting motionbank " .. mbank_idx .. " " .. (motbank_name and (motbank_name .. " " .. tostring(mb_asset)) or "[No Name Found]") .. " for " .. self.name)
 			self.old_dynamic_banks = self.old_dynamic_banks or {}
 			local dyn_bank_count = self.motion:call("getDynamicMotionBankCount")
@@ -1675,7 +1700,12 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 			end]]
 			
 			self.layer:call("clearMotionResource")
-			self.motion:call("set_MotionBankAsset", mb_asset) 
+			if not pcall(function()
+				self.motion:call("set_MotionBankAsset", mb_asset) 
+			end) then 
+				fail = {self, self.motion, mb_asset}
+				return nil
+			end
 			
 			if forced_mode and player and (self.xform == player.xform) and self.mfsm2 then 
 				self.mfsm2:call("set_PuppetMode", true)
@@ -1686,8 +1716,8 @@ GameObject.set_motionbank = function(self, mbank_idx, mlist_idx, mot_idx, is_sea
 			
 			self.mbank_idx = find_index(self.motbank_names, motbank_name) or mbank_idx
 			if static_funcs.setup_mbank_method then 
-				self.motion:call("setupMotionBank")
-				self:change_motion(self.mlist_idx, self.mot_idx)--, true) --thanks to setupMotionBank(), it can change immediately
+				static_funcs.setup_mbank_method:call(self.motion)
+				self:change_motion(self.mlist_idx, self.mot_idx)--, true) --thanks to setupMotionBank, it can change immediately
 				self:update_banks()
 			end
 			self.changed_bank = not is_pre_cache and true
@@ -2020,15 +2050,15 @@ end)
 
 --import settings from file
 local default_settings = deep_copy(EMVSettings) --merge_tables({}, EMVSettings) --deep copies
-local default_cache = merge_tables({}, EMVCache) 
+local default_cache = merge_tables({}, EMVCache)
+ 
 EMVSettings.init_EMVSettings = function()
-	--re.msg(tostring(EMVSettings.init_EMVSettings))
 	local new_settings = json.load_file("EnhancedModelViewer\\EMVSettings.json")
 	if new_settings and new_settings.load_json then 
-		local this = EMVSettings.init_EMVSettings
-		EMVSettings = jsonify_table(new_settings, true) or default_settings
+		local new_EMVSettings = jsonify_table(new_settings, true) or default_settings
+		new_EMVSettings.init_EMVSettings = EMVSettings.init_EMVSettings
 		for key, value in pairs(default_settings) do 
-			if EMVSettings[key] == nil then EMVSettings[key] = value end
+			if new_EMVSettings[key] == nil then new_EMVSettings[key] = value end
 		end
 		local new_cache = json.load_file("EnhancedModelViewer\\EMVCache.json")
 		if new_cache then
@@ -2037,9 +2067,8 @@ EMVSettings.init_EMVSettings = function()
 				if EMVCache[key] == nil then EMVCache[key] = value end
 			end
 		end
-		EMVSettings.init_EMVSettings = this
+		EMVSettings = new_EMVSettings
 	end
-	--re.msg(tostring(EMVSettings.init_EMVSettings))
 end
 
 re.on_script_reset(function()
@@ -2462,6 +2491,7 @@ local function show_imgui_animation(anim_object, idx, embedded_mode)
 				end
 				
 				changed, anim_object.mot_idx = imgui.combo("Mot", anim_object.mot_idx, anim_object.motion_names_w_frames[anim_object.mlist_idx] or {} ); was_changed = was_changed or changed
+				
 				if changed then 
 					anim_object:change_motion(nil, anim_object.mot_idx)
 				end
@@ -2814,9 +2844,11 @@ local function show_emv_settings()
 			--changed, SettingsCache.remember_materials = imgui.checkbox("Remember Material Settings", SettingsCache.remember_materials); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.sync_face_mots = imgui.checkbox("Sync Animations", EMVSettings.sync_face_mots); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.transparent_bg = imgui.checkbox("Transparent Background", EMVSettings.transparent_bg); EMVSetting_was_changed = EMVSetting_was_changed or changed
-			changed, EMVSettings.cutscene_viewer = imgui.checkbox("Cutscene Viewer", EMVSettings.cutscene_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
+			if isRE2 or isRE3 or isDMC then
+				changed, EMVSettings.cutscene_viewer = imgui.checkbox("Cutscene Viewer", EMVSettings.cutscene_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
+				changed, EMVSettings.detach_cs_viewer = imgui.checkbox("Detach Cutscene Seek Bar", EMVSettings.detach_cs_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
+			end
 			changed, EMVSettings.detach_ani_viewer = imgui.checkbox("Detach Animation Seek Bar", EMVSettings.detach_ani_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
-			changed, EMVSettings.detach_cs_viewer = imgui.checkbox("Detach Cutscene Seek Bar", EMVSettings.detach_cs_viewer); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.customize_cached_banks = imgui.checkbox("Remove mismatched motlists", EMVSettings.customize_cached_banks); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			--changed, EMVSettings.allow_performance_mode = imgui.checkbox("Allow Performance Mode", EMVSettings.allow_performance_mode); EMVSetting_was_changed = EMVSetting_was_changed or changed
 			changed, EMVSettings.use_savedata = imgui.checkbox("Cache Figure Data", EMVSettings.use_savedata); EMVSetting_was_changed = EMVSetting_was_changed or changed
@@ -3031,7 +3063,7 @@ re.on_frame(function()
 	-- Begin EMV stuff ------------------------------------------------------------------------------------
 	--Load + cache motions and build list of motion data:
 	if pre_cached_banks then -- and RN.motbank_resource_names and RN.motbank_resource_names[3]  then
-		log.info("Precache")
+		
 		local dummy_obj = get_anim_object(scene:call("findGameObject(System.String)", "dummy_AnimLoaderBody"), {body_part="Body"}) or create_gameobj( "dummy_AnimLoaderBody", {"via.motion.Motion"})
 		if dummy_obj and not dummy_obj.motion then 
 			local motion = lua_find_component(dummy_obj.gameobj, "via.motion.Motion")
@@ -3047,7 +3079,6 @@ re.on_frame(function()
 		end
 		local obj_to_check = dummy_obj
 		if obj_to_check then 
-			log.info("obj to check")
 			obj_to_check:pre_cache_all_banks() 
 		end
 	end
@@ -3099,23 +3130,6 @@ re.on_frame(function()
 		
 		log.info("init create total objects")
 		
-		if not cutscene_mode then
-			fig_mgr_name, current_fig_name = nil, nil
-			if isRE8 then 
-				fig_mgr_name = "GUIFigureList" --RE8
-				current_fig_name = "gl%d.+_Figure"--"gl[%d%d%d%d]_Figure" --RE8
-			elseif isRE2 then 
-				fig_mgr_name = "IlluminationList" --"LocalCubemap"
-				current_fig_name = "^Figure_%a%a%d"
-			elseif isDMC then 
-				fig_mgr_name = "GUIMesh"
-				current_fig_name = "ui5005GUI"
-			elseif isRE3 then 
-				fig_mgr_name = "GuiBlackBox_Figure"
-				current_fig_name = "^Figure_%d%d"
-			end
-		end
-		
 		if fig_mgr_name and not cutscene_mode and scene:call("findGameObject(System.String)", fig_mgr_name) then
 			
 			total_objects, imgui_anims, imgui_others = {}, {}, {}
@@ -3127,19 +3141,6 @@ re.on_frame(function()
 				selected = nil
 			end
 			--log.info("starting")
-			--[[if isRE8 then 
-				local figdata = figure_mode.components_named.FigureDataHolder
-				figdata._ = figdata._ or create_REMgdObj(figdata)
-				figlist = {}
-				local list = merge_indexed_tables(lua_get_system_array(figdata.meshes), lua_get_system_array(figdata.physicsChains))
-				list = merge_indexed_tables(list, lua_get_system_array(figdata.physicsCloths))
-				list = merge_indexed_tables(list, lua_get_system_array(figdata.chains))
-				for i, elem in ipairs(merge_indexed_tables(list, lua_get_system_array(figdata.gpuCloths))) do 
-					local xform = get_GameObject(elem, 1)
-					figlist[xform] = xform and (held_transforms[xform] or GameObject:new_AnimObject{xform=xform})
-				end
-			end]]
-			--log.info("A")
 			all_transforms = lua_get_system_array(scene:call("findComponents(System.Type)", sdk.typeof("via.Transform")) or {}, false, true)
 			if all_transforms then --gather gameobjects for model viewer
 				--log.info("B")
@@ -3254,10 +3255,13 @@ re.on_frame(function()
 			unique_names[name] = true
 			
 			if not anim_object.is_AnimObject then 
-				anim_object = New_AnimObject({xform=anim_object.xform}, anim_object)
+				--log.info(anim_object.name .. " is NOT AN ANIM OBJECT")
+				anim_object = New_AnimObject({xform=anim_object.xform}, anim_object) or anim_object
+				--if not anim_object.is_AnimObject then log.info(anim_object.name .. " is STILL NOT AN ANIM OBJECT") end
+				--tester = anim_object
 			end
 			
-			if anim_object.layer and (anim_object.body_part ~= "Hair") then --or anim_object == re2_figure_container_obj then 
+			if anim_object and anim_object.layer and (anim_object.body_part ~= "Hair") then --or anim_object == re2_figure_container_obj then 
 			--if (anim_object.layer and (anim_object.body_part ~= "Hair")) or (figure_mode and (num_anims == 0) and anim_object.mesh and (tics - figure_start_time > 100)) then --or anim_object == re2_figure_container_obj then 
 				temp_anims[name] = anim_object
 			else
@@ -3852,7 +3856,7 @@ re.on_frame(function()
 						local others = {}
 						for i, non_light in ipairs(non_lights) do others[non_light.name_w_parent] = non_light end
 						for i, non_light in orderedPairs(non_lights) do 
-							non_light.name_w_parent = non_light.name_w_parent or non_light.name
+							non_light.name_w_parent = non_light.name_w_parent or non_light.name or ""
 							local indent = {""}
 							for part in non_light.name_w_parent:gmatch("[^ %-> ]+") do
 								table.insert(indent, "	")

@@ -44,6 +44,7 @@ end
 local filter_info = nil
 
 --global variables
+scene = (scene_manager and sdk.call_native_func(scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene"))
 touched_gameobjects = {}
 go = nil
 
@@ -51,7 +52,6 @@ go = nil
 last_grabbed_object = nil
 last_impact_pos = Vector4f.new(0, 0, 0, 0)
 
-local scene = (scene_manager and sdk.call_native_func(scene_manager, sdk.find_type_definition("via.SceneManager"), "get_CurrentScene"))
 local grav_objs = {}
 local d_grav_objs = {}
 local active_objects = EMV.active_objects
@@ -78,18 +78,16 @@ local camera_forward = nil
 local last_camera_matrix = Matrix4x4f.new()
 local neg_last_camera_matrix = Matrix4x4f.new()
 
-GGSettings = {
-	load_json = false,
-	block_input = false,
-	action_monitor = false,
-	force_functions = (isMHR and true) or false,
-	show_transform = true,
-	prefer_rigid_bodies = (isRE2 or isRE3) and true,
-	wanted_layer = -1,
-	wanted_mask_bits = 2, --1?
-	forced_funcs_data = {},
-	load_type = {"via.render.Mesh", "via.render.Mesh"},
-}
+GGSettings = {}
+GGSettings.load_json = false
+GGSettings.block_input = false
+GGSettings.action_monitor = false
+GGSettings.force_functions = (isMHR and true) or false
+GGSettings.show_transform = true
+GGSettings.prefer_rigid_bodies = (isRE2 or isRE3) and true
+GGSettings.wanted_layer = -1
+GGSettings.wanted_mask_bits = (isMHR and 10) or 2 --1?
+GGSettings.forced_funcs_data = {}
 
 local wants_rigid_bodies = false
 local loaded_EMV = false
@@ -119,7 +117,7 @@ local d_current_contact_points = 0
 local sort_closest_optional_limit
 local sort_closest_optional_max_distance
 
-saved_xforms = {}
+local saved_xforms = {}
 local saved_lights = {}
 local spawned_lights = {}
 local collected_objects = {}
@@ -129,14 +127,14 @@ local width = EMV.statics.width
 local height = EMV.statics.height
 
 
+--table.insert(GGSettings.ray_layers_tables.re3, )
 --Collision layers from which the gravity gun samples for each game:
 GGSettings.ray_layers_tables = {
 	["re2"] = 		{0, 1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 19, 20, 22, 21, 23, 24 , 27, 28, 29, 30, 31, 32},
 	["re3"] =		{0, 1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 19, 20, 22, 21, 23, 24 , 27, 28, 29, 30, 31, 32},
 	["re7"] =		{0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
-	--["re7"] =		{2, 3, 4, 8, 10, 11, 12, 13, 14, 15, 17, 19, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["mhrise"] =	{0, 1, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 17, 20, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
-	["re8"] =		{1, 4, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
+	["re8"] =		{1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
 	["dmc5"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32}
 }
 
@@ -203,20 +201,20 @@ local logv = EMV.logv
 local hashing_method = EMV.hashing_method
 local imgui_anim_object_viewer = EMV.imgui_anim_object_viewer
 local imgui_saved_materials_menu = EMV.imgui_saved_materials_menu
+local mini_console = EMV.mini_console
 local get_first_gameobj = EMV.get_first_gameobj
 local editable_table_field = EMV.editable_table_field
 local get_folders = EMV.get_folders
 local search = EMV.search
 local find = EMV.find
 local clear_object = EMV.clear_object
-local get_GameObject = EMV.get_GameObject
 
 
 ----------------------------------------------------------------------------------------------------------[[UTILITY FUNCTIONS]]
 
-local gg_default_settings = EMV.deep_copy(GGSettings)
+local gg_default_settings = merge_tables({}, GGSettings)
 local function load_settings()
-	local new_settings = jsonify_table(json.load_file("GravityGunAndConsole\\GGunConsoleSettings.json") or {}, true)
+	local new_settings = jsonify_table(json.load_file("GravityGunAndConsole\\GGunConsoleSettings.json"), true)
 	if new_settings and new_settings.load_json then 
 		GGSettings = new_settings
 		for key, value in pairs(gg_default_settings) do
@@ -437,16 +435,16 @@ local ForcedValue = {
 GameObject.new_GrabObject = function(self, args, o)
 	
 	o = o or {}
-	self = GameObject:new(args, o)
-	--self = (args.xform and held_transforms[args.xform]) or GameObject:new(args, o)
+	self = (args.xform and held_transforms[args.xform]) or GameObject:new(args, o)
 	--self = (args.xform and held_transforms[args.xform] and merge_tables(held_transforms[args.xform], o, true)) or GameObject:new(args, o)
 	if not self or not self.update then 
+		log.info("Failed to create GameObject") 
 		return nil
 	end
-	--touched_gameobjects[self.xform] = (touched_gameobjects[self.xform] and (touched_gameobjects[self.xform] ~= self) and merge_tables(self, touched_gameobjects[self.xform], true)) or self
-	--self = touched_gameobjects[self.xform]
+	touched_gameobjects[self.xform] = (touched_gameobjects[self.xform] and (touched_gameobjects[self.xform] ~= self) and merge_tables(self, touched_gameobjects[self.xform], true)) or self
+	self = touched_gameobjects[self.xform]
 	
-	log.info("Creating GrabObject " .. self.name)
+	log.info("Creating " .. self.name)
 	self.collidable 			= args.collidable		
 	self.rigid_body 			= args.rigid_body		or has_dynamics and self.gameobj:call("getComponent(System.Type)", sdk.typeof("via.dynamics.RigidBodySet"))
 	self.contact_pt 			= args.contact_pt 	
@@ -504,7 +502,7 @@ GameObject.new_GrabObject = function(self, args, o)
 					local collider = comp:call("getColliders", c)
 					if collider then 
 						self.colliders = self.colliders or {}
-						--table.insert(self.components, collider)
+						table.insert(self.components, collider)
 						table.insert(self.colliders, collider)
 						local shape = collider:call("get_Shape")
 						local t_shape = collider:call("get_TransformedShape")
@@ -517,8 +515,8 @@ GameObject.new_GrabObject = function(self, args, o)
 			end
 		end
 	end
-	--log.info(((last_camera_matrix[3] - self.impact_pos):length()))
-	if (isRE7 or isRE7rt) and ((last_camera_matrix[3] - self.impact_pos):length() < 0.1) or (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
+	
+	if isRE7 and (self.impact_pos ~= new_vector4 and (self.impact_pos - self.pos):length() > 10) then --not string.find(self.name, "pl%d%d") and not string.find(self.name, "em%d%d") and --shit
 		self.invalid = true
 	end
 	if isDMC and self.ray_layer == 18 then 
@@ -529,24 +527,10 @@ GameObject.new_GrabObject = function(self, args, o)
 		self.invalid = true
 	end
 	
-	--Update named vars:
-	if go and (go~=self) and (go.xform==self.xform) then
-		self = merge_tables(self, go, true)
-		go = self
-	end
-	if grav_objs[1] and (grav_objs[1]~=self) and (grav_objs[1].xform==self.xform) then
-		self = merge_tables(self, grav_objs[1], true)
-		grav_objs[1] = self
-	end
-	if last_grabbed_object and (last_grabbed_object~=self) and (last_grabbed_object.xform==self.xform) then
-		self = merge_tables(self, last_grabbed_object, true)
-		last_grabbed_object = self
-	end
-	held_transforms[self.xform] = self
-	touched_gameobjects[self.xform] = self
+	if go and (self.xform == go.xform) then go = self end --update other vars
+	if grav_objs[1] and (self.xform == grav_objs[1].xform) then grav_objs[1] = self end
+	if last_grabbed_object and (self.xform == last_grabbed_object.xform) then last_grabbed_object = self end
 	
-	self.is_GrabObject = true
-	last = self
 	return self
 end
 
@@ -565,42 +549,42 @@ GameObject.update_GrabObject = function(self, is_known_valid)
 	
 	if is_known_valid or self:update() then
 		self.active = (not not active_objects[self.xform]) or nil	
-		--[[
-			if self.packed_xform and self.packed_xform[1] then -- and self.packed_xform[1] ~= self.pos then 
-				if cutscene_mode and self.cog_joint  then 
-					--local pos = self.cog_joint:call("get_Position")
-					--local rot = self.cog_joint:call("get_Rotation")
-					--local scale = self.cog_joint:call("get_LocalScale")
-					local pos = self.cog_joint:call("get_LocalPosition")
-					local rot = self.cog_joint:call("get_LocalRotation")
-					if self.active then
-						self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
-						self.cog_joint:call("set_Rotation", self.packed_xform[2])
-						--self.cog_joint:call("set_LocalScale", self.packed_xform[3])
-						self.last_cog_offset = {
-							self.cog_joint:call("get_LocalPosition") - pos,
-							self.cog_joint:call("get_LocalRotation") * rot,
-						}
-					else
-						--local transformed_pos = mathex:call("transform(via.vec3, via.Quaternion)", pos, Quaternion.new(0,0,-1,0)) --test
-						if not cutscene_mode.paused then
-							self.cog_joint:call("set_LocalPosition", self.last_cog_offset[1] + pos)
-							self.cog_joint:call("set_LocalRotation", self.last_cog_offset[2] * rot:inverse())
-						--	self.cog_joint:call("set_Position", pos + self.last_cog_offset[1])
-						--	self.cog_joint:call("set_Rotation", rot:inverse() * self.last_cog_offset[2]) -- 
-						else
-							self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
-							self.cog_joint:call("set_Rotation", self.packed_xform[2])
-						--	write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
-						end
-						--self.cog_joint:call("set_LocalScale", scale + self.last_cog_offset[3])
-					end
+--[[
+	if self.packed_xform and self.packed_xform[1] then -- and self.packed_xform[1] ~= self.pos then 
+		if cutscene_mode and self.cog_joint  then 
+			--local pos = self.cog_joint:call("get_Position")
+			--local rot = self.cog_joint:call("get_Rotation")
+			--local scale = self.cog_joint:call("get_LocalScale")
+			local pos = self.cog_joint:call("get_LocalPosition")
+			local rot = self.cog_joint:call("get_LocalRotation")
+			if self.active then
+				self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
+				self.cog_joint:call("set_Rotation", self.packed_xform[2])
+				--self.cog_joint:call("set_LocalScale", self.packed_xform[3])
+				self.last_cog_offset = {
+					self.cog_joint:call("get_LocalPosition") - pos,
+					self.cog_joint:call("get_LocalRotation") * rot,
+				}
+			else
+				--local transformed_pos = mathex:call("transform(via.vec3, via.Quaternion)", pos, Quaternion.new(0,0,-1,0)) --test
+				if not cutscene_mode.paused then
+					self.cog_joint:call("set_LocalPosition", self.last_cog_offset[1] + pos)
+					self.cog_joint:call("set_LocalRotation", self.last_cog_offset[2] * rot:inverse())
+				--	self.cog_joint:call("set_Position", pos + self.last_cog_offset[1])
+				--	self.cog_joint:call("set_Rotation", rot:inverse() * self.last_cog_offset[2]) -- 
 				else
-					write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
-					self.packed_xform = nil
+					self.cog_joint:call("set_Position", self.packed_xform[1] + self.center)
+					self.cog_joint:call("set_Rotation", self.packed_xform[2])
+				--	write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
 				end
+				--self.cog_joint:call("set_LocalScale", scale + self.last_cog_offset[3])
 			end
-		]]
+		else
+			write_transform(self, self.packed_xform[1], self.packed_xform[2], self.packed_xform[3])
+			self.packed_xform = nil
+		end
+	end
+]]
 		if self.packed_xform and self.packed_xform[1] then -- and self.packed_xform[1] ~= self.pos then 
 			if cutscene_mode and self.cog_joint  then 
 				local pos = self.cog_joint:call("get_Position")
@@ -635,11 +619,6 @@ GameObject.update_GrabObject = function(self, is_known_valid)
 		if self.is_forced and self.do_reset <= 0 and not active_objects[self.xform] then 
 			self:toggle_forced_funcs(false)
 		end
-		
-		if held_transforms[self.xform] and held_transforms[self.xform]~=self then
-			self = merge_tables(self, held_transforms[self.xform])
-			held_transforms[self.xform] = self
-		end
 	else
 	--	clear_object(self.xform) 
 	end
@@ -656,12 +635,15 @@ GameObject.toggle_forced_funcs = function(self, bool)
 			--[[--only gravity gun objects should have reached this part, so give them collidables and rigid body components if they didnt have them:
 			--disabled because it causes internal game exceptions that make testing very hard
 			if not self.gameobj:call("getComponent(System.Type)", sdk.typeof("via.physics.Colliders")) then 
-				local colliders = self.gameobj:call("createComponent", sdk.typeof("via.physics.Colliders")):add_ref()
+				local colliders = self.gameobj:call("createComponent", sdk.typeof("via.physics.Colliders"))
 				colliders:call(".ctor")
-				local new_collider = sdk.create_instance("via.physics.Collider"):add_ref()
+				colliders:add_ref()
+				local new_collider = sdk.create_instance("via.physics.Collider")
 				new_collider:call(".ctor")
-				local userdata = sdk.create_instance("via.physics.UserData"):add_ref()
+				new_collider:add_ref()
+				local userdata = sdk.create_instance("via.physics.UserData")
 				userdata:call(".ctor")
+				userdata:add_ref()
 				new_collider:call("set_UserData", userdata)
 				colliders:call("setCollidersCount", 1)
 				colliders:call("setColliders", 0, new_collider)
@@ -846,7 +828,7 @@ end
 local function reset_object(game_object, parent)
 	if not resetted_objects[game_object.xform] then 
 		if is_valid_obj(game_object.xform) then 
-			if parent or (game_object.multiplier and game_object.multiplier < 1.0) and (player == nil or player.xform ~= game_object.xform) then
+			if parent or game_object.multiplier < 1.0 and (player == nil or player.xform ~= game_object.xform) then
 				resetted_objects[game_object.xform] = game_object
 				active_objects[game_object.xform] = game_object
 				game_object.multiplier = 1.0
@@ -936,6 +918,174 @@ local function on_pre_forced_func(args)
 	end
 end
 
+
+--[[args_table = {}
+
+local function on_pre_destroy_gameobj(args)
+	if not is_calling_hooked_function then 
+		--counter = counter + 1
+		--args_table = args
+		--log.debug("4 " .. tostring(sdk.is_managed_object(sdk.to_managed_object(args[4]))))
+		--log.debug("2 " .. tostring(sdk.is_managed_object(sdk.to_managed_object(args[3])))) 
+		--log.debug("1 " .. tostring(sdk.is_managed_object(sdk.to_managed_object(args[1])))) 
+		--spawned_prefabs[sdk.to_managed_object(args[3]):call("get_Transform")] then 
+		--return sdk.PreHookResult.SKIP_ORIGINAL
+	end
+end
+
+local function on_post_forced_func(retval)
+	return retval
+end
+]]
+--[[
+
+local function on_pre_resource_path(args)	
+	local try, object = pcall(sdk.to_managed_object, args[2])
+	if try and object then 
+		local name = object:get_type_definition():get_full_name()
+		resource_exts[name] = object:call("ToString()"):match("^.+%.(.+)%]")
+	end
+end
+
+local function on_post_resource_path(retval)
+	if res_obj then
+		
+		res_obj = nil
+	end
+	return retval
+end
+
+sdk.hook(sdk.find_type_definition("via.ResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.SceneResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.PrefabResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.nnfc.nfp.NFPResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.areamap.AreaMapResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.areamap.AreaQueryResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.autoplay.AutoPlayResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.movie.MovieResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.browser.BrowserConfigHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.puppet.PuppetResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.effect.EffectResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.effect.EffectCollisionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.effect.lensflare.LensflareResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.uvsequence.UVSequenceResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.BankResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.ContainableResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.EventListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.MemorySettingsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.PlugInsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.PackageResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SetStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.FreeAreaListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.BankInfoResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.BankListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.ContainerListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.FloatEnumConverterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.GameParameterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.GetGameParameterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SetGameParameterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.GlobalUserVariablesSetStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.JointAngleListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.JointMaterialListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.JointRotationListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.MaterialObsOclListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.MaterialSwitchListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.MarkerStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.MotionSwitchListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.PackageListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.RagdollListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.RigidBodyListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SpaceDeterminationAuxSendsListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SpaceDeterminationFeatureListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SpaceDeterminationStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.StateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SwitchListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.SwitchByNameListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.TriggerListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.TwistAngleListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.VelocityListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.JointMoveListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.DistanceListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.FootContactListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.EncodedMediaResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.TargetOperationTriggerSettingsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.wwise.TargetOperationTriggerResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.fsm.FsmResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.timeline.TimelineBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.timeline.ClipResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.timeline.TimelineResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.timeline.UserCurveResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.timeline.UserCurveListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.userdata.UserVariablesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.PSOPatchHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.ShaderResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.MasterMaterialResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.TextureResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.RenderTargetTextureResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.SSSProfileResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.LodResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.MeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.MeshMaterialResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.IESLightResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.SparseShadowTreeHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.ProbesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.SceneStructureResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.render.LightProbesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.network.AutoSessionRulesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.network.NetworkConfigHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionBlendResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionTreeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionListBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.JointMapResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionBankBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionBankResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionCameraBankResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionFsmResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionFsm2ResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.ChainResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.SkeletonResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.FbxSkeletonResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.JointConstraintsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.DevelopRetargetResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.IkDamageActionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionCameraResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.motion.MotionCameraListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.hid.VibrationResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.CollisionDefinitionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.CollisionBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.CollisionFilterResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.CollisionMaterialResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.CollisionMeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.CollisionSkinningMeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.RequestSetColliderResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.physics.TerrainResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.navigation.AIMapResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.navigation.NavigationFilterSettingResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.navigation.AIMapAttributeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.GUISoundResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.BaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.GUIResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.GUIConfigResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.OutlineFontResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.IconFontResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.TextAnimationResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.gui.MessageResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.RigidBodySetResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.RagdollResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.RagdollControllerResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.RigidBodyMeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.DefinitionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.GpuClothResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.dynamics.GpuCloth2ResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.behaviortree.BehaviorTreeBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.behaviortree.FSMv2TreeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+sdk.hook(sdk.find_type_definition("via.behaviortree.BehaviorTreeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
+]]
+
+
 if not isRE7 then 
 	sdk.hook(sdk.find_type_definition("via.Transform"):get_method("set_Position"), on_pre_set_transform, on_post_func_skip)
 	sdk.hook(sdk.find_type_definition("via.Transform"):get_method("set_LocalPosition"), on_pre_set_transform, on_post_func_skip)
@@ -944,15 +1094,43 @@ if not isRE7 then
 	--sdk.hook(sdk.find_type_definition("via.GrabObject"):get_method("destroy(via.GrabObject)"), on_pre_destroy_gameobj, on_post_func_skip, false)
 end
 
+--[[
+if isRE2 then 
+	for typedef_name, functions in pairs(funcs_to_force_by_component) do 
+		local typedef = sdk.find_type_definition(typedef_name)
+		for f, packed_func in ipairs(functions) do 
+			if not packed_func.once then 
+				pcall( function() sdk.hook(typedef:get_method(packed_func.set), on_pre_forced_func, on_post_func_skip) end)
+			end
+		end
+	end
+end]]
+--[[
+function create_searchcolinfo()
+	local searchcolinfo = sdk.create_instance("via.physics.System.SearchCollisionInfo"):add_ref()
+	searchcolinfo:call(".ctor")
+	return searchcolinfo
+end
+
+function create_rigid_body()
+	local construction_info = sdk.find_type_definition("via.dynamics.RigidBody.ConstructionInfo"):get_field("Default"):get_data()
+	local main_world = sdk.call_native_func(via_dynamics_system, via_dynamics_system_typedef, "get_MainWorld") --via_dynamics_system_typedef:get_method("get_MainWorld"):call() --
+	--main_world:call("set_RigidBodyCapacity", main_world:call("get_RigidBodyCapacity")+1)
+	--local new_shape = ValueType.new(sdk.find_type_definition("via.dynamics.Shape"))
+	--local new_rigid = via_dynamics_system_typedef:get_method("createRigidBody"):call(nil, "createRigidBody", construction_info, main_world)
+	local try, new_rigid = pcall(sdk.call_native_func, via_dynamics_system, via_dynamics_system_typedef, "createRigidBody", construction_info, main_world)
+	--new_rigid = via_dynamics_system_typedef:get_method("createRigidBody"):call(nil, "createRigidBody", construction_info, main_world)
+	return new_rigid
+end]]
+
+
 ----------------------------------------------------------------------------------------------------------[[GRAVITY GUN]]
 
 local function cast_rays(ray_method, ray_query)
 	
 	local gameobjects = {}
 	local ray_layers_table = GGSettings.ray_layers_tables[game_name]  --auto mode
-	if GGSettings.wanted_layer ~= -1 then 
-		ray_layers_table = {GGSettings.wanted_layer} 
-	end  --manual mode
+	if GGSettings.wanted_layer ~= -1 then ray_layers_table = {GGSettings.wanted_layer} end  --manual mode
 	
 	ray_query = ray_query or sdk.create_instance("via.physics.CastRayQuery"):add_ref()
 	ray_query:call("clearOptions")
@@ -988,12 +1166,10 @@ local function cast_rays(ray_method, ray_query)
 							gameobjects[contact_pt_dist].impact_pos = contact_pos
 							gameobjects[contact_pt_dist].contact_pt = new_contactpoint 
 							gameobjects[contact_pt_dist].is_old = true
-							gameobjects[contact_pt_dist].ray_layer = ray_layer
 						else
 							gameobjects[contact_pt_dist] = GameObject:new_GrabObject { gameobj=game_object, xform=transform, collidable=new_collidable, contact_pt=new_contactpoint, impact_pos = contact_pos, ray_layer=ray_layer, dist=contact_pt_dist, num_contacts=num_contact_pts }
 							--re.on_update_transform(transform, on_update_transform)
 						end
-						--re.msg(ray_layer)
 					end
 				end
 			end
@@ -1033,7 +1209,6 @@ local function cast_rays(ray_method, ray_query)
 								gameobjects[contact_pt_dist].rigid_body = new_rigid_component
 								gameobjects[contact_pt_dist].rigid_id = new_rigid_id:get_field("Value")
 								gameobjects[contact_pt_dist].contact_pt = new_contactpoint 
-								gameobjects[contact_pt_dist].ray_layer = ray_layer
 								gameobjects[contact_pt_dist].is_old = true
 							elseif not touched_gameobjects[transform] then
 								gameobjects[contact_pt_dist] = GameObject:new_GrabObject { gameobj=game_object, xform=transform, rigid_body=new_rigid_component, rigid_id=rigid_index, contact_pt=new_contactpoint, impact_pos=contact_pos, ray_layer=ray_layer, dist=contact_pt_dist, num_contacts=num_contact_pts } 
@@ -1276,9 +1451,8 @@ local function gravity_gun()
 						impact_pos=o.impact_pos, 
 						ray_layer=o.ray_layer, 
 						children=o.children, 
-						shapes=o.shapes, 
+						shapes=o.shapes 
 					}
-					if not last_grabbed_object then goto exit end
 					active_objects[last_grabbed_object.xform] = last_grabbed_object
 					grav_objs[1] = last_grabbed_object
 				end
@@ -1294,7 +1468,6 @@ local function gravity_gun()
 				toggled = true
 			end
 		end
-		::exit::
 	end
 	
 	-- WHILE GRAVITY GUN IS ACTIVE:
@@ -1341,7 +1514,7 @@ local function gravity_gun()
 					end
 					if scale_multiplier ~= 1 then 
 						new_scale = new_scale * scale_multiplier
-						if game_object.hp and game_object.scale.x > 1.0 then
+						if game_object.hp ~= nil and game_object.scale.x > 1.0 then
 							game_object.hp:call("set_CurrentHitPoint", math.floor(game_object.hp:call("get_CurrentHitPoint") * scale_multiplier))
 						end
 					end
@@ -1351,7 +1524,7 @@ local function gravity_gun()
 					if not player or player.xform ~= game_object.xform then 
 						final_pos, new_rotation, new_scale = mat4_to_trs(game_object.init_worldmat)
 						reset_object(game_object)
-					elseif game_object.hp then
+					else
 						game_object.hp:call("set_CurrentHitPoint", game_object.hp:call("get_DefaultHitPoint"))
 					end
 					if game_object.think and game_object.hp and game_object.hp:call("get_CurrentHitPoint") == 0 then 
@@ -1438,7 +1611,7 @@ re.on_draw_ui(function()
 	if imgui.tree_node("Gravity Gun Settings") then
 		
 		changed, GGSettings.load_json = imgui.checkbox("Persistent Settings", GGSettings.load_json); setting_was_changed = setting_was_changed or changed
-		changed, GGSettings.action_monitor = imgui.checkbox("GrabObject Action Monitor", GGSettings.action_monitor); setting_was_changed = setting_was_changed or changed
+		changed, GGSettings.action_monitor = imgui.checkbox("Action Monitor", GGSettings.action_monitor); setting_was_changed = setting_was_changed or changed
 		changed, GGSettings.force_functions = imgui.checkbox("Forced functions", GGSettings.force_functions); setting_was_changed = setting_was_changed or changed
 		if isRE2 or isRE3 then 
 			changed, GGSettings.block_input = imgui.checkbox("Block input when UI", GGSettings.block_input); setting_was_changed = setting_was_changed or changed
@@ -1459,9 +1632,6 @@ re.on_draw_ui(function()
 			changed, GGSettings.wanted_layer = imgui.drag_int("Wanted layer: " .. layer_name, GGSettings.wanted_layer, 1, -1, 2048); --setting_was_changed = setting_was_changed or changed
 			changed, GGSettings.wanted_mask_bits = imgui.drag_int("Wanted mask bits", GGSettings.wanted_mask_bits, 1, 0, 100000000); --setting_was_changed = setting_was_changed or changed
 			imgui.text("Auto Mode Layers:")
-			if imgui.button("Reset") then 
-				GGSettings.ray_layers_tables = EMV.deep_copy(gg_default_settings.ray_layers_tables)
-			end
 			for i=0, 32 do 
 				local exists = find_index(GGSettings.ray_layers_tables[game_name], i) --table.bfind(GGSettings.ray_layers_tables[game_name], i)
 				local changed, layer = imgui.checkbox("Layer " .. i, not not exists) 
@@ -1537,13 +1707,15 @@ re.on_draw_ui(function()
 		
 		if jsonify_table then --save/load positions from a file, using the object's original position as its key
 			imgui.same_line()
-			if imgui.button("Save Positions") then 
+			if imgui.button("Save Transforms") then 
 				saved_xforms = {}
-				local short_name = GGSettings.load_type[1]:match("^.+%.(.-)$")
-				for xform, object in pairs(held_transforms) do 
-					if object.components_named[short_name] and not object.xform:call("getJointByName", "COG") and not object.xform:call("getJointByName", "Hip") then --and (object.init_worldmat ~= new_mat4) 
+				for xform, object in pairs(touched_gameobjects) do 
+					if object.components_named.Mesh and (object.init_worldmat ~= new_mat4) and not object.xform:call("getJointByName", "COG") and not object.xform:call("getJointByName", "Hip") then 
+						--local getmesh = object.components_named.Mesh:call("getMesh")
+						--if getmesh then 
 						if object.key_hash then
-							saved_xforms[object.key_hash] = object.xform:call("get_WorldMatrix")
+							--local key = jsonify_table({object.init_worldmat})[1]
+							saved_xforms[object.key_hash] = { matrix=object.xform:call("get_WorldMatrix") } --mesh=getmesh:call("ToString()"),
 						end
 					end
 				end
@@ -1551,34 +1723,26 @@ re.on_draw_ui(function()
 			end
 			
 			imgui.same_line()
-			if imgui.button("Load Positions") then 
-				items = find(GGSettings.load_type[2])
+			if imgui.button("Load Transforms") then 
+				local meshes = find("via.render.Mesh")
 				saved_xforms = jsonify_table(json.load_file("GravityGunAndConsole\\GGCSavedXforms.json") or {}, true)
-				for i, xform in ipairs(items) do 
-					local obj = held_transforms[xform]
-					local obj_key_hash = (obj and obj.key_hash) or hashing_method(EMV.get_gameobj_path(xform:call("get_GameObject")))
-					
-					if saved_xforms[obj_key_hash] then
-						log.info(tostring(obj_key_hash) .. ", " .. tostring(saved_xforms[obj_key_hash]))
-						obj = held_transforms[xform] or GameObject:new_GrabObject{xform=xform}
-						obj.packed_xform =  table.pack(mat4_to_trs( saved_xforms[obj_key_hash] ))
-						--write_transform(obj, table.unpack(obj.packed_xform))
-						break
+				for key_hash, sub_tbl in pairs(saved_xforms) do 
+					--local mat_key = jsonify_table({init_worldmat}, true)[1]
+					for i, mesh_xform in ipairs(meshes) do 
+						--local this_mesh_xform = (touched_gameobjects[mesh] and touched_gameobjects[mesh].init_worldmat) or mesh:call("get_WorldMatrix")
+						--if this_mesh_xform == mat_key then
+						local obj = touched_gameobjects[mesh_xform] --and touched_gameobjects[mesh_xform].init_worldmat
+						local obj_key_hash = (obj and obj.key_hash) or hashing_method(EMV.get_gameobj_path(mesh_xform:call("get_GameObject")))
+						if obj_key_hash == key_hash then
+							touched_gameobjects[mesh_xform] = touched_gameobjects[mesh_xform] or GameObject:new_GrabObject{xform=mesh_xform}
+							obj = touched_gameobjects[mesh_xform]
+							obj.packed_xform =  table.pack(mat4_to_trs(sub_tbl.matrix))
+							write_transform(obj, table.unpack(obj.packed_xform))
+							break
+						end
 					end
 				end
 			end
-			
-			if GGSettings.load_type[2] ~= GGSettings.load_type[1] then 
-				if imgui.button("Enter") then 
-					if sdk.find_type_definition(GGSettings.load_type[2]) then
-						GGSettings.load_type[1] = GGSettings.load_type[2]
-					else
-						GGSettings.load_type[2] = GGSettings.load_type[1]
-					end
-				end
-				imgui.same_line()
-			end
-			changed, GGSettings.load_type[2] = imgui.input_text("Load Transforms by Component", GGSettings.load_type[2])
 		end
 		
 		imgui.text("Hotkeys:\n[F] - Scale Objects with Mouse Wheel\n[R] - Force Move Physics Objects without Physics\n[Z] - Reset Object to Original\n[Alt] - Unlock Rotation\n[V] - Toggle between Physics/Normal mode")
@@ -1623,11 +1787,9 @@ re.on_draw_ui(function()
 		if next(touched_gameobjects) then
 			if imgui.tree_node("Touched GameObjects") then 
 				for xform, game_object in orderedPairs(touched_gameobjects) do 
-					imgui.text("	"); imgui.same_line()
-					if game_object and imgui.tree_node_str_id(game_object.key_hash, game_object.name) then
-						imgui.begin_rect()
-							imgui_anim_object_viewer(game_object)
-						imgui.end_rect(2)
+					imgui.text("  "); imgui.same_line()
+					if imgui.tree_node_str_id(game_object.key_hash, game_object.name) then
+						imgui_anim_object_viewer(game_object)
 						imgui.tree_pop()
 					end
 				end
@@ -1755,10 +1917,11 @@ re.on_application_entry("BeginRendering", function()
 end)
 
 ----------------------------------------------------------------------------------------------------------[[ON FRAME]]
+
 re.on_frame(function()
 	
 	player = get_player()
-	go = last_grabbed_object or go or player or (EMV.nextValue(touched_gameobjects)) or get_first_gameobj() or (held_transforms and (EMV.nextValue(held_transforms)))
+	go = last_grabbed_object or go or player or (next(touched_gameobjects)) or get_first_gameobj() or (held_transforms and (next(held_transforms)))
 	go = (go and is_valid_obj(go.xform)) and go
 	
     local camera = sdk.get_primary_camera()
@@ -1801,14 +1964,11 @@ re.on_frame(function()
 		end
 	end
 	
+	
 	if reframework:is_drawing_ui() then
-		if GGSettings.action_monitor and go and go.behaviortrees and go.behaviortrees[1]  then
+		if GGSettings.action_monitor and go and go.behaviortrees and go.behaviortrees[1] and go.behaviortrees[1].names[1] then
 			if imgui.begin_window("Action Monitor - " .. go.name, true, GGSettings.transparent_bg and 129) == false then GGSettings.action_monitor = false end--128
 				for i, bhvt_obj in ipairs(go.behaviortrees) do
-					if not bhvt_obj.imgui_behaviortree then 
-						bhvt_obj = BHVT:new(bhvt_obj)
-						go.behaviortrees[i] = bhvt_obj
-					end
 					bhvt_obj:imgui_behaviortree()
 				end
 			imgui.end_window()

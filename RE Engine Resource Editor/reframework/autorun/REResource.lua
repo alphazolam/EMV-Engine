@@ -7,12 +7,14 @@ local EMV = require("EMV Engine")
 
 local bool_to_number = { [true]=1, [false]=0 }
 local number_to_bool = { [1]=true, [0]=false }
-local game_name = reframework.get_game_name()
+local game_name = (isSF6 and "sf6") or reframework.get_game_name()
 local tdb_ver = sdk.get_tdb_version()
+local rt_suffix = ((game_name=="re2" or game_name=="re3") and tdb_ver > 69 and "rt") or ""
 local isOldVer = tdb_ver <= 67
 local addFontSize = 3
 local nativesFolderType = ((tdb_ver <= 67) and "x64") or "stm"
-local copyBuffer = {}
+local shift_key_down
+copyBuffer = {}
 local changed
 ResourceEditor = nil
 
@@ -48,6 +50,10 @@ local function getWStringSize(value)
 		ctr = ctr + 1
 	end
 	return ctr
+end
+
+if rsz_parser and not rsz_parser.IsInitialized() then 
+	rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json")
 end
 
 -- Core resource class with important file methods shared by all specific resource types:
@@ -94,9 +100,9 @@ REResource = {
 				re.msg("Failed to locate reframework\\data\\plugins\\rsz_parser_REF" .. ".dll !\n")
 				o.bs = BitStream:new()
 			elseif not rsz_parser.IsInitialized() then 
-				rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json")
+				rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json")
 				if not rsz_parser.IsInitialized() then 
-					re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
+					re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
 					o.bs = BitStream:new()
 				end
 			end
@@ -267,24 +273,27 @@ REResource = {
 	checkOpenResource = function(self, path, fieldTbl, fieldIdx)
 		if type(path) ~= "string" then return end
 		path = path:lower():gsub("/", "\\")
-		local ext = type(path)=="string" and path:match("^.+%.(.+)$")
-		if ext and REResource.validExtensions[ext] then 
-			if not tonumber(ext) and REResource.validExtensions[ext] then
-				path = path .. REResource.validExtensions[ext].extensions[game_name]
-			end
-			fieldTbl.cleanPath = "$natives\\" .. nativesFolderType .. "\\" .. path
-			if not ResourceEditor.previousItems[fieldTbl.cleanPath] and BitStream.checkFileExists(fieldTbl.cleanPath) then
-				if fieldIdx then 
-					fieldTbl.canOpen = fieldTbl.canOpen or {}
-					fieldTbl.canOpen[fieldIdx] = fieldTbl.cleanPath
-				else
-					fieldTbl.canOpen = fieldTbl.cleanPath
+		local ext = path:match("^.+%.(.+)$")
+		if ext and path:find("%\\") then
+			fieldTbl.isResource = true
+			if REResource.validExtensions[ext] then 
+				if not tonumber(ext) and REResource.validExtensions[ext] then
+					path = path .. REResource.validExtensions[ext].extensions[game_name]
+				end
+				fieldTbl.cleanPath = "$natives\\" .. nativesFolderType .. "\\" .. path
+				if not ResourceEditor.previousItems[fieldTbl.cleanPath] and BitStream.checkFileExists(fieldTbl.cleanPath) then
+					if fieldIdx then 
+						fieldTbl.canOpen = fieldTbl.canOpen or {}
+						fieldTbl.canOpen[fieldIdx] = fieldTbl.cleanPath
+					else
+						fieldTbl.canOpen = fieldTbl.cleanPath
+					end
 				end
 			end
 		end
 	end,
 	
-	openResource = function(path, force)
+	openResource = function(path, noPrompt)
 		
 		if not path then return end
 		local lowerC = path:lower():gsub("/", "\\")
@@ -319,7 +328,9 @@ REResource = {
 				ResourceEditor.recentItemIdx = #ResourceEditor.recentFiles
 			end
 			json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
-			re.msg("Opened File: " .. currentItem.filepath)
+			if not noPrompt then
+				re.msg("Opened File: " .. currentItem.filepath)
+			end
 			return true
 		else
 			re.msg("File not found!")
@@ -328,26 +339,44 @@ REResource = {
 	
 	displayInstance = function(self, instance, displayName, parentField, parentFieldListIdx, rszBufferFile)
 		
+		local copied, pasted
 		local id = imgui.get_id(parentFieldListIdx or "") .. (displayName or "[Invalid ObjectId]")
-		if imgui.tree_node_str_id(id, displayName) then 
+		
+		local tree_opened = imgui.tree_node_str_id(id, displayName or "")
+		if imgui.begin_popup_context_item(displayName) then  
+			copied = imgui.menu_item("Copy")
+			pasted = copyBuffer.instance and imgui.menu_item("Paste" .. (shift_key_down and " after" or ""))
+			imgui.end_popup() 
+		end
+		imgui.same_line()
+		imgui.text_colored(instance.title or (parentField and parentField.objectIndex and instance.name) or "", 0xFFE0853D)
+		
+		if tree_opened then 
 			--[[if imgui.tree_node("[Lua]") then
 				EMV.read_imgui_element(instance)
 				imgui.tree_pop()
 			end]]
-			
+			 
 			if parentField then
+				local was_changed
 				if parentFieldListIdx then --lists
 					imgui.push_id(id .. "f")
+						if parentField.isNative then
+							was_changed = EMV.editable_table_field(parentFieldListIdx, parentField.objectIndex[parentFieldListIdx], parentField.objectIndex, "", {hide_type=true, width=64})==1
+							imgui.same_line()
+						end
 						changed, parentField.objectIndex[parentFieldListIdx] = imgui.combo("ObjectIndex", parentField.objectIndex[parentFieldListIdx], self.instanceNames)
-						if (parentField.isNative and EMV.editable_table_field(parentFieldListIdx, parentField.objectIndex[parentFieldListIdx], parentField.objectIndex, "ObjectIndex?")==1) or changed then
-							parentField.value[parentFieldListIdx] = rszBufferFile.rawData[ parentField.objectIndex[parentFieldListIdx] ].sortedTbl
+						if changed or was_changed then
+							parentField.value[parentFieldListIdx] = (rszBufferFile.rawData[ parentField.objectIndex[parentFieldListIdx] ] and rszBufferFile.rawData[ parentField.objectIndex[parentFieldListIdx] ].sortedTbl) or {}
 							parentField.rawField.value[parentFieldListIdx] = parentField.objectIndex[parentFieldListIdx]
 						end
 					imgui.pop_id()
 				else --singles
+					was_changed = EMV.editable_table_field("objectIndex", parentField.objectIndex, parentField, "", {hide_type=true, width=64})==1
+					imgui.same_line()
 					changed, parentField.objectIndex = imgui.combo("ObjectIndex", parentField.objectIndex, self.instanceNames)
-					if (EMV.editable_table_field("objectIndex", parentField.objectIndex, parentField, "ObjectIndex")==1) or changed then --parentField.isNative and 
-						parentField.value = rszBufferFile.rawData[parentField.objectIndex].sortedTbl
+					if changed or was_changed then
+						parentField.value = (rszBufferFile.rawData[parentField.objectIndex] and rszBufferFile.rawData[parentField.objectIndex].sortedTbl) or {}
 						parentField.rawField.value = parentField.objectIndex
 					end
 				end
@@ -364,7 +393,8 @@ REResource = {
 							local rawF = field.rawField or field
 							
 							if field.count then 
-								if imgui.tree_node("List (" .. field.fieldTypeName .. ") " .. field.name) then
+								if imgui.tree_node_colored(field.name, "List [" .. field.fieldTypeName .. "] ", field.name .. " (" .. field.count .. " elements)", 0xFFE0853D) then
+								--if imgui.tree_node_str_id(field.name, "List [" .. field.fieldTypeName .. "] " .. field.name .. " (" .. field.count .. " elements)") then
 									-- Add/Remove List operations:
 									imgui.text("Count: " .. field.count)
 									local toInsert, toRemove
@@ -393,7 +423,7 @@ REResource = {
 												end
 												imgui.same_line()
 											end
-											if EMV.editable_table_field(e, element, field.value, e .. ". " .. field.fieldTypeName .. " " .. field.name)==1 then
+											if EMV.editable_table_field(e, element, field.value, e .. ". " .. field.fieldTypeName .. " " .. field.name, {color_text={e .. ". " .. field.fieldTypeName, field.name, nil}})==1 then
 												rawF.value[e] = field.value[e]
 											end
 										end
@@ -430,8 +460,10 @@ REResource = {
 									end
 									imgui.tree_pop()
 								end
-							elseif field.objectIndex then
+							elseif field.objectIndex and field.value then
+							
 								self:displayInstance(field.value, field.fieldTypeName .. " " .. field.name, field, nil, rszBufferFile)
+								
 							elseif rawF.is4ByteArray and (rawF.LuaTypeName=="Float" or rawF.LuaTypeName=="Int") then
 								if #field.value <= 4 then 
 									field.vecType = field.vecType or ("Vector" .. #field.value .. "f")
@@ -454,14 +486,23 @@ REResource = {
 								end
 							elseif (rawF.fieldTypeName=="Vec4" or rawF.fieldTypeName=="Quaternion" or rawF.fieldTypeName=="Data16") then
 								changed, field.value = EMV.show_imgui_vec4(field.value, field.name, false, 0.01)
+								if changed then 
+									rawF.value = {field.value.x, field.value.y, field.value.z, field.value.w} 
+								end
 							elseif rawF.fieldTypeName=="Vec3" then
 								field.vecValue = field.vecValue or field.value:to_vec3()
 								changed, field.vecValue = EMV.show_imgui_vec4(field.vecValue, field.name, false, 0.01)
-								if changed then field.value = field.vecValue:to_vec4() end
+								if changed then 
+									field.value = field.vecValue:to_vec4() 
+									rawF.value = {field.vecValue.x, field.vecValue.y, field.vecValue.z, field.vecValue.w}
+								end
 							elseif rawF.fieldTypeName=="Vec2" then
 								field.vecValue = field.vecValue or field.value:to_vec2()
 								changed, field.vecValue = EMV.show_imgui_vec4(field.vecValue, field.name, false, 0.01)
-								if changed then field.value = field.vecValue:to_vec4() end
+								if changed then 
+									field.value = field.vecValue:to_vec4() 
+									rawF.value = {field.vecValue.x, field.vecValue.y, field.vecValue.z, field.vecValue.w}
+								end
 							else
 								if rawF.canOpen and not ResourceEditor.previousItems[rawF.canOpen] then
 									if imgui.button("Open") then 
@@ -469,7 +510,10 @@ REResource = {
 									end
 									imgui.same_line()
 								end
-								if EMV.editable_table_field("value", field.value, field, field.fieldTypeName .. " " .. field.name)==1 then
+								if EMV.editable_table_field("value", field.value, field, field.fieldTypeName .. " " .. field.name, {color_text={field.fieldTypeName, field.name, nil}})==1 then --hide_type=true
+									if type(field.value)=="string" and field.value:find("/") and not EMV.find_index(rszBufferFile.owner.resourceInfos or {}, field.value, "resourcePath") then
+										table.insert(rszBufferFile.owner.resourceInfos, {name=field.value, resourcePath=field.value})
+									end
 									rawF.value = (type(field.value)=="boolean" and bool_to_number[field.value]) or field.value
 								end
 							end
@@ -489,26 +533,24 @@ REResource = {
 			imgui.tree_pop()
 		end
 		
-		if imgui.begin_popup_context_item(displayName) then  
-			if imgui.menu_item("Copy") then 
-				copyBuffer.instance = instance
-			end 
-			if imgui.menu_item("Paste" .. (EMV.check_key_released(via.hid.KeyboardKey.Shift, 0.0) and " after" or "")) and copyBuffer.instance then 
-				local owner = self.owner or self
-				local instance = instance.rawDataTbl or instance
-				local newInstance = EMV.merge_tables({}, copyBuffer.instance.rawDataTbl or copyBuffer.instance)
-				local name = rsz_parser.GetRSZClassName(newInstance.typeId)
-				local isRSZObject = EMV.find_index(rszBufferFile.objectTable, newInstance.index, "objectId")
-				local addAmt = EMV.check_key_released(via.hid.KeyboardKey.Shift, 0.0) and 1 or 0 --self.backup
-				local objectTblInsertPt = rszBufferFile:addInstance(name, instance.index+addAmt, newInstance, isRSZObject)
-				owner:updateSCNObjectIds(objectTblInsertPt, instance.index+addAmt, isRSZObject) --sdk.find_type_definition(name):is_a("via.Component"))
-				owner:save(nil, true)
-				owner:read()
-			end 
-			--if imgui.menu_item("Delete") then 
-			--	re.msg("Delete " .. displayName)
-			--end 
-			imgui.end_popup() 
+		if copied then
+			copyBuffer.instance = instance
+		end
+		if pasted  then
+			local owner = self.owner or self
+			local instance = instance.rawDataTbl or instance
+			local newInstance = EMV.merge_tables({}, copyBuffer.instance.rawDataTbl or copyBuffer.instance)
+			local name = rsz_parser.GetRSZClassName(newInstance.typeId)
+			local isRSZObject = EMV.find_index(rszBufferFile.objectTable, newInstance.index, "instanceId")
+			local addAmt = shift_key_down and 1 or 0 --self.backup
+			local objectTblInsertPt = rszBufferFile:addInstance(name, instance.index+addAmt, newInstance, isRSZObject)
+			local RSZ = self.RSZ or self
+			RSZ:writeBuffer()
+			--RSZ.bs:save("test97.scn")
+			RSZ:readBuffer()
+			owner:updateSCNObjectIds(objectTblInsertPt, instance.index+addAmt, isRSZObject)
+			owner:save(nil, true)
+			owner:read()
 		end
 		
 	end,
@@ -518,13 +560,14 @@ REResource = {
 		if self.gameObjectInfos and objectTblInsertPt then
 			
 			local addedComponent = isComponent and false
+			
 			for g, gInfo in ipairs(self.gameObjectInfos or {}) do 
 				if gInfo.parentId >= objectTblInsertPt-1 then gInfo.parentId = gInfo.parentId+1 end
 				if gInfo.objectId >= objectTblInsertPt-1 then 
 					gInfo.objectId = gInfo.objectId+1
 				elseif addedComponent==false then 
 					for c, component in ipairs(gInfo.gameObject.components) do
-						if gInfo.gameObject.gameobj.rawDataTbl.index  >= newInstanceInsertIdx or component.rawDataTbl.index >=  newInstanceInsertIdx  then
+						if (gInfo.gameObject.gameobj.rawDataTbl.index+1 >= newInstanceInsertIdx) or (component.rawDataTbl.index+1 >= newInstanceInsertIdx) then
 							gInfo.componentCount = gInfo.componentCount + 1
 							addedComponent = true
 							--re.msg("Added Component to GameObject: " .. gInfo.name .. " " .. newInstanceInsertIdx .. ", " .. objectTblInsertPt)
@@ -538,11 +581,14 @@ REResource = {
 				if fInfo.objectId >= objectTblInsertPt-1 then fInfo.objectId = fInfo.objectId+1 end
 				if fInfo.parentId >= objectTblInsertPt-1 then fInfo.parentId = fInfo.parentId+1 end
 			end
-			for f, uInfo in ipairs(self.userdataInfos or {}) do 
-				if uInfo.typeId >= objectTblInsertPt-1 then uInfo.typeId = uInfo.typeId+1 end
-			end
+			
 			for f, pInfo in ipairs(self.prefabInfos or {}) do 
 				if pInfo.parentId >= objectTblInsertPt-1 then pInfo.parentId = pInfo.parentId+1 end
+			end
+			
+			for f, grInfo in ipairs(self.gameObjectRefInfos or {}) do 
+				if grInfo.objectID >= objectTblInsertPt-1 then grInfo.objectID = grInfo.objectID+1 end
+				if grInfo.targetId >= objectTblInsertPt-1 then grInfo.targetId = grInfo.targetId+1 end
 			end
 		end
 		
@@ -573,8 +619,9 @@ REResource = {
 			self.newInstanceIdx = self.newInstanceIdx or 1
 			self.newTypeName = self.newTypeName or names_list[self.newInstanceIdx] or ""
 			
-			if EMV.editable_table_field("newTypeName", self.newTypeName, self, label)==1 then
+			if EMV.editable_table_field("newTypeName", self.newTypeName, self, label .. " ", {hide_type=true})==1 and sdk.find_type_definition(self.newTypeName) then
 				self.newInstanceIdx = (sdk.find_type_definition(self.newTypeName) and EMV.find_index(names_list, self.newTypeName)) or self.newInstanceIdx
+				changed = true
 			end
 			
 			if changed or not instanceHolder.newInstance then
@@ -612,8 +659,11 @@ REResource = {
 				
 				local objectTblInsertPt = rszBufferFile:addInstance(self.newTypeName, self.newInstanceInsertIdx, instanceHolder.newInstance, isRSZObject)
 				
-				self:updateSCNObjectIds(isRSZObject and objectTblInsertPt, self.newInstanceInsertIdx)
+				self:updateSCNObjectIds(isRSZObject and objectTblInsertPt, self.newInstanceInsertIdx, isRSZObject)
 				
+				local RSZ = self.RSZ or self
+				RSZ:writeBuffer()
+				RSZ:readBuffer()
 				self:save(nil, true) --save all data to the buffer
 				self:read() --refresh Lua tables from the buffer
 				
@@ -640,8 +690,226 @@ REResource = {
 	end,
 	
 	displayGameObject = function(self, gameObject, displayName, rszBufferFile)
+		
+		local function context_menu()
+			if imgui.begin_popup_context_item(displayName .. "GO") then  
+				
+				if imgui.menu_item("Copy") then 
+					copyBuffer.gameObject = EMV.deep_copy(gameObject)
+					copyBuffer.gameObject.children = {}
+					copyBuffer.RSZ = self.RSZ
+				end 
+				
+				if gameObject.children[1] and imgui.menu_item("Copy With Children") then 
+					copyBuffer.gameObject = EMV.deep_copy(gameObject)
+					copyBuffer.RSZ = self.RSZ
+				end 
+				
+				if copyBuffer.gameObject then 
+					--[[if imgui.menu_item("Save Json") then
+						json.dump_file("REResources\\Saved\\"..copyBuffer.gameObject.name..".json", EMV.jsonify_table(copyBuffer.gameObject))
+					end]]
+					
+					if imgui.menu_item("Paste") then-- .. (shift_key_down and " after" or "")) then 
+						
+						local insertionGObj = gameObject
+						local thisInfo = insertionGObj.gInfo or insertionGObj.fInfo
+						local copyInfo = copyBuffer.gameObject.gInfo or copyBuffer.gameObject.fInfo
+						local owner = self.owner or self
+						local thisGobjInstanceId = owner.RSZ.objectTable[thisInfo.objectId] and owner.RSZ.objectTable[thisInfo.objectId].instanceId
+						local atIdx = #owner.RSZ.rawData+1 --(thisGobjInstanceId and thisGobjInstanceId+1) or 1
+						--if shift_key_down then
+						--	atIdx = ((owner.gameObjects[insertionGObj.idx+1] and owner.RSZ.objectTable[owner.gameObjects[insertionGObj.idx+1].gInfo.objectId].instanceId) or #owner.RSZ.rawData)+1
+						--end
+						
+						local newInstances = {}
+						local newNames = {}
+						local newObjects = {}
+						local newGInfos = {}
+						local newFInfos = {}
+						local usedGUIDs = {}
+						
+						if owner.isSCN then
+							for i, gInfo in ipairs(owner.gameObjectInfos) do 
+								usedGUIDs[gInfo.guid] = gInfo.guid
+							end
+						end
+						
+						local function recurse(go)
+							local info = go.gInfo or go.fInfo
+							local startIdx = copyBuffer.RSZ.objectTable[info.objectId+1].instanceId
+							local compCtr, i = 0, 0
+							if info.componentCount  then
+								while compCtr <= info.componentCount do
+									local newInstance = copyBuffer.RSZ.rawData[startIdx + i]
+									i = i + 1
+									if newInstance.objectId then 
+										table.insert(newObjects, newInstance)
+										compCtr = compCtr + 1 
+									end
+									newNames[#newNames+1] = rsz_parser.GetRSZClassName(newInstance.typeId)
+									newInstances[#newInstances+1] = newInstance
+								end
+							else
+								newInstances[1] = copyBuffer.RSZ.rawData[startIdx]
+							end
+							
+							if go.fInfo then 
+								table.insert(newFInfos, go.fInfo)
+							else
+								table.insert(newGInfos, info)
+							end
+							
+							for i, childFolder in ipairs(go.folders or {}) do 
+								recurse(childFolder)
+							end
+							for i, childObj in ipairs(go.children) do 
+								recurse(childObj)
+							end
+						end
+						
+						recurse(copyBuffer.gameObject)
+						
+						local objTblDiff = #rszBufferFile.objectTable
+						local objectTblInsertPt = rszBufferFile:addInstance(newNames, atIdx, newInstances)
+						objTblDiff = #rszBufferFile.objectTable - objTblDiff
+						
+						--Add missing ResourceInfos
+						for rPath, none in pairs(rszBufferFile.newResources) do 
+							if not EMV.find_index(self.resourceInfos, rPath, "resourcePath") then
+								table.insert(self.resourceInfos, { pathOffset=0, resourcePath = rPath})
+							end
+						end
+						
+						--Add missing prefabInfos
+						if self.prefabInfos and rszBufferFile.newPrefabs[1] then 
+							for i, pInfo in ipairs(rszBufferFile.newPrefabs) do 
+								if not EMV.find_index(self.prefabInfos, pInfo.prefabPath, "prefabPath") then 
+									table.insert(self.prefabInfos, pInfo)
+								end
+							end
+							for i, pInfo in ipairs(rszBufferFile.newPrefabs) do
+								pInfo.parentId = pInfo.parentId or EMV.find_index(self.prefabInfos, pInfo.parentPath, "prefabPath") or -1
+							end
+						end
+						
+						--Add missing UserDataInfos: 
+						if self.userdataInfos then
+							for i, uInfo in ipairs(rszBufferFile.newUserDatas) do 
+								if not EMV.find_index(self.userdataInfos, uInfo.path, "userdataPath") then 
+									table.insert(self.userdataInfos, {
+										typeId = uInfo.typeId,
+										CRC = 0,
+										pathOffset = 0, 
+										userdataPath = uInfo.path,
+									})
+								end
+							end
+						end
+						
+						--Correct original GameObjectInfos:
+						local newGInfoInsertPt
+						for i, gInfo in ipairs(owner.gameObjectInfos) do 
+							if gInfo.objectId >= objectTblInsertPt-1 then 
+								newGInfoInsertPt = newGInfoInsertPt or i
+								gInfo.objectId = gInfo.objectId + objTblDiff
+							end
+							if gInfo.parentId >= objectTblInsertPt-1 then 
+								gInfo.parentId = gInfo.parentId + objTblDiff
+							end
+						end
+						newGInfoInsertPt = newGInfoInsertPt or #owner.gameObjectInfos+1
+						
+						--Correct original FolderInfos:
+						local newFInfoInsertPt
+						if owner.folderInfos then
+							for i, fInfo in ipairs(owner.folderInfos) do 
+								if fInfo.objectId >= objectTblInsertPt-1 then 
+									newFInfoInsertPt = newFInfoInsertPt or i
+									fInfo.objectId = fInfo.objectId + objTblDiff
+								end
+								if fInfo.parentId >= objectTblInsertPt-1 then 
+									fInfo.parentId = fInfo.parentId + objTblDiff
+								end
+							end
+							newFInfoInsertPt = newFInfoInsertPt or #owner.folderInfos+1
+						end
+						
+						--Correct original PrefabInfos:
+						for i, pInfo in ipairs(owner.prefabInfos or {}) do 
+							if pInfo.parentId >= objectTblInsertPt-1 then
+								pInfo.parentId = pInfo.parentId + objTblDiff
+							end
+						end
+						
+						--Insert new GameObjectInfos:
+						for i, newGInfo in ipairs(newGInfos) do 
+							local newInstanceId = EMV.find_index(rszBufferFile.newInstances, newGInfo.gameObject.gameobj.rawDataTbl.id, "id")
+							newGInfo.objectId = EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId")-1
+							--[[if newGInfo.objectId then 
+								if not pcall(function()
+									log.debug("Found objectId " .. newGInfo.objectId+1 .. " for " .. rszBufferFile.rawData[rszBufferFile.objectTable[newGInfo.objectId+1].instanceId ].title 
+									.. " with ID " .. rszBufferFile.rawData[rszBufferFile.objectTable[newGInfo.objectId+1].instanceId ].id .. " matching sourceID " 
+									.. newGInfo.gameObject.gameobj.rawDataTbl.id .. " (" .. newGInfo.gameObject.gameobj.rawDataTbl.title .. ")")
+								end) then log.debug("Failed to print objectId debug") end
+							end]]
+							if newGInfo.parentId ~= -1 then 
+								local oldParent = copyBuffer.RSZ.rawData[copyBuffer.RSZ.objectTable[newGInfo.parentId+1].instanceId]
+								local newParentInstanceId = oldParent and oldParent.id and EMV.find_index(rszBufferFile.newInstances, oldParent.id, "id")
+								newGInfo.parentId = (EMV.find_index(rszBufferFile.objectTable, newParentInstanceId, "instanceId") or 0) - 1
+								--[[if oldParent and newGInfo.parentId then 
+									if not pcall(function()
+										log.debug("Found parentId " .. newGInfo.parentId+1 .. " for " .. rszBufferFile.rawData[rszBufferFile.objectTable[newGInfo.parentId+1].instanceId ].title 
+										.. " with ID " .. rszBufferFile.rawData[rszBufferFile.objectTable[newGInfo.parentId+1].instanceId ].id .. " matching sourceID " .. oldParent.id .. " (" .. oldParent.title .. ")")
+									end) then log.debug("Failed to print parentId debug") end
+								end]]
+							end
+							
+							--Find old prefab:
+							newGInfo.prefabId = ((self.prefabInfos and newGInfo.prefab and EMV.find_index(self.prefabInfos, newGInfo.prefab.prefabPath, "prefabPath")) or 0) - 1
+							
+							if not newGInfo.guid or usedGUIDs[newGInfo.guid] or newGInfo.guid == "" then 
+								newGInfo.guid = ValueType.new(sdk.find_type_definition("System.Guid")):call("NewGuid()"):call("ToString()"):lower() --randomize GUID
+							end
+							table.insert(owner.gameObjectInfos, newGInfoInsertPt+i-1, newGInfo)
+						end
+						
+						--Insert new FolderInfos:
+						for i, newFInfo in ipairs(newFInfos) do 
+							local newInstanceId = EMV.find_index(rszBufferFile.newInstances, newFInfo.folder.instance.rawDataTbl.id, "id")
+							--testee = {i, newFInfo, newFInfo.folder.instance.rawDataTbl.id, newInstanceId, EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId"), rszBufferFile.newInstances}
+							newFInfo.objectId = EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId")-1
+							if newFInfo.parentId ~= -1 then 
+								local oldParent = copyBuffer.RSZ.rawData[copyBuffer.RSZ.objectTable[newFInfo.parentId+1].instanceId]
+								local newParentInstanceId = oldParent and oldParent.id and EMV.find_index(rszBufferFile.newInstances, oldParent.id, "id")
+								newFInfo.parentId = (EMV.find_index(rszBufferFile.objectTable, newParentInstanceId, "instanceId") or 0) - 1
+							end
+							table.insert(owner.folderInfos, newFInfoInsertPt+i-1, newFInfo)
+						end
+						
+						copyInfo.parentId = thisInfo.parentId
+						
+						--tester = {copyBuffer.gameObject, rszBufferFile.rawData, objectTblInsertPt, newInstances, newNames, newObjects, newGInfos, newFInfos, tostring(newGInfoInsertPt), tostring(newFInfoInsertPt), owner.gameObjectInfos }
+						
+						--Flush RSZ buffer:
+						rszBufferFile:writeBuffer()
+						--rszBufferFile.bs:save("test97.scn")
+						rszBufferFile:readBuffer()
+						
+						--Save SCN/PFB file
+						owner:save(nil, true)
+						owner:read()
+						copyBuffer.gameObject = nil
+					end
+					--imgui.tooltip("Hold shift to paste after", 0)
+				end
+				imgui.end_popup() 
+			end
+		end
 	
 		if imgui.tree_node(displayName) then 
+			
+			context_menu()
 			
 			local gameObjectInfo = gameObject.gInfo or gameObject.fInfo --or {idx=-1} --GameObject or Folder
 			
@@ -651,10 +919,14 @@ REResource = {
 				local function setupParent(infosList)
 					for i, gInfo in ipairs(infosList) do 
 						
-						local listName = (gInfo==gameObjectInfo and " ") or (gInfo.name .. "[" .. (gInfo.gameObject or gInfo.folder).idx .. "]") or "" --
-						local parentGInfo, isParentOfThis = self.gameObjectInfosIdMap[gInfo.objectId], false
+						--if not (gInfo.gameObject or gInfo.folder) then
+						--	self:setupGameObjects()
+						--end
 						
-						while self.gameObjectInfosIdMap[parentGInfo.parentId] and parentGInfo.parentId~=parentGInfo.objectId do 
+						local listName = (gInfo==gameObjectInfo and " ") or (gInfo.name .. "[" .. (gInfo.gameObject or gInfo.folder).idx .. "]") or "" --
+						local parentGInfo = self.gameObjectInfosIdMap[gInfo.objectId]
+						--local isParentOfThis = false
+						while parentGInfo and self.gameObjectInfosIdMap[parentGInfo.parentId] and parentGInfo.parentId~=parentGInfo.objectId do 
 							if parentGInfo.parentId == gameObjectInfo.objectId then
 								listName = listName .. " (CHILD)"; break
 							end
@@ -737,6 +1009,9 @@ REResource = {
 						end
 						imgui.tree_pop()
 					end
+					
+
+					
 				imgui.end_rect(2)
 				
 			elseif gameObject.fInfo then --Folders
@@ -755,6 +1030,8 @@ REResource = {
 				imgui.end_rect(2)
 			end
 			imgui.tree_pop()
+		else
+			context_menu()
 		end
 	end,
 	
@@ -773,50 +1050,52 @@ REResource = {
 				end
 			end
 			
-			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath")
+			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder")
 			
 			if imgui.button("Save") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
 				self:save(nil, nil, true)
 			end
-			imgui.tooltip("Save to the same filepath, overwriting", "foverw")
+			imgui.tooltip("Save to the same filepath, overwriting")
 			imgui.same_line()
 			
 			if imgui.button("Save Copy") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
 				self:save()
 			end
-			imgui.tooltip("Save to a new filepath", "fsave")
+			imgui.tooltip("Save to a new filepath")
 			imgui.same_line()
 			
 			local fullExt = self.ext2 .. self.ext
 			local backupPath = self.filepath:gsub(fullExt, ".BAK" .. fullExt)
 			
 			if imgui.button("Backup") then
-				if BitStream:copyFile(self.filepath, backupPath) and BitStream.checkFileExists(backupPath) then 
+				if BitStream.copyFile(self.filepath, backupPath) and BitStream.checkFileExists(backupPath) then 
 					re.msg("Backed up to " .. backupPath)
 				end
 			end
-			imgui.tooltip("Make a backup copy of this file", "fbak")
+			imgui.tooltip("Make a backup copy of this file")
 			imgui.same_line()
 			
 			if imgui.button("Restore") and BitStream.checkFileExists(backupPath) then
 				if BitStream.copyFile(backupPath, self.filepath) then
 					re.msg("Restored from " .. backupPath)
+					REResource.openResource(self.filepath, true)
 				end
 			end
-			imgui.tooltip("Restore this file from an existing backup", "frest")
+			imgui.tooltip("Restore this file from an existing backup")
 			imgui.same_line()
 			
 			if imgui.button("Revert") then
+				re.msg("Reloaded from " .. self.filepath)
 				REResource.openResource(self.filepath, true)
 			end
-			imgui.tooltip("Reload this file from disk", "freload")
+			imgui.tooltip("Reload this file from disk")
 			imgui.same_line()
 			
 			if imgui.button("Refresh Buffer") then
 				self:save(nil, true)
 				self:read()
 			end
-			imgui.tooltip("Update the file's internal buffer and rebuild Lua data", "frefresh")
+			imgui.tooltip("Update the file's internal buffer and refresh Lua data")
 			
 			--[[if self.backup then
 				if not imgui.same_line() and imgui.button("Undo") then
@@ -824,17 +1103,19 @@ REResource = {
 					self:save(nil, true)
 					self:read()
 				end
-				imgui.tooltip("Revert the file to its previous state", "fundo")
+				imgui.tooltip("Revert the file to its previous state")
 			end]]
 			
 			if spawn_pfb and self.isPFB and not imgui.same_line() and imgui.button("Spawn PFB") then 
-				local path = self.filepath:match("^(.+)%."):gsub(".pfb", "") .. ".NEW.pfb"
+				local path = "$natives\\"..nativesFolderType.."\\REResource\\temp.pfb"..PFBFile.extensions[game_name]--self.filepath:match("^(.+)%."):gsub(".pfb", "") .. ".NEW.pfb"
 				if self.saveAsPFB then
-					self:saveAsPFB(path .. PFBFile.extensions[game_name], true)
+					self:saveAsPFB(path, true)
 				else
-					self:save(path .. PFBFile.extensions[game_name], nil, nil, true)
+					self:save(path, nil, nil, true)
 				end
-				spawn_pfb(path:sub(14,-1))
+				if BitStream.checkFileExists(path) then
+					spawn_pfb("REResource/temp.pfb")
+				end
 			end
 			
 			if self.saveAsPFB and not imgui.same_line() and imgui.button("Save as PFB") then
@@ -852,7 +1133,7 @@ REResource = {
 				EMV.read_imgui_element(self)
 				imgui.tree_pop()
 			end
-			imgui.tooltip("View debug information", "fdebug")
+			imgui.tooltip("View debug information")
 		end
 		
 		local function display_struct(s, struct, structPrototype, structName, doExpand)
@@ -907,6 +1188,10 @@ REResource = {
 			
 			if toRemoveIdx then 
 				table.remove(structList, toRemoveIdx)
+				--[[if structName == "instanceInfo" then
+					table.remove(self.rawData, toRemoveIdx)
+					--self:updateSCNObjectIds(nil, toRemoveIdx, -1)
+				end]]
 			end
 			
 			if toAddIdx or (#structList==0 and imgui.button("Add " .. structName)) then
@@ -937,7 +1222,6 @@ REResource = {
 					if pluralName==structName and structName ~= "objectTable" then
 						display_struct(pluralName, self[pluralName], structPrototype, structName, true)
 					else
-						test = {self, pluralName}
 						local thisInfos, isList = self[pluralName], false
 						displayStructList(thisInfos, structPrototype, structName)
 					end
@@ -951,8 +1235,8 @@ REResource = {
 		
 		if RSZ then
 			
-			if not self.instanceNames then 
-				self.instanceNames = {}
+			if not self.instanceNames or #self.instanceNames ~= #RSZ.instanceInfos then 
+				self.instanceNames = {[0]=" "}
 				for i, dataTbl in ipairs(RSZ.rawData) do 
 					self.instanceNames[i] = dataTbl.name
 				end
@@ -1021,7 +1305,7 @@ REResource = {
 			elseif self.objects then 
 				if imgui.tree_node("Objects") then
 					for i, object in ipairs(self.objects) do
-						self:displayInstance(object, object.name, nil, nil, RSZ)
+						self:displayInstance(object, i-1 .. ". " .. object.name, nil, nil, RSZ)
 					end
 				imgui.tree_pop()
 				end
@@ -1083,8 +1367,9 @@ RSZFile = {
 		
 		o.save = o.writeBuffer
 		o.read = o.readBuffer
-		
 		o:seek(0)
+		
+		--o.bs.file:close()
 		return o
 	end,
 	
@@ -1092,12 +1377,12 @@ RSZFile = {
 	writeBuffer = function(self)
 		
 		local bs = BitStream:new()
+		if not bs then return re.msg("Failed to create tmpfile") end
 		self.bs = bs
 		
-		test = bs
 		bs:writeBytes(self.structSizes["header"])
 		for i, objectTblObj in ipairs(self.objectTable) do
-			bs:writeInt(objectTblObj.objectId)
+			bs:writeInt(objectTblObj.instanceId)
 		end 
 		
 		self.header.instanceOffset = self:tell()
@@ -1107,7 +1392,7 @@ RSZFile = {
 		end 
 		
 		bs:align(16)
-		log.info("Pos " .. bs:tell() .. ", " .. (bs:tell()%16))
+		--log.info("Pos " .. bs:tell() .. ", " .. (bs:tell()%16))
 		self.header.userdataOffset = bs:tell()
 		for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
 			self:writeStruct("RSZUserDataInfo", RSZUserDataInfo)
@@ -1127,7 +1412,7 @@ RSZFile = {
 				RSZUserDataInfo.RSZOffset = bs:tell()
 				RSZUserDataInfo.RSZData.startOfs = bs:tell() + (self.startOfs or 0)
 				RSZUserDataInfo.RSZData:writeBuffer()
-				bs:writeBytes(RSZUserDataInfo.RSZData.bs:getBuffer())
+				bs:writeBytes(RSZUserDataInfo.RSZData.bs:getBuffer()) 
 				bs:writeInt(RSZUserDataInfo.RSZData:fileSize(), RSZUserDataInfo.startOf+12) 
 				bs:writeUInt64(RSZUserDataInfo.RSZOffset, RSZUserDataInfo.startOf+16)
 			end
@@ -1135,9 +1420,10 @@ RSZFile = {
 		
 		bs:align(16)
 		self.header.dataOffset = bs:tell()
+		
 		for i, instance in ipairs(self.rawData) do
 			if not instance.userdataFile then 
-				for f, field in ipairs(instance.fields) do 
+				for f, field in ipairs(instance.fields or {}) do 
 					self:writeRSZField(field)
 				end
 			end
@@ -1148,11 +1434,7 @@ RSZFile = {
 		self.header.userdataCount = #self.RSZUserDataInfos
 		self:seek(0)
 		self:writeStruct("header", self.header)
-		
-		if self.header.userdataOffset == 6998 then 
-			re.msg(6998)
-		end
-		
+		self.bs:seek(0)
 		return bs
 	end,
 	
@@ -1174,6 +1456,12 @@ RSZFile = {
 			self.instanceInfos[i].name = rsz_parser.GetRSZClassName(self.instanceInfos[i].typeId)
 		end
 		
+		if tdb_ver <= 67 then
+			for i, rInfo in ipairs(self.RSZUserDataInfos or {}) do
+				if rInfo.RSZData then rInfo.RSZData.bs:close() end
+			end
+		end
+		
 		self:seek(self.header.userdataOffset)
 		self.RSZUserDataInfos = {}
 		local usedRSZUserDataInstances = {}
@@ -1186,7 +1474,6 @@ RSZFile = {
 		--embedded userdatas:
 		if self.header.userdataCount > 0 and tdb_ver <= 67 then
 			for i, rszInfo in ipairs(self.RSZUserDataInfos) do
-				--test = {self, rszInfo, self.bs:readString(rszInfo.RSZOffset)}
 				self:seek(rszInfo.RSZOffset)
 				rszInfo.RSZData = RSZFile:new({file=self.bs:extractStream(), startOf=rszInfo.RSZOffset + self.startOf, owner=self})
 			end
@@ -1194,7 +1481,7 @@ RSZFile = {
 		
 		if not noRawData then
 			self:seek(self.header.dataOffset)
-			self.rawData = {}
+			self.rawData = { [0]={} }
 			for i=1, self.header.instanceCount-1 do 
 				local typeId = self.instanceInfos[i].typeId
 				local instance = {
@@ -1205,24 +1492,33 @@ RSZFile = {
 					startOf = self:tell(),
 					index = i,
 				}
+				
 				if instance.RSZUserDataIdx then 
-					instance.userdataFile = (not isOldVer and self.RSZUserDataInfos[instance.RSZUserDataIdx].path) or self.RSZUserDataInfos[instance.RSZUserDataIdx].RSZData
+					instance.RSZUserData = (not isOldVer and self.RSZUserDataInfos[instance.RSZUserDataIdx]) or self.RSZUserDataInfos[instance.RSZUserDataIdx]
+					instance.userdataFile = instance.RSZUserData and (instance.RSZUserData.path or instance.RSZUserData.RSZData) or nil
 				else
 					instance.fields = {}
 					for index=1, instance.fieldCount do 
-						if self.bs:tell() >= self.bs:fileSize()-16 then 
-							self.bs:save("test92.scn")
+						if self.bs:tell() > self.bs:fileSize() then 
+							--self.bs:save("test92.scn")
+							re.msg("Buffer overflow!")
+							goto exit
 						end
 						local field = self:readRSZField(typeId, index-1)
-						if index == 1 then instance.startOf = field.startOf or instance.startOf end
+						if index == 1 then 
+							instance.startOf = field.startOf or instance.startOf 
+						end
 						table.insert(instance.fields, field)
 					end
+					::exit::
 					instance.sizeOf = self:tell() - instance.startOf
 				end
+				--log.debug("Read instance " .. logv(instance))
+				instance.id = imgui.get_id(tostring(instance))
 				self.rawData[i] = instance
 			end
-			
-			self.bs = BitStream:new(self.bs:extractStream(self:tell(), 0)) 
+			--self.bs:seek(0)
+			--self.bs = BitStream:new(self.bs:extractStream())
 			
 			for i, rd in ipairs(self.rawData) do
 				rd.sortedTbl = self:sortRSZInstance(rd)
@@ -1231,9 +1527,11 @@ RSZFile = {
 			self.objects = {}
 			self.objectTable.names = {}
 			for i, objectIndexTbl in ipairs(self.objectTable) do
-				self.objects[i] = self.rawData[objectIndexTbl.objectId].sortedTbl
-				self.objectTable.names[i] = self.objects[i].name
+				self.objects[i] = self.rawData[objectIndexTbl.instanceId].sortedTbl
+				self.objects[i].rawDataTbl.objectId = i-1
+				self.objectTable.names[i] = self.objects[i].name .. ((self.objects[i].title and " (" .. self.objects[i].title .. ")") or "")
 			end
+			
 			self.objectTable.names[#self.objectTable.names+1] = " "
 		end
 	end,
@@ -1273,8 +1571,11 @@ RSZFile = {
 		local sortedField = {value=(type(field.value)=="table" and EMV.deep_copy(field.value)) or field.value, name=field.name, fieldTypeName=field.fieldTypeName, count=field.count, rawField=field, isNative=field.isNative}
 		local fieldValue = (type(field.value)=="table" and field.value[1]) or field.value
 		
-		sortedField.objectIndex = field.fieldTypeName=="Object" or (field.isNative and (field.LuaTypeName=="Int" and type(fieldValue)=="number") and (fieldValue < instance.index) and (fieldValue > instance.index - 101)) or nil
-		if sortedField.objectIndex then sortedField.fieldTypeName = "Data4 (Object?)" end
+		sortedField.objectIndex = field.fieldTypeName=="Object" or (field.isNative and (field.LuaTypeName=="Int" and type(fieldValue)=="number") and (fieldValue < instance.index) and (fieldValue > instance.index - 101) and (fieldValue > 3)) or nil
+		if sortedField.objectIndex then 
+			sortedField.fieldTypeName = "Data4 (Object?)" 
+			field.fieldTypeName = sortedField.fieldTypeName 
+		end
 		sortedField.objectIndex = sortedField.objectIndex or (self.rawData[sortedField.value]~=nil and (field.fieldTypeName=="Object") or (field.fieldTypeName=="UserData")) or nil
 		
 		if field.isList then 
@@ -1286,8 +1587,12 @@ RSZFile = {
 			sortField(field, sortedField)
 		end
 		
-		if not instance.title and field.fieldTypeName=="String" and type(field.value)=="string" and field.value:len() > 1 then
-			instance.title = field.value
+		--log.debug("Sorted Field " .. field.name)
+		
+		if not instance.title then 
+			if type(field.value)=="string" and field.value:len() > 1 then --field.fieldTypeName=="String" and
+				instance.title = field.value
+			end
 		end
 		
 		return sortedField
@@ -1304,9 +1609,8 @@ RSZFile = {
 		end
 		
 		sortedInstance.name = instance.name
-		if instance.title then 
-			sortedInstance.name = sortedInstance.name .. " -- " .. instance.title
-		end
+		sortedInstance.title = instance.title
+		
 		return setmetatable(sortedInstance, {name=instance.name})
 	end,
 	
@@ -1324,13 +1628,17 @@ RSZFile = {
 				bs:writeArray(value, field.LuaTypeName)
 			elseif field.LuaTypeName == "WString" then 
 				if value:len() <= 1 then
-					bs:writeUInt(0)
+					bs:writeUInt(value:len())
+					if value == " " then
+						bs:writeUShort(0)
+					end
 				else
 					--log.info("writing string " .. value .. " @ " .. self.startOf+bs:tell() .. " " .. value:len()+1)
 					bs:writeUInt(getWStringSize(value)) --value:len()+1
 					bs:writeWString(value)
 				end
 			else
+				last = {field, value}
 				bs["write" .. field.LuaTypeName](bs, value)
 			end
 			
@@ -1394,7 +1702,6 @@ RSZFile = {
 				end
 			end
 		else
-			
 			local startPos = self:tell()
 			if fieldTbl.is4ByteArray then
 				fieldTbl.value = self.bs:readArray(math.floor(fieldTbl.elementSize / 4), fieldTbl.LuaTypeName, self:tell(), true)
@@ -1404,13 +1711,16 @@ RSZFile = {
 				fieldTbl.value = ''
 				
 				if self.bs:readUByte(pos+1) ~= 0 then 
-					log.info("Broken string at " .. pos .. " " .. EMV.logv(fieldTbl))
+					log.info("Broken string at " .. pos )--.. " " .. EMV.logv(fieldTbl))
 				end
 				
-				last = {fieldTbl, typeId, index, parentListField, pos, self}
+				--last = {fieldTbl, typeId, index, parentListField, pos, self}
 				
-				if self.bs:readUShort(pos) > 0 and self.charCount > 0 then
+				if self.charCount > 0 then --and self.bs:readUShort(pos) > 0
 					fieldTbl.value = self.bs:readWString(pos)
+					if self.charCount == 1 and self.bs:readUShort(pos) == 0 then
+						fieldTbl.value = " "
+					end
 					--log.info("read wstring " .. fieldTbl.value .. " @ position " .. pos .. ", " .. self.charCount .. " chars")
 				end
 				
@@ -1444,7 +1754,7 @@ RSZFile = {
 		if not RSZFile.json_dump_map or force then
 			re.msg("Creating data from JSON dumps, this may take a few minutes...")
 			RSZFile.json_dump_names, RSZFile.json_dump_map, RSZFile.json_dump_components = {}, {}, {}
-			local json_dump = json.load_file("rsz\\rsz"..game_name..".json")
+			local json_dump = json.load_file("rsz\\rsz"..game_name..rt_suffix..".json")
 			for hash, tbl in pairs(json_dump) do
 				local simpleName =  (doAll and tbl.name) or tbl.name:match("^(.-%..-%..-)$")
 				if simpleName and #tbl.fields > 0 and not simpleName:find("[<>`,%[%(]") and simpleName:sub(1,7)~="System." then 
@@ -1467,7 +1777,7 @@ RSZFile = {
 	getFieldLuaTypeName = function(self, fieldTbl, fieldTypeName)
 		fieldTbl.fieldTypeName = fieldTypeName or fieldTbl.fieldTypeName
 		fieldTbl.LuaTypeName = self.typeNames[fieldTbl.fieldTypeName]
-		--log.info(tostring(fieldTbl.LuaTypeName) .. " " .. fieldTbl.fieldTypeName)
+		
 		if not fieldTbl.LuaTypeName then 
 			fieldTbl.LuaTypeName = self.sizesToTypeNames[fieldTbl.elementSize]
 			if fieldTbl.elementSize == 64 then 
@@ -1476,11 +1786,12 @@ RSZFile = {
 				if fieldTbl.alignment == 8 then fieldTbl.LuaTypeName = "GUID" else fieldTbl.LuaTypeName = "Vec4" end
 			elseif fieldTbl.elementSize == 8 then
 				if fieldTbl.alignment == 8 then fieldTbl.LuaTypeName = "Int64" else fieldTbl.LuaTypeName = "Vec2" end
-			elseif fieldTbl.elementSize == 4 or fieldTbl.elementSize % 4 == 0 then 
-				fieldTbl.LuaTypeName = (self:tell() +4 <= self:fileSize()) and (self.bs:detectedFloat() and "Float") or "Int"
-				if fieldTbl.elementSize > 4 then 
-					fieldTbl.is4ByteArray = true
-				end
+			elseif fieldTbl.elementSize == 4 or fieldTbl.elementSize % 4 == 0 then
+				local tell = self.bs:tell()
+				local listCount = fieldTbl.isList and self.bs:readInt(tell)
+				local countSize = (listCount and 4) or 0
+				fieldTbl.LuaTypeName = (tell+4+countSize <= self:fileSize() and (not listCount or (listCount > 0 and listCount < 2500)) and self.bs:detectedFloat(tell+countSize) and "Float") or "Int"
+				fieldTbl.is4ByteArray = (fieldTbl.elementSize > 4) or nil
 			end
 		end
 		return fieldTbl.LuaTypeName
@@ -1544,72 +1855,143 @@ RSZFile = {
 		end
 	end,
 	
-	addInstance = function(self, typeName, atIndex, newInstance, isRSZObject)
-		--if not RSZFile.json_dump_names then 
-		--	self:loadJson()
-		--end
+	addInstance = function(self, typeNames, atIndex, newInstances, gameObjObjectId)
 		
-		typeName = (newInstance and newInstance.typeName) or typeName
-		local typeId = (newInstance and newInstance.typeId) or RSZFile.json_dump_map[typeName]
+		local objectTblInsertPt
+		atIndex = atIndex or #self.instanceInfos+1
+		if type(typeNames) ~= "table" then typeNames = {typeNames} end
+		if type(newInstances) ~= "table" or not newInstances[1] then newInstances = {newInstances} end
+		newInstances[1] = newInstances[1] or (typeNames[1] and self:createInstance(typeNames[1], atIndex))
+		newInstances = EMV.deep_copy(newInstances) --purge all references
 		
-		if typeId then
-			atIndex = atIndex or #self.instanceInfos
-			local typedef = sdk.find_type_definition(typeName)
-			local objectTblInsertPt
-			
-			for i, objectTblObj in ipairs(self.objectTable) do 
-				if objectTblObj.objectId >= atIndex then 
-					objectTblInsertPt = objectTblInsertPt or i
-					objectTblObj.objectId =  objectTblObj.objectId+1
-				end
+		local addAmt = 0
+		for i, newInstance in ipairs(newInstances) do 
+			if gameObjObjectId or newInstance.objectId then addAmt = addAmt + 1 end 
+		end
+		
+		for i, objectTblObj in ipairs(self.objectTable) do 
+			if objectTblObj.instanceId >= atIndex then 
+				objectTblInsertPt = objectTblInsertPt or i
+				objectTblObj.instanceId = objectTblObj.instanceId + addAmt
 			end
-			
-			objectTblInsertPt = objectTblInsertPt or #self.objectTable+1
-			for i, instance in ipairs(self.rawData) do
-				for f, field in ipairs(instance.fields or {}) do 
-					if field.fieldTypeName:find("Object^(Ref)") or field.fieldTypeName == "UserData" then 
-						if type(field.value)=="table" then
-							for o, objId in ipairs(field.value) do
-								if objId >= atIndex then 
-									field.value[o] = field.value[o] + 1
-								end
+		end
+		
+		objectTblInsertPt = objectTblInsertPt or #self.objectTable + 1
+		
+		--Correct ObjectIds in target file:
+		for i, instance in ipairs(self.rawData) do
+			for f, field in ipairs(instance.fields or {}) do 
+				if field.fieldTypeName:find("Object%??[^R]") then --or field.fieldTypeName == "UserData" then 
+					if type(field.value)=="table" then --lists of objects
+						for o, objId in ipairs(field.value) do
+							if objId >= atIndex then 
+								field.value[o] = field.value[o] + addAmt
 							end
-						else
-							if field.value >= atIndex then
-								field.value = field.value + 1 --correct objectIds in RSZ
-							end
+						end
+					else
+						if field.value >= atIndex then
+							field.value = field.value + addAmt --correct objectIds in RSZ
 						end
 					end
 				end
 			end
+		end
+		
+		for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
+			if RSZUserDataInfo.instanceId >= atIndex then 
+				RSZUserDataInfo.instanceId = RSZUserDataInfo.instanceId + addAmt
+			end
+		end
+		
+		self.newResources = {}
+		self.newInstances = {}
+		self.newPrefabs = {}
+		self.newUserDatas = {}
+		
+		for i, instance in ipairs(self.rawData) do 
+			table.insert(self.newInstances, {}) --create a fake newInstances holder to search-through for imguiIDs (while ignoring target file's imguiIDs)
+		end
+		
+		for i, newInstance in ipairs(newInstances) do
+			local typeId = newInstance.typeId or RSZFile.json_dump_map[ newInstance.name:match("^(.-)%[") or typeNames[1] ]
+			if typeId then
+				table.insert(self.instanceInfos, atIndex+i-1, { typeId=typeId, CRC=tonumber("0x"..rsz_parser.GetRSZClassCRC(typeId)), })
+				table.insert(self.rawData, atIndex+i-1, newInstance)
+				table.insert(self.newInstances, atIndex+i-1, newInstance)
+			end
+		end
+		
+		local function addRSZUserData(instance, instanceId)
+			local newRSZUData = EMV.merge_tables({}, instance.RSZUserData)
+			newRSZUData.instanceId = instanceId
+			table.insert(self.RSZUserDataInfos, newRSZUData)
+			table.insert(self.newUserDatas, newRSZUData)
+		end
+		
+		--Correct ObjectIDs in copied instances to point to their new ObjectIndexes:
+		for i, instance in ipairs(self.newInstances) do
+			for f, sfield in ipairs((instance.sortedTbl and instance.sortedTbl.fields) or {}) do
+				local field = sfield.rawField
+				local isUserData = (sfield.fieldTypeName == "UserData")
+				if isUserData or sfield.fieldTypeName:find("Object%??[^R]") then
+					if type(field.value)=="table" then
+						for o, objId in ipairs(field.value) do
+							field.value[o] = EMV.find_index(self.newInstances, objId, "index") or 0
+							if isUserData then addRSZUserData(self.newInstances[ field.value[o] ], field.value[o]) end
+						end
+					else
+						field.value = EMV.find_index(self.newInstances, field.value, "index") or 0
+						if isUserData and field.value ~= 0 then addRSZUserData(self.newInstances[field.value], field.value) end
+					end
+				elseif field.isResource then 
+					if type(field.value)=="table" then
+						for l, listItem in ipairs(field.value) do self.newResources[listItem] = true end
+					else
+						self.newResources[field.value] = true
+					end
+				end
+				instance.fields[f] = field
+				
+				if type(field.value)=="string" and field.value:find("/") and not EMV.find_index(self.owner.resourceInfos or {}, field.value, "resourcePath") then
+					table.insert(self.owner.resourceInfos, {name=field.value, resourcePath=field.value})
+				end
+			end
+		end
+		
+		local objectsAdded = 0
+		local toAddRSZUDidx = nil
+		
+		for i, newInstance in ipairs(newInstances) do 
 			
-			for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
-				if RSZUserDataInfo.instanceId >= atIndex then 
-					RSZUserDataInfo.instanceId = RSZUserDataInfo.instanceId + 1
+			local typeName = newInstance.name:match("^(.-)%[") or typeNames[1]
+			local typedef = sdk.find_type_definition(typeName)
+			local typeId = newInstance.typeId or RSZFile.json_dump_map[typeName]
+			
+			if typeId and typedef then
+				if gameObjObjectId or newInstance.objectId then
+					table.insert(self.objectTable, objectTblInsertPt+objectsAdded, { instanceId=atIndex+i-1 })
+					objectsAdded = objectsAdded + 1
 				end
 			end
 			
-			if isRSZObject or typedef:is_a("via.Component") then
-				table.insert(self.objectTable, objectTblInsertPt, { objectId=atIndex })
+			--Prepare new prefabInfos:
+			if newInstance.gInfo and newInstance.gInfo.prefab then 
+				self.newPrefabs[#self.newPrefabs+1] = EMV.deep_copy(newInstance.gInfo.prefab)
 			end
-			
-			table.insert(self.instanceInfos, atIndex, { typeId=typeId, CRC=tonumber("0x"..rsz_parser.GetRSZClassCRC(typeId)), })
-			
-			local new_instance = newInstance or self:createInstance(typeName, atIndex)
-			table.insert(self.rawData, atIndex, new_instance)
-			
-			self.startOf = self.bs:getAlignedOffset(16, self.startOf) --make sure every RSZ buffer rewritten is 16 bytes aligned, and every container file
-			self:writeBuffer()
-			--self.bs:save("test97.scn")
-			self:readBuffer()
-			return objectTblInsertPt
 		end
+		
+		self.startOf = self.bs:getAlignedOffset(16, self.startOf) --make sure every RSZ buffer written is 16 bytes aligned, and every container file
+		self.instanceNames = nil
+		
+		return objectTblInsertPt
 	end,
 	
 	customStructDisplayFunction = function(self, struct)
 		if struct.RSZData and imgui.tree_node("RSZ Data") then 
 			struct.RSZData:displayImgui()
 			imgui.tree_pop()
+		elseif next(struct)=="instanceId" then --objectTable
+			changed, struct.instanceId = imgui.combo("Instance", struct.instanceId, self.instanceNames)
 		end
 	end,
 	
@@ -1629,7 +2011,7 @@ RSZFile = {
 		},
 		
 		objectTable = {
-			{"UInt", "objectId"},
+			{"UInt", "instanceId"},
 		},
 		
 		instanceInfo = {
@@ -1663,6 +2045,7 @@ SCNFile = {
 		re7 = ((tdb_ver==49) and ".18") or ".20",
 		dmc5 =".19",
 		mhrise = ".20",
+		sf6 = ".20",
 	},
 	
 	isSCN = true,
@@ -1704,14 +2087,15 @@ SCNFile = {
 		self.resourceInfos = {}
 		for i = 1, self.header.resourceCount do 
 			self.resourceInfos[i] = self:readStruct("resourceInfo")
-			self.resourceInfos[i].name = self.resourceInfos[i].resourcePath
+			self.resourceInfos[i].name = tostring(self.resourceInfos[i].resourcePath)
 		end
 		
 		self:seek(self.header.prefabInfoOffset)
 		self.prefabInfos = {}
 		for i = 1, self.header.prefabCount do 
 			self.prefabInfos[i] = self:readStruct("prefabInfo")
-			self.prefabInfos[i].name = self.prefabInfos[i].prefabPath
+			self.prefabInfos[i].name = tostring(self.prefabInfos[i].prefabPath)
+			self.prefabInfos[i].parentPath = self.prefabInfos[self.prefabInfos[i].parentId] and self.prefabInfos[self.prefabInfos[i].parentId].prefabPath
 		end
 		
 		self:seek(self.header.userdataInfoOffset)
@@ -1722,6 +2106,7 @@ SCNFile = {
 		end
 		
 		self:seek(self.header.dataOffset)
+		if self.RSZ then self.RSZ.bs:close() end
 		local stream = self.bs:extractStream()
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset, owner=self})
 		
@@ -1804,8 +2189,12 @@ SCNFile = {
 		
 		self:seek(self.header.dataOffset)
 		self.RSZ.startOfs = self.header.dataOffset
+		
 		self.RSZ:writeBuffer()
+		
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
+		
+		
 		--self.backup = self.bs
 		
 		if not onlyUpdateBuffer then
@@ -1839,10 +2228,10 @@ SCNFile = {
 					gameObjects = {},
 					folders = {},
 					children = {},
-					instance = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].objectId ].sortedTbl,
+					instance = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].instanceId ].sortedTbl,
 					idx = i,
 				}
-				info.folder.name = info.folder.instance.name
+				info.folder.name = tostring(info.folder.instance.name)
 				info.name = info.folder.name
 				
 				if info.parentId == -1 then 
@@ -1856,21 +2245,27 @@ SCNFile = {
 		local gameObjParentMap = {}
 		for i, info in ipairs(self.gameObjectInfos) do 
 			local gameObject = { 
-				gameobj = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].objectId ].sortedTbl, 
+				gameobj = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].instanceId ].sortedTbl, 
+				--parentObj = self.RSZ.rawData[ self.RSZ.objectTable[info.parentId+1].instanceId ].sortedTbl,
 				components = {}, 
 				children = {}, 
 				idx = i, 
 				gInfo=info 
 			}
 			for j=info.objectId + 2, (info.objectId + info.componentCount + 1) do
-				table.insert(gameObject.components, self.RSZ.rawData[ self.RSZ.objectTable[j].objectId ].sortedTbl) --
+				--testee = {gameObject.components, self.RSZ.rawData, j, self.RSZ.objectTable, self.RSZ.objectTable[j]}
+				table.insert(gameObject.components, self.RSZ.rawData[ self.RSZ.objectTable[j].instanceId ].sortedTbl) --
 			end
+			
+			info.prefab = info.prefabId and info.prefabId >= 0 and self.prefabInfos[info.prefabId+1]
+			gameObject.gameobj.rawDataTbl.gInfo = info
 			gameObjParentMap[info.objectId] = gameObject
 			info.gameObject = gameObject
+			
 			if info.parentId == -1 then
 				table.insert(self.gameObjects, gameObject)
 			end
-			info.name = gameObject.gameobj.fields[1].value --(type(gameObject.gameobj.fields[1].value)=="string" and gameObject.gameobj.fields[1].value) or info.name or ""
+			info.name = tostring(gameObject.gameobj.fields[1].value) --(type(gameObject.gameobj.fields[1].value)=="string" and gameObject.gameobj.fields[1].value) or info.name or ""
 			gameObject.name = info.name .. "[" .. gameObject.idx .. "]"
 		end
 		
@@ -1906,7 +2301,7 @@ SCNFile = {
 			changed, struct.newFolderIdx = imgui.combo("Folder Instance", struct.newFolderIdx or 1, self.instanceNames)
 		elseif self.RSZ then
 			if struct.objectId then
-				changed, struct.newObjectId = imgui.combo("Object Instance", struct.newObjectId or struct.objectId+1, self.RSZ.objectTable.names) -- EMV.find_index(self.RSZ.objectTable, self.objectId, "objectId")
+				changed, struct.newObjectId = imgui.combo("Object Instance", struct.newObjectId or struct.objectId+1, self.RSZ.objectTable.names) -- EMV.find_index(self.RSZ.objectTable, self.objectId, "instanceId")
 				if changed then 
 					struct.objectId = struct.newObjectId-1 
 				end
@@ -1990,6 +2385,7 @@ PFBFile = {
 		re7 = ((tdb_ver==49) and ".16") or ".17",
 		dmc5 =".16",
 		mhrise = ".17",
+		sf6 = ".17",
 	},
 	
 	isPFB = true,
@@ -2019,16 +2415,17 @@ PFBFile = {
 			self.gameObjectInfosIdMap[self.gameObjectInfos[i].objectId] = self.gameObjectInfos[i]
 		end
 		
-		self.uknPFBInfos = {}
-		for i = 1, self.header.uknPFBInfoCount or 0 do 
-			self.uknPFBInfos[i] = self:readStruct("uknPFBInfo")
+		self:seek(self.header.gameObjectRefInfoOffset)
+		self.gameObjectRefInfos = {}
+		for i = 1, self.header.gameObjectRefInfoCount or 0 do 
+			self.gameObjectRefInfos[i] = self:readStruct("gameObjectRefInfo")
 		end
 		
 		self:seek(self.header.resourceInfoOffset)
 		self.resourceInfos = {}
 		for i = 1, self.header.resourceCount do 
 			self.resourceInfos[i] = self:readStruct("resourceInfo")
-			self.resourceInfos[i].name = self.resourceInfos[i].resourcePath
+			self.resourceInfos[i].name = tostring(self.resourceInfos[i].resourcePath)
 		end
 		
 		if self.header.userdataInfoOffset then
@@ -2041,13 +2438,20 @@ PFBFile = {
 		end
 		
 		self:seek(self.header.dataOffset)
+		if self.RSZ then self.RSZ.bs:close() end
 		local stream = self.bs:extractStream()
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset, owner=self})
 		
 		if self.RSZ.objectTable then
 			SCNFile.setupGameObjects(self)
 		end
-		self.RSZ.bs:save("test93.pfb")
+		
+		for i, gRefInfo in ipairs(self.gameObjectRefInfos) do
+			--pcall(function()
+				gRefInfo.name = self.RSZ.objectTable.names[gRefInfo.objectID+1] .. "  ...  " .. self.RSZ.objectTable.names[gRefInfo.targetId+1]
+			--end)
+		end
+		--self.RSZ.bs:save("test93.pfb")
 	end,
 	
 	-- Updates the PFBFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
@@ -2058,7 +2462,10 @@ PFBFile = {
 		end
 		
 		self.bs = BitStream:new()
-		self.bs.filepath = onlyUpdateBuffer and self.filepath or filepath
+		self.bs.filepath = (onlyUpdateBuffer and self.filepath) or filepath
+		filepath = filepath or self.bs.filepath or self.filepath
+		if not filepath then return re.msg("No File") end
+		
 		self.bs.fileExists = BitStream.checkFileExists(filepath)
 		
 		self.bs:writeBytes(PFBFile.structSizes["header"])
@@ -2067,11 +2474,11 @@ PFBFile = {
 			self:writeStruct("gameObjectInfo", gameObjectInfo)
 		end
 		
-		if self.header.uknPFBInfoCount and self.header.uknPFBInfoCount > 0 then 
-			self.bs:align(16)
-			self.header.uknPFBInfoOffset = self:tell()
-			for i, uknPFBInfo in ipairs(self.uknPFBInfos) do
-				self:writeStruct("uknPFBInfo", uknPFBInfo)
+		if self.header.gameObjectRefInfoCount and self.header.gameObjectRefInfoCount > 0 then 
+			--self.bs:align(16)
+			self.header.gameObjectRefInfoOffset = self:tell()
+			for i, gameObjectRefInfo in ipairs(self.gameObjectRefInfos) do
+				self:writeStruct("gameObjectRefInfo", gameObjectRefInfo)
 			end
 		end
 		
@@ -2107,7 +2514,7 @@ PFBFile = {
 		self:seek(0)
 		self.header.infoCount = #self.gameObjectInfos
 		self.header.resourceCount = #self.resourceInfos
-		self.header.uknPFBInfoCount = self.uknPFBInfos and #self.uknPFBInfos
+		self.header.gameObjectRefInfoCount = self.gameObjectRefInfos and #self.gameObjectRefInfos
 		self.header.userdataCount = self.userdataInfos and #self.userdataInfos
 		self:writeStruct("header", self.header)
 		if not onlyUpdateBuffer then
@@ -2116,7 +2523,7 @@ PFBFile = {
 			ResourceEditor.textBox = filepath
 		end
 		--self.backup = self.bs
-		self.RSZ.bs:save("test94.pfb")
+		--self.RSZ.bs:save("test94.pfb")
 	end,
 	
 	saveAsSCN = function(self, filepath)
@@ -2127,7 +2534,19 @@ PFBFile = {
 		self.structs = nil
 	end,
 	
-	customStructDisplayFunction = SCNFile.customStructDisplayFunction,
+	customStructDisplayFunction = function(self, struct, idx)
+		SCNFile.customStructDisplayFunction(self, struct, idx)
+		if struct.targetId then
+			changed, struct.newObjectId = imgui.combo("Object Instance", struct.newObjectId or struct.objectID+1, self.RSZ.objectTable.names)
+			if changed then
+				struct.objectID = struct.newObjectId-1
+			end
+			changed, struct.newTargetId = imgui.combo("Target Instance", struct.newTargetId or struct.targetId+1, self.RSZ.objectTable.names)
+			if changed then
+				struct.targetId = struct.newTargetId-1
+			end
+		end
+	end,
 	
 	-- Structures comprising a PFB file:
 	structs = {
@@ -2135,9 +2554,9 @@ PFBFile = {
 			{"UInt", "magic"},
 			{"UInt", "infoCount"},
 			{"UInt", "resourceCount"},
-			{"UInt", "uknPFBInfoCount"},
+			{"UInt", "gameObjectRefInfoCount"},
 			{"UInt64", "userdataCount"}, --{"skip", 4},
-			{"UInt64", "uknPFBInfoInfoOffset"},
+			{"UInt64", "gameObjectRefInfoOffset"},
 			{"UInt64", "resourceInfoOffset"},
 			{"UInt64", "userdataInfoOffset"},
 			{"UInt64", "dataOffset"},
@@ -2149,12 +2568,11 @@ PFBFile = {
 			{"Int", "componentCount"},
 		},
 		
-		uknPFBInfo = {
-			{"UInt", "ID"},
-			{"UShort", "uknShortA"},
-			{"UShort", "uknShortB"},
-			{"Int", "unkInt"},
-			{"UInt", "gameObjectId"},
+		gameObjectRefInfo = {
+			{"UInt", "objectID"},
+			{"Int", "propertyId"},
+			{"Int", "arrayIndex"},
+			{"UInt", "targetId"},
 		},
 		
 		resourceInfo = {
@@ -2167,7 +2585,7 @@ PFBFile = {
 			{"UInt64", "pathOffset", {"WString", "userdataPath"}},
 		},
 		
-		structOrder = {"header", "gameObjectInfo", "uknPFBInfo", "resourceInfo", "userdataInfo"}
+		structOrder = {"header", "gameObjectInfo", "gameObjectRefInfo", "resourceInfo", "userdataInfo"}
 	},
 }
 
@@ -2190,6 +2608,7 @@ UserFile = {
 		re7 = ".2",
 		dmc5 = ".2",
 		mhrise = ".2",
+		sf6 = ".2",
 	},
 	
 	isUser = true,
@@ -2228,6 +2647,7 @@ UserFile = {
 		end
 		
 		self:seek(self.header.dataOffset)
+		if self.RSZ then self.RSZ.bs:close() end
 		stream = self.bs:extractStream()
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset, owner=self})
 		
@@ -2322,6 +2742,7 @@ MDFFile = {
 		re7 = ((tdb_ver==49) and ".6") or ".21",
 		dmc5 =".10",
 		mhrise = ".23",
+		sf6 = ".31",
 	},
 	
 	isMDF = true,
@@ -2804,7 +3225,7 @@ EMV.displayResourceEditor = function()
 		if not rsz_parser then 
 			imgui.text_colored("Failed to locate reframework\\data\\plugins\\rsz_parser_REF.dll!", 0xFF0000FF)
 		elseif not rsz_parser.IsInitialized() then 
-			imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. reframework.get_game_name() .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0xFF0000FF)
+			imgui.text_colored("Failed to locate reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0xFF0000FF)
 		end
 		
 		local lastIdx, doOpen = ResourceEditor.recentItemIdx
@@ -2832,18 +3253,18 @@ EMV.displayResourceEditor = function()
 		lastIdx = ResourceEditor.currentItemIdx
 		changed, ResourceEditor.currentItemIdx = imgui.combo("Path", ResourceEditor.currentItemIdx or 1, ResourceEditor.paths)
 		
-		imgui.tooltip("Edit \"reframework\\data\\rsz\\resource_list.json\" to make this list have files from your natives folder", "pths")
+		imgui.tooltip("Edit \"reframework\\data\\rsz\\resource_list.json\" to make this list have files from your natives folder")
 		
 		if changed and lastIdx ~= ResourceEditor.currentItemIdx then 
 			ResourceEditor.textBox = "$natives\\" .. nativesFolderType .. "\\" .. ResourceEditor.paths[ResourceEditor.currentItemIdx]
 			doOpen = true
 		end
 
-		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File", {always_show=true})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
+		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
 			REResource.openResource(ResourceEditor.textBox)
 		end
 		
-		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder", "fpath2")
+		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder")
 		
 		if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 
 			for path, item in orderedPairs(ResourceEditor.previousItems) do
@@ -2866,7 +3287,7 @@ EMV.displayResourceEditor = function()
 	imgui.end_rect()
 end
 
-local folderTree
+--[[local folderTree
 
 local function generateFolderTree(filepath)
     local parts = {}
@@ -2889,12 +3310,76 @@ local function generateFolderTree(filepath)
 			end
         end
     end
+end]]
+
+local last_tbl_sz = 0
+local last_timer = 0
+openedFiles = {}
+local old_tmpfile = io.tmpfile
+io.tmpfile = function()
+	local tmp_file = old_tmpfile()
+	if tmp_file then 
+		openedFiles[tmp_file] = tmp_file
+		return tmp_file
+	end
 end
 
+should_setup_dlcs = ((isRE2 or isRE3) and EMV.calln("via.Application", "get_UpTimeSecond()") < 60.0) or nil
+
 re.on_frame(function()
-	if not folderTree then
+	
+	shift_key_down = EMV.check_key_released(via.hid.KeyboardKey.Shift, 0.0)
+	
+	--for i, file in ipairs(openedFiles) do 
+	--	file:close()
+	--end
+	local tblsize = EMV.get_table_size(openedFiles)
+	if tblsize > last_tbl_sz or (os.clock() - last_timer) > 5 then 
+		last_timer = os.clock()
+		last_tbl_sz = tblsize
+	end
+	--imgui.text(last_tbl_sz-1)
+	--openedFiles = {}
+	--[[if not folderTree then
 		for i, filepath in pairs(fs.glob("$natives.*")) do
 			generateFolderTree(filepath)
 		end
+	end]]
+	--[[local ctr = 1
+	local tmp = io.tmpfile()
+	while tmp and ctr < 1000 do 
+		ctr = ctr + 1
+		tmp = io.tmpfile()
 	end
+	imgui.text("Max tmpfiles: " .. ctr)]] --509 max tmpfiles in one frame
+	
+	if should_setup_dlcs then
+		
+		should_setup_dlcs = nil
+		local re_key = (isRE2 and "objectroot") or "escape"
+		local dlc_master_path = "$natives\\"..nativesFolderType.."\\" .. re_key .. "\\scene\\contents\\extra\\ropewayextracontents.scn"..SCNFile.extensions[game_name]
+		local dlc_file = SCNFile:new(dlc_master_path..".bak")
+		local dlc_paths = fs.glob([[dlcs\\.*.scn.*]])
+		
+		if dlc_paths[1] and dlc_file and dlc_file.bs.fileExists then
+			for i, path in ipairs(dlc_paths) do
+				local dlc_name = path:match(".+\\(.+)%.scn")
+				local new_path = "$natives\\"..nativesFolderType.."\\"..re_key.."\\scene\\contents\\extra\\"..path:match(".+\\(.+)$")
+				local newInstance = EMV.deep_copy(dlc_file.RSZ.rawData[7])
+				newInstance.fields[1].value = dlc_name
+				newInstance.fields[6].value = new_path:match("("..re_key..".+)%"..SCNFile.extensions[game_name]):gsub("\\","/")
+				local objectTblInsertPt = dlc_file.RSZ:addInstance("via.Folder", nil, newInstance)
+				table.insert(dlc_file.folderInfos, {objectId=dlc_file.RSZ.header.objectCount, parentId=-1})
+				BitStream.copyFile(path, new_path)
+				dlc_file.RSZ:writeBuffer()
+				dlc_file.RSZ:readBuffer()
+			end
+			dlc_file:save(dlc_master_path, nil, nil, true)
+			local folder = scene:call("findFolder(System.String)", "RopewayExtraContents")
+			folder:call("deactivate()")
+			folder:call("set_Standby", true)
+			folder:call("activate(System.Boolean)", true)
+		end
+	end
+	
 end)
