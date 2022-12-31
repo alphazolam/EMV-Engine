@@ -68,6 +68,34 @@ local cached_command_text = {}
 local command_metadata = {}
 local force_autocomplete
 
+local function get_args(args)
+	local result = {}
+	for i, arg in pairs(args) do 
+		if not pcall(function()
+			result[i] = sdk.to_managed_object(arg) or sdk.to_int64(arg) or tostring(arg)
+		end) then
+			result[i] = sdk.to_int64(arg) or tostring(arg)
+		end
+	end
+	return result
+end
+
+function quick_hook(typename, methodname, pre_func, ret_func)
+	local typedef = sdk.find_type_definition(typename)
+	local method = typedef and typedef:get_method(methodname)
+	if method then 
+		sdk.hook(method,
+			pre_func or function(args)
+				_G[methodname.."_args"] = get_args(args)
+			end,
+			ret_func or function(retval)
+				return retval
+			end
+		)
+		return true
+	end
+end
+
 --RE2, RE3
 local cheats = {
 	["god"] = table.pack({ comp="HitPointController", method="set_NoDamage", get_method="get_NoDamage"}),

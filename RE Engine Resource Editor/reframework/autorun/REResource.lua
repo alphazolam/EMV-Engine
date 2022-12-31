@@ -14,8 +14,10 @@ local isOldVer = tdb_ver <= 67
 local addFontSize = 3
 local nativesFolderType = ((tdb_ver <= 67) and "x64") or "stm"
 local shift_key_down
-copyBuffer = {}
+local copyBuffer = {}
 local changed
+local re23ConvertJson
+local re23ConvertJsonPath
 ResourceEditor = nil
 
 local CHINESE_GLYPH_RANGES = {
@@ -57,7 +59,7 @@ if rsz_parser and not rsz_parser.IsInitialized() then
 end
 
 -- Core resource class with important file methods shared by all specific resource types:
-REResource = {
+RE_Resource = {
 	
 	typeNamesToSizes = {
 		UByte=1,
@@ -82,7 +84,7 @@ REResource = {
 		
 		o = o or {}
 		
-		local newMT = {} --set mixed metatable of REResource and outer File class:
+		local newMT = {} --set mixed metatable of RE_Resource and outer File class:
 		for key, value in pairs(self) do newMT[key] = value end
 		for key, value in pairs(getmetatable(o)) do newMT[key] = value end
 		newMT.__index = newMT
@@ -97,13 +99,20 @@ REResource = {
 		o.ext = o.extensions and o.extensions[game_name] or ".?"
 		if o.isRSZ then
 			if not rsz_parser then 
-				re.msg("Failed to locate reframework\\data\\plugins\\rsz_parser_REF" .. ".dll !\n")
+				re.msg("Failed to locate reframework\\data\\plugins\\rsz_parser_REF.dll !\n")
 				o.bs = BitStream:new()
 			elseif not rsz_parser.IsInitialized() then 
 				rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json")
 				if not rsz_parser.IsInitialized() then 
 					re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
 					o.bs = BitStream:new()
+				end
+			end
+			if isRE2 or isRE3 then
+				if BitStream.checkFileExists("rsz\\rsz" .. ((isRE2 and "re3") or "re2") .. rt_suffix .. ".json") then
+					re23ConvertJsonPath = "rsz\\rsz" .. ((isRE2 and "re3") or "re2") .. rt_suffix .. ".json"
+				--else
+				--	re.msg("reframework\\data\\rsz\\rsz" .. ((isRE2 and "re3") or "re2") .. rt_suffix .. ".json\n NOT FOUND")
 				end
 			end
 		end
@@ -276,9 +285,9 @@ REResource = {
 		local ext = path:match("^.+%.(.+)$")
 		if ext and path:find("%\\") then
 			fieldTbl.isResource = true
-			if REResource.validExtensions[ext] then 
-				if not tonumber(ext) and REResource.validExtensions[ext] then
-					path = path .. REResource.validExtensions[ext].extensions[game_name]
+			if RE_Resource.validExtensions[ext] then 
+				if not tonumber(ext) and RE_Resource.validExtensions[ext] then
+					path = path .. RE_Resource.validExtensions[ext].extensions[game_name]
 				end
 				fieldTbl.cleanPath = "$natives\\" .. nativesFolderType .. "\\" .. path
 				if not ResourceEditor.previousItems[fieldTbl.cleanPath] and BitStream.checkFileExists(fieldTbl.cleanPath) then
@@ -299,8 +308,8 @@ REResource = {
 		local lowerC = path:lower():gsub("/", "\\")
 		local ext = lowerC:match("^.+%.(.+)$")
 		local numberExt = ""
-		if not tonumber(ext) and REResource.validExtensions[ext] then
-			numberExt = REResource.validExtensions[ext].extensions[game_name]
+		if not tonumber(ext) and RE_Resource.validExtensions[ext] then
+			numberExt = RE_Resource.validExtensions[ext].extensions[game_name]
 			lowerC = lowerC .. numberExt
 		end
 		
@@ -419,7 +428,7 @@ REResource = {
 										else
 											if rawF.canOpen and rawF.canOpen[e] and not ResourceEditor.previousItems[ rawF.canOpen[e] ] then
 												if imgui.button("Open") then 
-													REResource.openResource(rawF.canOpen[e])
+													RE_Resource.openResource(rawF.canOpen[e])
 												end
 												imgui.same_line()
 											end
@@ -506,7 +515,7 @@ REResource = {
 							else
 								if rawF.canOpen and not ResourceEditor.previousItems[rawF.canOpen] then
 									if imgui.button("Open") then 
-										REResource.openResource(rawF.canOpen)
+										RE_Resource.openResource(rawF.canOpen)
 									end
 									imgui.same_line()
 								end
@@ -707,7 +716,7 @@ REResource = {
 				
 				if copyBuffer.gameObject then 
 					--[[if imgui.menu_item("Save Json") then
-						json.dump_file("REResources\\Saved\\"..copyBuffer.gameObject.name..".json", EMV.jsonify_table(copyBuffer.gameObject))
+						json.dump_file("RE_Resources\\Saved\\"..copyBuffer.gameObject.name..".json", EMV.jsonify_table(copyBuffer.gameObject))
 					end]]
 					
 					if imgui.menu_item("Paste") then-- .. (shift_key_down and " after" or "")) then 
@@ -1010,8 +1019,6 @@ REResource = {
 						imgui.tree_pop()
 					end
 					
-
-					
 				imgui.end_rect(2)
 				
 			elseif gameObject.fInfo then --Folders
@@ -1035,7 +1042,7 @@ REResource = {
 		end
 	end,
 	
-	-- Displays a REResource in imgui with editable fields, showing only the important structs of the file. Contains special functions for RSZ data
+	-- Displays a RE_Resource in imgui with editable fields, showing only the important structs of the file. Contains special functions for RSZ data
 	displayImgui = function(self)
 		
 		local display_struct
@@ -1078,7 +1085,7 @@ REResource = {
 			if imgui.button("Restore") and BitStream.checkFileExists(backupPath) then
 				if BitStream.copyFile(backupPath, self.filepath) then
 					re.msg("Restored from " .. backupPath)
-					REResource.openResource(self.filepath, true)
+					RE_Resource.openResource(self.filepath, true)
 				end
 			end
 			imgui.tooltip("Restore this file from an existing backup")
@@ -1086,7 +1093,7 @@ REResource = {
 			
 			if imgui.button("Revert") then
 				re.msg("Reloaded from " .. self.filepath)
-				REResource.openResource(self.filepath, true)
+				RE_Resource.openResource(self.filepath, true)
 			end
 			imgui.tooltip("Reload this file from disk")
 			imgui.same_line()
@@ -1107,14 +1114,14 @@ REResource = {
 			end]]
 			
 			if spawn_pfb and self.isPFB and not imgui.same_line() and imgui.button("Spawn PFB") then 
-				local path = "$natives\\"..nativesFolderType.."\\REResource\\temp.pfb"..PFBFile.extensions[game_name]--self.filepath:match("^(.+)%."):gsub(".pfb", "") .. ".NEW.pfb"
+				local path = "$natives\\"..nativesFolderType.."\\RE_Resource\\temp.pfb"..PFBFile.extensions[game_name]--self.filepath:match("^(.+)%."):gsub(".pfb", "") .. ".NEW.pfb"
 				if self.saveAsPFB then
 					self:saveAsPFB(path, true)
 				else
 					self:save(path, nil, nil, true)
 				end
 				if BitStream.checkFileExists(path) then
-					spawn_pfb("REResource/temp.pfb")
+					spawn_pfb("RE_Resource/temp.pfb")
 				end
 			end
 			
@@ -1126,6 +1133,72 @@ REResource = {
 			if self.saveAsSCN and not imgui.same_line() and imgui.button("Save as SCN") then
 				local path = self.filepath:match("^(.+)%.") .. ".NEW.scn" .. SCNFile.extensions[game_name]
 				self:saveAsSCN(path:gsub("%.pfb", ""))
+			end
+			
+			if re23ConvertJsonPath and not imgui.same_line() and imgui.button("Save as " .. (isRE2 and "RE3" or "RE2")) then
+				
+				if not re23ConvertJson then
+					local json = json.load_file(re23ConvertJsonPath)
+					re23ConvertJson = {}
+					for hash, tbl in pairs(json) do
+						tbl.hash = hash
+						re23ConvertJson[tbl.name] = tbl
+					end
+				end
+				
+				local oldInstanceInfos = self.RSZ.instanceInfos
+				local oldRSZUserDataInfos = self.RSZ.RSZUserDataInfos
+				local oldUserdataInfos = self.userdataInfos
+				local oldRawData = self.RSZ.rawData
+				local newInstanceInfos = EMV.deep_copy(self.RSZ.instanceInfos)
+				local newRSZUserDataInfos = EMV.deep_copy(self.RSZ.RSZUserDataInfos)
+				local newUserdataInfos = self.userdataInfos and EMV.deep_copy(self.userdataInfos)
+				local newRawData = EMV.deep_copy(self.RSZ.rawData, 2)
+				--goto exit
+				rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. (isRE2 and "re3" or "re2") .. rt_suffix .. ".json")
+				
+				for i, instanceInfo in ipairs(newInstanceInfos) do
+					local otherGameInstance = re23ConvertJson[instanceInfo.name:gsub("app.ropeway", "offline")]
+					if not otherGameInstance then
+						re.msg("Failed to Convert: \n" .. instanceInfo.name:gsub("app.ropeway", "offline") .. "\n not found in " .. (isRE2 and "RE3" or "RE2") .. " JSON!")
+						goto exit
+					else
+						local rszUserDataInfoIdx = EMV.find_index(self.RSZ.RSZUserDataInfos, i, "instanceId")
+						if rszUserDataInfoIdx then
+							newRSZUserDataInfos[rszUserDataInfoIdx].typeId = tonumber("0x"..otherGameInstance.hash)
+							local newUserdataInfoIdx = newUserdataInfos and EMV.find_index(newUserdataInfos, newRSZUserDataInfos[rszUserDataInfoIdx].path, "userdataPath")
+							if newUserdataInfoIdx then 
+								newUserdataInfos[newUserdataInfoIdx].typeId = tonumber("0x"..otherGameInstance.hash)
+							end
+						end
+						instanceInfo.name = otherGameInstance.name
+						instanceInfo.typeId = tonumber("0x"..otherGameInstance.hash)
+						instanceInfo.CRC = tonumber("0x"..otherGameInstance.crc)
+						local oldInstance, newInstance = self.RSZ.rawData[i], newRawData[i]
+						newInstance.fields = {}
+						for f, fieldTbl in ipairs(otherGameInstance.fields) do
+							local idx = EMV.find_index(oldInstance.fields, fieldTbl.name, "name")
+							if idx then
+								table.insert(newInstance.fields, oldInstance.fields[idx])
+							else
+								table.insert(newInstance.fields, self.RSZ:makeFieldTable(instanceInfo.typeId, f-1, true))
+							end
+						end
+					end
+				end
+				
+				self.RSZ.instanceInfos = newInstanceInfos
+				self.RSZ.RSZUserDataInfos = newRSZUserDataInfos
+				self.userdataInfos = newUserdataInfos
+				self.RSZ.rawData = newRawData
+				self:save()
+				self.RSZ.instanceInfos = oldInstanceInfos
+				self.RSZ.RSZUserDataInfos = oldRSZUserDataInfos
+				self.userdataInfos = oldUserdataInfos
+				self.RSZ.rawData = oldRawData
+				
+				::exit::
+				rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. (isRE2 and "re2" or "re3") .. rt_suffix .. ".json")
 			end
 			
 			imgui.same_line()
@@ -1355,14 +1428,15 @@ RSZFile = {
 	new = function(self, args, o)
 		o = o or {}
 		self.__index = self
-		o = REResource:newResource(args, setmetatable(o, self))
+		o = RE_Resource:newResource(args, setmetatable(o, self))
 		o.startOf = args.startOf
 		o.bs.alignShift = o.bs:getAlignedOffset(16, o.startOf) - o.startOf
 		o.owner = args.owner
 		
 		if o.bs:fileSize() > 0 then
-			o:readBuffer()
-			o:writeBuffer()
+			if o:readBuffer() then
+				o:writeBuffer()
+			end
 		end
 		
 		o.save = o.writeBuffer
@@ -1428,6 +1502,7 @@ RSZFile = {
 				end
 			end
 		end 
+		log.info("finished writing fields")
 		
 		self.header.objectCount = #self.objectTable
 		self.header.instanceCount = #self.instanceInfos+1
@@ -1454,6 +1529,10 @@ RSZFile = {
 		for i = 0, self.header.instanceCount-1 do
 			self.instanceInfos[i] = self:readStruct("instanceInfo")
 			self.instanceInfos[i].name = rsz_parser.GetRSZClassName(self.instanceInfos[i].typeId)
+			if self.instanceInfos[i].name == "Unknown Class!" and i > 0 then
+				re.msg("TypeId not found: " .. self.instanceInfos[i].typeId)
+				return false
+			end
 		end
 		
 		if tdb_ver <= 67 then
@@ -1534,6 +1613,7 @@ RSZFile = {
 			
 			self.objectTable.names[#self.objectTable.names+1] = " "
 		end
+		return true
 	end,
 	
 	sortRSZField = function(self, field, instance)
@@ -1618,7 +1698,7 @@ RSZFile = {
 	writeRSZField = function(self, field, bs)
 		bs = bs or self.bs
 		
-		--field.elementSize = REResource.typeNamesToSizes[field.fieldTypeName] or field.elementSize
+		--field.elementSize = RE_Resource.typeNamesToSizes[field.fieldTypeName] or field.elementSize
 		
 		local function writeFieldValue(value)
 			local absStart = self.bs:getAlignedOffset(((field.isList and 4) or field.alignment), self:tell() + self.startOf)
@@ -1641,7 +1721,7 @@ RSZFile = {
 				last = {field, value}
 				bs["write" .. field.LuaTypeName](bs, value)
 			end
-			
+			--log.info("wrote field")
 			if field.LuaTypeName ~= "WString" then
 				self:seek(pos + field.elementSize)
 			end
@@ -1790,7 +1870,7 @@ RSZFile = {
 				local tell = self.bs:tell()
 				local listCount = fieldTbl.isList and self.bs:readInt(tell)
 				local countSize = (listCount and 4) or 0
-				fieldTbl.LuaTypeName = (tell+4+countSize <= self:fileSize() and (not listCount or (listCount > 0 and listCount < 2500)) and self.bs:detectedFloat(tell+countSize) and "Float") or "Int"
+				fieldTbl.LuaTypeName = (tell+4+countSize <= self:fileSize() and (not listCount or (listCount > 0 and listCount < 2500)) and self.bs:detectedFloat(tell+countSize) and fieldTbl.fieldTypeName ~= "Color" and "Float") or "Int"
 				fieldTbl.is4ByteArray = (fieldTbl.elementSize > 4) or nil
 			end
 		end
@@ -2052,11 +2132,11 @@ SCNFile = {
 	
 	ext2 = ".scn",
 
-	-- Creates a new REResource SCNFile
+	-- Creates a new RE_Resource SCNFile
 	new = function(self, args, o)
 		o = o or {}
 		self.__index = self
-		o = REResource:newResource(args, setmetatable(o, self))
+		o = RE_Resource:newResource(args, setmetatable(o, self))
 		if o.bs:fileSize() > 0 then
 			o:read()
 		end
@@ -2392,11 +2472,11 @@ PFBFile = {
 	
 	ext2 = ".pfb",
 
-	-- Creates a new REResource PFBFile
+	-- Creates a new RE_Resource PFBFile
 	new = function(self, args, o)
 		o = o or {}
 		self.__index = self
-		o = REResource:newResource(args, setmetatable(o, self))
+		o = RE_Resource:newResource(args, setmetatable(o, self))
 		if o.bs:fileSize() > 0 then
 			o:read()
 		end
@@ -2596,7 +2676,7 @@ if isOldVer then
 	PFBFile.structs.resourceInfo = { {"WString", "resourcePath"}, }
 end
 
---pfb = PFBFile:new("REResources\\em1240deadbody.pfb.17")
+--pfb = PFBFile:new("RE_Resources\\em1240deadbody.pfb.17")
 
 UserFile = {
 	
@@ -2615,11 +2695,11 @@ UserFile = {
 	
 	ext2 = ".user",
 
-	-- Creates a new REResource.UserFile
+	-- Creates a new RE_Resource.UserFile
 	new = function(self, args, o)
 		o = o or {}
 		self.__index = self
-		o = REResource:newResource(args, setmetatable(o, self))
+		o = RE_Resource:newResource(args, setmetatable(o, self))
 		if o.bs:fileSize() > 0 then
 			o:read()
 		end
@@ -2654,7 +2734,7 @@ UserFile = {
 	end,
 	
 	-- Updates the UserFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
-	save = function(self, filepath, doOverwrite, noPrompt)
+	save = function(self, filepath, doOverwrite, noPrompt, cmd_materials)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.user", ".NEW.user")
@@ -2689,6 +2769,27 @@ UserFile = {
 		self.header.dataOffset = self:tell()
 		
 		self.RSZ.startOfs = self.header.dataOffset
+		
+		if cmd_materials then
+			local fn = EMV.static_funcs.calc_color
+			for i, part in ipairs(self.RSZ.objects[1].fields[1].value) do
+				for j, cluster in ipairs(part.fields[2].value) do
+					local mat_idx = EMV.find_index(cmd_materials, cluster.title, "name")
+					if mat_idx then
+						for c, c_color in ipairs(cluster.fields[2].value) do
+							local idx = cmd_materials[mat_idx].var_names_dict["CustomizeColor_"..c-1]
+							local real_cc = cmd_materials[mat_idx].variables[idx]
+							if real_cc then
+								local as_int = string.unpack("<i", string.pack("<BBBB", fn(real_cc.x), fn(real_cc.y), fn(real_cc.z), fn(real_cc.w)))
+								c_color.fields[2].rawField.value = as_int
+								c_color.fields[2].value = as_int
+							end
+						end
+					end
+				end
+			end
+		end
+		--$natives\stm\product\model\esf\esf004\001\esf004_001_cmd_010.user.2
 		self.RSZ:writeBuffer()
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
 		
@@ -2730,7 +2831,88 @@ UserFile = {
 		structOrder = {"header", "resourceInfo", "userdataInfo"}
 	},
 }
+--[[
+FCharFile = {
+	extensions = {
+		sf6 = ".31",
+	},
+	
+	isFCH = true,
+	
+	ext2 = ".fchar",
 
+	-- Creates a new RE_Resource.UserFile
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o = RE_Resource:newResource(args, setmetatable(o, self))
+		if o.bs:fileSize() > 0 then
+			o:read()
+		end
+		o:seek(0)
+		return o
+	end,
+	
+	read = function(self, start)
+		self.bs:seek(start or 0)
+		self.offsets = {}
+		self.header = self:readStruct("header")
+		
+		self:seek(self.header.resourceInfoOffset)
+		self.resourceInfos = {}
+		for i = 1, self.header.resourceCount do 
+			self.resourceInfos[i] = self:readStruct("resourceInfo")
+			self.resourceInfos[i].name = self.resourceInfos[i].path
+		end
+		
+		self:seek(self.header.userdataInfoOffset)
+		self.userdataInfos = {}
+		for i = 1, self.header.userdataCount do 
+			self.userdataInfos[i] = self:readStruct("userdataInfo")
+			self.userdataInfos[i].name = rsz_parser.GetRSZClassName(self.userdataInfos[i].typeId)
+		end
+		
+		self:seek(self.header.dataOffset)
+		if self.RSZ then self.RSZ.bs:close() end
+		stream = self.bs:extractStream()
+		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset, owner=self})
+		
+	end,
+	
+	-- Structures comprising a fchar file:
+	structs = {
+		header = {
+			{"UInt", "version"},
+			{"UInt", "magic"},
+			{"UInt64", "idTblOffs"},
+			{"UInt64", "parentIdTblOffs"},
+			{"UInt64", "actionListTblOffsOffs"},
+			{"UInt64", "DataIdTblOffs"},
+			{"UInt64", "DataListTblOffsOffs"},
+			{"UInt64", "stringsObjectsOffs"},
+			{"UInt64", "StringsOffs"},
+			{"UInt64", "objectTblRSZOffset"},
+			{"UInt64", "objectTblRSZEnd"},
+			{"UInt", "objCount"},
+			{"UInt", "styleCount"},
+			{"UInt", "dataCount"},
+			{"UInt", "StringsCount"},
+		},
+		
+		resourceInfo = {
+			{"UInt64", "pathOffset", {"WString", "resourcePath"}},
+		},
+		
+		userdataInfo = {
+			{"UInt", "typeId"},
+			{"UInt", "CRC"},
+			{"UInt64", "pathOffset", {"WString", "userdataPath"}},
+		},
+		
+		structOrder = {"header", "resourceInfo", "userdataInfo"}
+	},
+}
+]]
 -- Class for MDF Material files
 MDFFile = {
 	
@@ -2749,11 +2931,11 @@ MDFFile = {
 	
 	ext2 = ".mdf2",
 	
-	-- Creates a new REResource.MDFFile
+	-- Creates a new RE_Resource.MDFFile
 	new = function(self, args, o)
 		o = o or {}
 		self.__index = self
-		o = REResource:newResource(args, setmetatable(o, self))
+		o = RE_Resource:newResource(args, setmetatable(o, self))
 		if o.bs:fileSize() > 0 then
 			o:read()
 		end
@@ -2993,36 +3175,36 @@ for className, class in pairs({RSZFile, PFBFile, SCNFile, UserFile, MDFFile}) do
 	for name, structArray in pairs(class.structs) do
 		local totalBytes = 0
 		for i, fieldTbl in ipairs(structArray) do 
-			totalBytes = totalBytes + (REResource.typeNamesToSizes[ fieldTbl[1] ] or 0)
+			totalBytes = totalBytes + (RE_Resource.typeNamesToSizes[ fieldTbl[1] ] or 0)
 		end
 		class.structSizes[name] = totalBytes
 	end
 end
 
 
---scn:saveAsPFB("REResources\\st11_020_kitchen_in2f.pfb.17")
+--scn:saveAsPFB("RE_Resources\\st11_020_kitchen_in2f.pfb.17")
 --user = UserFile:new("em1000configuration.user.2")
 --system_difficulty_rate_data.user.2
---$natives\\stm\\REResources\\evc0010_Character.pfb.17
---scn = SCNFile:new("REResources\\evc3009_Character.scn.20")
+--$natives\\stm\\RE_Resources\\evc0010_Character.pfb.17
+--scn = SCNFile:new("RE_Resources\\evc3009_Character.scn.20")
 
---scn = SCNFile:new("REResources\\st11_076_BasementB_In1B.scn.20")
---scn = SCNFile:new("REResources\\st11_020_kitchen_in2f.scn.20")
+--scn = SCNFile:new("RE_Resources\\st11_076_BasementB_In1B.scn.20")
+--scn = SCNFile:new("RE_Resources\\st11_020_kitchen_in2f.scn.20")
 --scn.RSZ:addInstance("via.motion.Motion")
 --scn:save()
 --scn.RSZ:addInstance("via.physics.Colliders")
---scn = SCNFile:new("REResources\\ItemBox.scn.20")
---scn = SCNFile:new("REResources\\em1302pool.scn.20")
+--scn = SCNFile:new("RE_Resources\\ItemBox.scn.20")
+--scn = SCNFile:new("RE_Resources\\em1302pool.scn.20")
 --buffer = scn.RSZ:writeBuffer()
 --buffer:save("test99.scn")
 
 --[[function testInsert()
-	MDF = MDFFile:new{"REResources\\pl0003.mdf2.10"}
+	MDF = MDFFile:new{"RE_Resources\\pl0003.mdf2.10"}
 	MDF:fixOffsets(0, MDF.bs:fileSize(), MDF.matHeaders[#MDF.matHeaders].startOf+MDF.matHeaders[#MDF.matHeaders].sizeOf, MDF.bs.size + MDF.matHeaders[#MDF.matHeaders].sizeOf, MDF.matHeaders[#MDF.matHeaders].sizeOf, 8) --
 	MDF:insertStruct("matHeader", MDF.matHeaders[#MDF.matHeaders])
 	MDF:read()
 	MDF.header.matCount = MDF.header.matCount + 1
-	MDF:save("REResources\\saved.mdf2.10")
+	MDF:save("RE_Resources\\saved.mdf2.10")
 end]]
 
 --[[
@@ -3189,7 +3371,7 @@ MeshFile = {
 }
 ]]
 
-REResource.validExtensions = {
+RE_Resource.validExtensions = {
 	["scn"] = SCNFile,
 	["pfb"] = PFBFile,
 	["user"] = UserFile,
@@ -3261,7 +3443,7 @@ EMV.displayResourceEditor = function()
 		end
 
 		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
-			REResource.openResource(ResourceEditor.textBox)
+			RE_Resource.openResource(ResourceEditor.textBox)
 		end
 		
 		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder")
@@ -3324,7 +3506,7 @@ io.tmpfile = function()
 	end
 end
 
-should_setup_dlcs = ((isRE2 or isRE3) and EMV.calln("via.Application", "get_UpTimeSecond()") < 60.0) or nil
+--should_setup_dlcs = ((isRE2 or isRE3) and EMV.calln("via.Application", "get_UpTimeSecond()") < 60.0) or nil
 
 re.on_frame(function()
 	
@@ -3352,34 +3534,5 @@ re.on_frame(function()
 		tmp = io.tmpfile()
 	end
 	imgui.text("Max tmpfiles: " .. ctr)]] --509 max tmpfiles in one frame
-	
-	if should_setup_dlcs then
-		
-		should_setup_dlcs = nil
-		local re_key = (isRE2 and "objectroot") or "escape"
-		local dlc_master_path = "$natives\\"..nativesFolderType.."\\" .. re_key .. "\\scene\\contents\\extra\\ropewayextracontents.scn"..SCNFile.extensions[game_name]
-		local dlc_file = SCNFile:new(dlc_master_path..".bak")
-		local dlc_paths = fs.glob([[dlcs\\.*.scn.*]])
-		
-		if dlc_paths[1] and dlc_file and dlc_file.bs.fileExists then
-			for i, path in ipairs(dlc_paths) do
-				local dlc_name = path:match(".+\\(.+)%.scn")
-				local new_path = "$natives\\"..nativesFolderType.."\\"..re_key.."\\scene\\contents\\extra\\"..path:match(".+\\(.+)$")
-				local newInstance = EMV.deep_copy(dlc_file.RSZ.rawData[7])
-				newInstance.fields[1].value = dlc_name
-				newInstance.fields[6].value = new_path:match("("..re_key..".+)%"..SCNFile.extensions[game_name]):gsub("\\","/")
-				local objectTblInsertPt = dlc_file.RSZ:addInstance("via.Folder", nil, newInstance)
-				table.insert(dlc_file.folderInfos, {objectId=dlc_file.RSZ.header.objectCount, parentId=-1})
-				BitStream.copyFile(path, new_path)
-				dlc_file.RSZ:writeBuffer()
-				dlc_file.RSZ:readBuffer()
-			end
-			dlc_file:save(dlc_master_path, nil, nil, true)
-			local folder = scene:call("findFolder(System.String)", "RopewayExtraContents")
-			folder:call("deactivate()")
-			folder:call("set_Standby", true)
-			folder:call("activate(System.Boolean)", true)
-		end
-	end
 	
 end)

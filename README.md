@@ -8,17 +8,18 @@ This is a repository of my RE Engine Lua script mods, for use with [praydog](htt
 * Resident Evil 2 Remake
 * Resident Evil 3 Remake
 * Monster Hunter Rise: Sunbreak
+* Street Fighter 6
 
 ### Requirements
 * [REFramework](https://github.com/praydog/REFramework-nightly/releases)
 * [Fluffy Mod Manager (Optional)](https://www.fluffyquack.com/modding/)
 
 ### Installation
-* All scripts require REFramework's dinput8.dll to be in your game directory, and all of my scripts require "EMV Engine\init.lua"  
+* All scripts require REFramework's dinput8.dll to be in your game directory, and all of my scripts require "EMV Engine\init.lua" ("EMV-Engine" mod must be installed)
 * Scripts can be installed each as a package by Fluffy Mod Manager. Simply put the script's folder from this repository into your game's Mods folder in your Fluffy Mod Manager directory and install like any other mod  
 * Alternatively, they can be installed or run manually by placing them in your game directory's reframework/autorun folder, or by running them manually with "Run Script" under REFramework's "ScriptRunner" UI  
 
-# EMV Engine Lua Script (Required)
+# EMV-Engine (Required)
 **EMV Engine** is a large Lua script containing many useful utility features and functions that all my other scripts rely on. 
 The script does nothing on its own, but is utilized when Enhanced Model Viewer, Gravity Gun, Console or Enemy Spawner are used run.  
 ![alpha](https://i.imgur.com/2ykqQ8b.jpg)

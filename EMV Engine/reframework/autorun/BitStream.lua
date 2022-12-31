@@ -73,7 +73,7 @@ BitStream = {
 		--o.file = o.file or io.tmpfile()
 		--if not o.file then re.msg("io.tmpfile failed to generate file: " .. tostring(io.tmpfile())) end
 		
-		o.name = (o.filepath and o.filepath:match("^.+/(.+)")) or o.filepath
+		o.name = (o.filepath and (o.filepath:match("^.+/(.+)") or o.filepath))
 		o.pos = 0
 		self.__index = self
 		return o.file and setmetatable(o, self)
@@ -322,6 +322,34 @@ BitStream = {
 		end
 		return result
 	end,]]
+	
+	gen_unicode_str = function(str)
+		local output = ""
+		for c in str:gmatch(".") do
+			output = output .. c .. "\x00"
+		end
+		return output
+	end,
+	
+	find_and_replace = function(filepath, search_term, replace_term)
+		local file = io.open(filepath, "rb")
+		local new_stream = file:read("*a")
+		file:close()
+		local new_file = io.open(filepath, "wb")
+		search_term = no_unicode and search_term or BitStream.gen_unicode_str(search_term)
+		replace_term = no_unicode and replace_term or BitStream.gen_unicode_str(replace_term)
+		new_stream = new_stream:gsub(search_term, replace_term)
+		new_file:write(new_stream)
+		new_file:close()
+	end,
+	
+	find = function(filepath, search_term, no_unicode)
+		local file = io.open(filepath, "rb")
+		local stream = file:read("*a")
+		file:close()
+		search_term = no_unicode and search_term or BitStream.gen_unicode_str(search_term)
+		return stream:find(search_term)
+	end,
 	
 	-- Returns the next address ahead of 'pos' or the current position that is aligned to the given 'alignment'
 	getAlignedOffset = function(self, alignment, pos)
@@ -693,6 +721,4 @@ BitStream = {
 	end,
 }
 
-return {
-	BitStream = BitStream,
-}
+return BitStream

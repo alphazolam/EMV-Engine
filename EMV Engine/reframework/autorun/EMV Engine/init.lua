@@ -191,9 +191,11 @@ misc_vars = {
 	skip_props = {
 		HashCode = true,
 		--Type = true,
-		DeltaTime = true,
+		_DeltaTime = true,
 		_UpdateCost = true,
 		_LateUpdateCost = true,
+		_IsInstanceEnable = true,
+		
 	},
 }
 
@@ -420,7 +422,7 @@ local function merge_indexed_tables(table_a, table_b, is_vec, no_dupes)
 	end
 end
 
---Merge hashed dictionaries. table_a will persist while table_b will become nil
+--Merge hashed dictionaries. table_b will be merged into table_a
 local function merge_tables(table_a, table_b, no_overwrite)
 	table_a = table_a or {}
 	table_b = table_b or {}
@@ -436,15 +438,15 @@ local function merge_tables(table_a, table_b, no_overwrite)
 	return table_a
 end
 
-local function deep_copy(tbl)
+local function deep_copy(tbl, max_layers)
 	local loops, loops2 = {}, {}
-	local function recurse(sub_tbl)
+	local function recurse(sub_tbl, layer)
 		local new_tbl = {}
 		for key, value in pairs(sub_tbl or {}) do
-			if type(value) == "table" then
+			if (not max_layers or layer <= max_layers) and type(value) == "table" then
 				if not loops[value] then
 					loops[value] = merge_tables({}, value)
-					loops[value] = recurse(loops[value]) 
+					loops[value] = recurse(loops[value], layer+1) 
 				end
 				new_tbl[key] = loops[value]
 				--log.debug()
@@ -454,7 +456,7 @@ local function deep_copy(tbl)
 		end
 		return new_tbl
 	end
-	return recurse(tbl)
+	return recurse(tbl, 0)
 end
 
 --Reverse a table order
@@ -847,13 +849,13 @@ end
 get_GameObject = function(component, name_or_xform)
 	if component then
 		if (type(component.read_qword)=="function") and sdk.is_managed_object(component:read_qword(0x10)) then
-			if name_or_xform then
-				if name_or_xform==1 then 
-					return component:call("get_GameObject()"):call("get_Transform()")
-				end
-				return component:call("get_GameObject()"):call("get_Name()")
-			end
 			try, out = pcall(component.call, component, "get_GameObject()")
+			if try and name_or_xform then
+				if name_or_xform==1 then 
+					return out:call("get_Transform()")
+				end
+				return out:call("get_Name()")
+			end
 			return try and out
 		elseif tostring(component):find("sol%.RE") then
 			clear_object(component)
@@ -2280,6 +2282,7 @@ obj_to_json = function(obj, do_only_metadata, args)
 	if do_only_metadata or (otype:is_a("via.Component") or otype:is_a("via.GameObject")) or ((name_full:find("Layer$")  or name_full:find("Bank$")) and (not name_full:find("[_<>,%[%]]") and not name_full:find("Collections"))) then
 		local j_tbl = {} 
 		local used_fields = {}
+		
 		if not do_only_metadata or is_vt then 
 			local propdata = metadata_methods[name_full] or get_fields_and_methods(otype)
 			for field_name, field in pairs(propdata.fields) do
@@ -2288,31 +2291,67 @@ obj_to_json = function(obj, do_only_metadata, args)
 					used_fields[field_name:match("%<(.+)%>") or field_name] = true
 				end
 			end
+			
 			for method_name, method in pairs(propdata.setters) do
-				local count_method = (method:get_num_params() == 2) and propdata.counts[method_name]
-				if (method:get_num_params() == 1 or count_method) and not used_fields[method_name:gsub("_", "")] and not (method_name:find("Count$") or method_name:find("Num$")) then
-					local getter = propdata.getters[method_name]
-					local prop_value 
-					if tostring(prop_value):find("RETransform") then
-						prop_value = {__gameobj_name=get_GameObject(prop_value, true), __address=("obj:"..prop_value:get_address()), __typedef="via.Transform",}
-					elseif not count_method and getter then 
-						local try, item = pcall(getter.call, getter, obj) --normal values
-						prop_value = (try and not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror")))) and item or nil 
-					elseif getter then
-						--log.info("found count method " .. count_method:get_name() .. ", count is " .. tostring(count_method:call(obj))) 
-						prop_value = {}
-						for i=1, count_method:call(obj) do 
-							local try, item = pcall(getter.call, getter, obj, i-1)
-							if try and item and sdk.is_managed_object(item) then 
-								item = obj_to_json(item) or nil 
+				if not misc_vars.skip_props[method_name] then
+					local count_method = (method:get_num_params() == 2) and propdata.counts[method_name]
+					if (method:get_num_params() == 1 or count_method) and not used_fields[method_name:gsub("_", "")] and not (method_name:find("Count$") or method_name:find("Num$")) then
+						local getter = propdata.getters[method_name]
+						local prop_value 
+						if tostring(prop_value):find("RETransform") then
+							prop_value = {__gameobj_name=get_GameObject(prop_value, true), __address=("obj:"..prop_value:get_address()), __typedef="via.Transform",}
+						elseif not count_method and getter then 
+							local try, item = pcall(getter.call, getter, obj) --normal values
+							prop_value = (try and not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror")))) and item or nil
+							if is_valid_obj(prop_value) and (prop_value:get_type_definition():is_a("via.Component") or prop_value:get_type_definition():is_a("via.GameObject")) then 
+								prop_value = nil
 							end
-							item = not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror"))) and item or nil --lists
-							if item == nil then break end
-							prop_value[#prop_value+1] = item
+						elseif getter then
+							--log.info("found count method " .. count_method:get_name() .. ", count is " .. tostring(count_method:call(obj))) 
+							prop_value = {}
+							for i=1, count_method:call(obj) do 
+								local try, item = pcall(getter.call, getter, obj, i-1)
+								if try and item and sdk.is_managed_object(item) then 
+									item = obj_to_json(item) or nil 
+								end
+								item = not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror"))) and item or nil --lists
+								if item == nil then break end
+								prop_value[#prop_value+1] = item
+							end
 						end
+						j_tbl[method_name] = prop_value
+						used_fields[method_name:gsub("_", "")] = true
 					end
-					j_tbl[method_name] = prop_value
-					used_fields[method_name:gsub("_", "")] = true
+				end
+			end
+			
+			--Getters only:
+			for method_name, method in pairs(propdata.getters) do
+				if not misc_vars.skip_props[method_name] then
+					if not j_tbl[method_name] then
+						local prop_value, try 
+						local count_method = (method:get_num_params() == 1) and propdata.counts[method_name]
+						if count_method then
+							prop_value = {}
+							try, count = pcall(count_method.call, count_method, obj)
+							for i=1, try and count or 0 do 
+								try, item = pcall(method.call, method, obj, i-1)
+								if try and item and sdk.is_managed_object(item) then 
+									item = obj_to_json(item) or nil 
+								end
+								item = not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror"))) and item or nil --lists
+								if item == nil then break end
+								prop_value[#prop_value+1] = item
+							end
+						elseif method:get_num_params() == 0 then
+							local try, item = pcall(method.call, method, obj) --normal values
+							prop_value = (try and not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror")))) and item or nil 
+							if is_valid_obj(prop_value) and (prop_value:get_type_definition():is_a("via.Component") or prop_value:get_type_definition():is_a("via.GameObject")) then 
+								prop_value = nil
+							end
+						end
+						j_tbl[method_name] = prop_value
+					end
 				end
 			end
 			
@@ -4392,7 +4431,7 @@ local VarData = {
 		
 		o.is_vt = o.ret_type:is_value_type() or nil
 		o.is_arr_element = args.is_arr_element
-		o.is_sfix = o.full_name:find("%.[Ss]fix") and ((o.ret_type:is_a("via.Sfix4") and 4) or (o.ret_type:is_a("via.Sfix3") and 3) or (o.ret_type:is_a("via.Sfix2") and 2) or (o.ret_type:is_a("via.sfix") and 1)) or nil
+		o.is_sfix = ((o.ret_type:is_a("via.Sfix4") and 4) or (o.ret_type:is_a("via.Sfix3") and 3) or (o.ret_type:is_a("via.Sfix2") and 2) or (o.ret_type:is_a("via.sfix") and 1)) or nil --o.full_name:find("%.[Ss]fix") and 
 		--o.ret_type = evaluate_array_typedef_name(o_tbl.type, o_tbl.name_full) or o.ret_type
 		rt_name = o.ret_type:get_full_name()
 		o.name_methods = (metadata_methods[rt_name] and metadata_methods[rt_name].name_methods) or get_name_methods(o.ret_type, get_fields_and_methods(o.ret_type))
@@ -5663,7 +5702,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	
 	local can_set = (field or vd.field or prop.set or vd.is_arr_element)
 	changed = changed or was_changed
-	if changed and not can_set then 
+	if changed and not can_set and not is_obj then 
 		imgui.set_tooltip("Cannot set")
 		changed = false
 	end
@@ -6323,8 +6362,10 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 							changed, o_tbl.show_gameobj_buttons = imgui.checkbox("All", o_tbl.show_gameobj_buttons)
 							imgui.same_line()
 						end
-						changed, o_tbl.save_children = imgui.checkbox("Save Children", o_tbl.save_children)
-						imgui.same_line()
+						if o_tbl.is_xform or o_tbl.is_gameobj then
+							changed, o_tbl.save_children = imgui.checkbox("Save Children", o_tbl.save_children)
+							imgui.same_line()
+						end
 						show_save_load_button(o_tbl, "Save", nil, o_tbl.save_children)
 						imgui.same_line()
 						show_save_load_button(o_tbl, "Load")
@@ -6662,6 +6703,9 @@ local Material = {
 			for i=1, o.var_num do
 				local var_name = o.mesh:call("getMaterialVariableName", o.id, i-1)
 				table.insert(o.variable_names, var_name)
+				if isSF6 and var_name:find("CustomizeColor") then
+					o.is_cmd = true
+				end
 				o.var_names_dict[var_name] = i
 				local type_of = o.mesh:call("getMaterialVariableType", o.id, i-1)
 				table.insert(o.variable_types, type_of)
@@ -7096,35 +7140,93 @@ show_imgui_mats = function(anim_object)
 	end
 	
 	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
-	if _G.REResource and _G.BitStream and mesh then
-		if _G.MDFFile and anim_object.materials.save_path_exists then
-			if imgui.button("Save") then
-				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
-				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
-				if mdfFile:save(real_path) then 
-					re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
+	if _G.RE_Resource and _G.BitStream and mesh then
+	
+		local function ctx_menu(filetype, real_path)
+			imgui.tooltip("Right click for more options")
+			if imgui.begin_popup_context_item(filetype) then  
+				if imgui.menu_item("Overwrite") then
+					local file = _G[filetype]:new{filepath=real_path}
+					file:save(real_path, true, false, anim_object.materials)
+					anim_object.materials[filetype] = file
 				end
-				anim_object.materials.mdfFile = mdfFile
+				if imgui.menu_item("Backup") and BitStream.copyFile(real_path, real_path..".bak") and BitStream.checkFileExists(real_path..".bak") then
+					re.msg("Backed up to " .. real_path..".bak")
+				end
+				if BitStream.checkFileExists(real_path..".bak") and imgui.menu_item("Restore") and BitStream.copyFile(real_path..".bak", real_path) then
+					re.msg("Restored from " .. real_path..".bak")
+				end
+				imgui.end_popup() 
 			end
-			imgui.same_line()
 		end
+		
+		if _G.MDFFile and (anim_object.materials.save_path_exists) then
+			if anim_object.materials.save_path_exists then
+				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
+				if imgui.button("Save MDF") then
+					local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
+					if mdfFile:save(real_path) then 
+						re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
+					end
+					anim_object.materials.MDFFile = mdfFile
+				end
+				ctx_menu("MDFFile", real_path)
+				imgui.same_line()
+			end
+		end
+		
 		if anim_object.materials.save_path_text==nil then
-			anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. ((MDFFile and MDFFile.extensions[game_name]) or "")
+			anim_object.materials.save_path_text = "$natives/" .. (((sdk.get_tdb_version() <= 67) and "x64/") or "stm/") .. anim_object.mpaths.mdf2_path .. ((MDFFile and MDFFile.extensions[game_name]) or "")
+			--anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. ((MDFFile and MDFFile.extensions[game_name]) or "")
 		end
+		
 		changed, anim_object.materials.save_path_text = imgui.input_text("Modify File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text) --
 		if changed or anim_object.materials.save_path_exists==nil then
 			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
 		end
-		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh")
+		
+		local tooltip_msg = "Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh"
+		imgui.tooltip(tooltip_msg)
+		
+		if anim_object.materials.is_cmd then --SF6 CustomizeColors values
+			if anim_object.materials.cmd_save_path_exists then
+				local real_path = anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", "")
+				if imgui.button("Save CMD") then
+					local cmdFile = UserFile:new{filepath=real_path}
+					cmdFile:save(real_path, false, false, anim_object.materials)
+					anim_object.materials.UserFile = cmdFile
+					imgui.same_line()
+				end
+				ctx_menu("UserFile", real_path)
+				imgui.same_line()
+			end
+			
+			if anim_object.materials.cmd_save_path_text == nil then
+				pcall(function()
+					local color_slot = anim_object.parent_obj.components_named.PlayerColorController.ColorNum + 1
+					anim_object.materials.cmd_save_path_text = ("$natives/stm/product/model/esf/esf999/001/esf999_001_cmd_471.user.2"):gsub("esf999", "esf"..anim_object.name:match("esf(.+)v")):gsub("_471", "_"..string.format("%03d", color_slot))
+				end)
+			end
+			
+			changed, anim_object.materials.cmd_save_path_text = imgui.input_text("Modify CMD File" .. ((anim_object.materials.cmd_save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.cmd_save_path_text) --
+			if changed or anim_object.materials.cmd_save_path_exists==nil then
+				anim_object.materials.cmd_save_path_exists = BitStream.checkFileExists(anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", ""))
+			end
+		end
+		
+		imgui.tooltip(tooltip_msg)
 		if anim_object.materials.mdfFile and imgui.tree_node("[MDF Lua]") then 
-			--read_imgui_element(anim_object.materials.mdfFile)
 			anim_object.materials.mdfFile:displayImgui()
+			imgui.tree_pop()
+		end
+		if anim_object.materials.cmdFile and imgui.tree_node("[CMD Lua]") then 
+			anim_object.materials.cmdFile:displayImgui()
 			imgui.tree_pop()
 		end
 	end
 	
 	for i, mat in ipairs(anim_object.materials) do
-		mat:draw_imgui_mat(anim_object.materials.mdfFile)
+		mat:draw_imgui_mat()
 	end
 end
 
@@ -7484,7 +7586,16 @@ local function show_collection()
 	local moved_last_obj
 	if cd.new_args and cd.worldmatrix and (cd.sel_obj or cd.g_menu_open) then
 		cd.worldmatrix[3].w = 1.0
+		--local last_rot = not cd.gizmo_centers_on_selected and cd.worldmatrix:to_quat()
+		if cd.sel_obj and cd.gizmo_centers_on_selected then
+			cd.worldmatrix = cd.sel_obj.xform:call("get_WorldMatrix")
+		end
 		moved_last_obj, cd.worldmatrix = draw.gizmo(1234567890, cd.worldmatrix)
+		--[[if moved_last_obj and last_rot and cd.sel_obj and last_rot == cd.worldmatrix:to_quat() then --if only moving position, update saved rotation to object's current rotation
+			local new_pos = cd.worldmatrix[3]
+			cd.worldmatrix = cd.sel_obj.xform:call("get_WorldMatrix")
+			cd.worldmatrix[3] = new_pos
+		end]]
 	end
 	
 	imgui.text("Gizmo options:")
@@ -7516,6 +7627,8 @@ local function show_collection()
 	if cd.gizmo_moves_selected then 
 		imgui.same_line()
 		changed, cd.gizmo_freeze_selected = imgui.checkbox("Freeze", cd.gizmo_freeze_selected)
+		imgui.same_line()
+		changed, cd.gizmo_centers_on_selected = imgui.checkbox("Center On", cd.gizmo_centers_on_selected)
 	end
 	
 	if next(Collection) then
@@ -7640,6 +7753,8 @@ local function show_collection()
 	imgui.spacing()
 	
 	if cd.g_menu_open then 
+		--imgui.text(logv(cd.worldmatrix))
+		
 		local create_button_pressed
 		cd.o_tbl = cd.o_tbl  or {go=true, button_only=true, components={}}
 		if cd.new_g_name ~= "" then
@@ -7694,10 +7809,12 @@ local function show_collection()
 				changed, cd.new_args.parent_joint = imgui.input_text("Attach to Parent Joint", cd.new_args.parent_joint)
 				parent_joint = cd.new_args.parent:call("getJointByName", cd.new_args.parent_joint)
 				if parent_joint then 
-					cd.has_parent_joint = true
 					local wm = parent_joint:call("get_WorldMatrix")
+					--if imgui.button("Recenter") or not cd.has_parent_joint then
+						cd.worldmatrix[3] = wm[3]
+					--end
+					cd.has_parent_joint = true
 					cd.new_args.rot = cd.worldmatrix:to_quat():to_euler()--cd.new_args.rot or Vector3f.new(0,0,1.5)
-					cd.worldmatrix[3] = wm[3]
 					imgui.begin_rect()
 						changed, cd.new_args.rot  = imgui.drag_float3("Parent Joint Rotation", cd.new_args.rot, 0.01, -360.0, 360.0) --show_imgui_vec4(cd.new_args.rot or Vector3f.new(0,0,1.5), "Parent Joint Rotation", nil, 0.01, true)
 					imgui.end_rect(2)
@@ -7820,6 +7937,7 @@ local function show_collection()
 			
 			if create_button_pressed then 
 				cd.gizmo_moves_selected = true
+				cd.new_args.worldmatrix = cd.worldmatrix
 				local copy_args = deep_copy(cd.new_args)
 				copy_args.parent = copy_args.parent and (copy_args.parent:get_type_definition():is_a("via.GameObject") and copy_args.parent:call("get_Transform")) or copy_args.parent
 				copy_args.rot = cd.has_parent_joint and copy_args.worldmatrix:to_quat()
@@ -9127,9 +9245,18 @@ GameObject = {
 		end
 	end,
 	
-	reset_physics = function(self)
-		if self.components_named.physicscloth then self.components_named.physicscloth:call("restart") end
-		if self.components_named.chain then self.components_named.chain:call("restart") end
+	reset_physics = function(self, do_deferred)
+		if self.components_named.Chain or self.components_named.PhysicsCloth then
+			local tmp = function()
+				if self.components_named.Chain then self.components_named.Chain:call("restart") end
+				if self.components_named.PhysicsCloth then self.components_named.PhysicsCloth:call("restart") end
+			end
+			if do_deferred then 
+				deferred_calls[self.components_named.Chain or self.components_named.PhysicsCloth or self.gameobj] = {lua_func = tmp}
+			else
+				tmp()
+			end
+		end
 	end,
 	
 	set_materials = function(self, do_change_defaults, args) --use this with "do_change_defaults" to save all materials current settings to JSON
@@ -9145,6 +9272,7 @@ GameObject = {
 		for i=1, materials_count do 
 			local new_args = {anim_object=self, id=i-1, do_change_defaults=do_change_defaults}
 			local new_mat = Material:new((args and merge_tables(new_args, args) or new_args))
+			self.materials.is_cmd = new_mat.is_cmd
 			table.insert(self.materials, new_mat)
 		end
 		if do_change_defaults and SettingsCache.affect_children and self.children then 
