@@ -64,7 +64,7 @@ RE_Resource = {
 	typeNamesToSizes = {
 		UByte=1,
 		Byte=1,
-		UShort=1,
+		UShort=2,
 		Short=2,
 		Int=4,
 		UInt=4,
@@ -2777,7 +2777,7 @@ UserFile = {
 					local mat_idx = EMV.find_index(cmd_materials, cluster.title, "name")
 					if mat_idx then
 						for c, c_color in ipairs(cluster.fields[2].value) do
-							local idx = cmd_materials[mat_idx].var_names_dict["CustomizeColor_"..c-1]
+							local idx = cmd_materials[mat_idx].var_names_dict["CustomizeColor_"..c-1] or 0
 							local real_cc = cmd_materials[mat_idx].variables[idx]
 							if real_cc then
 								local as_int = string.unpack("<i", string.pack("<BBBB", fn(real_cc.x), fn(real_cc.y), fn(real_cc.z), fn(real_cc.w)))

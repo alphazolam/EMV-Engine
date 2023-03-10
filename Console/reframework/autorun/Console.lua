@@ -84,15 +84,16 @@ function quick_hook(typename, methodname, pre_func, ret_func)
 	local typedef = sdk.find_type_definition(typename)
 	local method = typedef and typedef:get_method(methodname)
 	if method then 
+		local name = methodname:match("(.+)%(") or methodname
 		sdk.hook(method,
 			pre_func or function(args)
-				_G[methodname.."_args"] = get_args(args)
+				_G[name.."_args"] = get_args(args)
 			end,
 			ret_func or function(retval)
 				return retval
 			end
 		)
-		return true
+		return "Global Variable: " .. name.."_args"
 	end
 end
 
@@ -106,12 +107,12 @@ local cheats = {
 
 if isRE8 then 
 	cheats.god = table.pack(
-		{ comp="PlayerUpdater", sub_obj="get_characterCore", field="isEnableDead"}
+		{ comp="PlayerUpdaterBase", sub_obj="get_characterCore", field="isEnableDead"}
 	)
 	cheats.God = table.pack(
-		{ comp="PlayerUpdater", sub_obj="get_characterCore", field="isEnableDead"},
+		{ comp="PlayerUpdaterBase", sub_obj="get_characterCore", field="isEnableDead"},
 		--{ comp="PlayerUpdater", sub_obj="get_characterCore", field="IsEnableDamageReaction"}, 
-		{ comp="PlayerUpdater", sub_obj="get_characterCore", field="IsEnableDamage"}
+		{ comp="PlayerUpdaterBase", sub_obj="get_characterCore", field="IsEnableDamage"}
 	)
 end
 
@@ -714,3 +715,5 @@ return {
 	mini_console = mini_console,
 	show_console_window = show_console_window,
 }
+
+

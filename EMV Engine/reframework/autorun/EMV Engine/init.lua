@@ -87,16 +87,15 @@ local uptime = os.clock()
 local tics, toks = 0, 0
 local changed, was_changed, try, out, value
 
-
 scene_timer = 0
 while scene_timer < 100 and not pcall(function()
 	scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene()")
 	scene_timer = nil
 end) do scene_timer = scene_timer + 1 end
+_G.isSF6 = not not scene:call("findGameObject(System.String)", "ResidentCFNTableHolder") or nil
+_G.isGNG = not not scene:call("findGameObject(System.String)", "St03_01_BrightnessRTT") or nil
 
-_G.isSF6 = not not scene:call("findGameObject(System.String)", "ResidentCFNTableHolder")
-local game_name = isSF6 and "sf6" or reframework.get_game_name()
-
+local game_name = (isSF6 and "sf6") or (isGNG and "gng") or reframework.get_game_name()
 
 local msg_ids = {}
 local saved_mats = {files=fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]]), names_map={}, names_indexed={}} --Collection of auto-applied altered material settings for GameObjects (by name)
@@ -144,8 +143,8 @@ static_objs.setn:call(".ctor")
 static_objs.setn:call("set_Fullname", true)
 
 local static_funcs = {
-	distance_gameobjs = tds.mathex:get_method("distance(via.GameObject, via.GameObject)"),
-	distance_vectors = tds.mathex:get_method("distance(via.vec3, via.vec3)"),
+	distance_gameobjs = tds.mathex and tds.mathex:get_method("distance(via.GameObject, via.GameObject)"),
+	distance_vectors = tds.mathex and tds.mathex:get_method("distance(via.vec3, via.vec3)"),
 	get_chain_method = sdk.find_type_definition("via.Component"):get_method("get_Chain"),
 	guid_method = sdk.find_type_definition("via.gui.message"):get_method("get"),
 	mk_gameobj = sdk.find_type_definition("via.GameObject"):get_method("create(System.String)"),
@@ -185,8 +184,8 @@ misc_vars = {
 	tooltip_timers = 0,
 	hovered_this_frame = 0,
 	update_modules = {
-		"UpdateMotion",
 		"PrepareRendering",
+		"UpdateMotion",
 	},
 	skip_props = {
 		HashCode = true,
@@ -237,7 +236,7 @@ local typedef_to_function = {
 
 --List of object examples on which to implement REMgdObj class
 local REMgdObj_objects = {
-	SystemArray = sdk.find_type_definition("System.Array"):get_method("CreateInstance"):call(nil, sdk.typeof("via.Transform"), 0):add_ref(),
+	--SystemArray = sdk.find_type_definition("System.Array"):get_method("CreateInstance"):call(nil, sdk.typeof("via.Transform"), 0):add_ref(),
 	ValueType = ValueType.new(sdk.find_type_definition("via.AABB")),
 	--REMgdObj_objects.BehaviorTree = findc("via.motion.MotionFsm2")[1],
 	RETransform = scene:call("get_FirstTransform"),
@@ -3137,7 +3136,7 @@ local function get_player(as_GameObject)
 		elseif isMHR then 
 			player = static_objs.playermanager:call("findMasterPlayer")
 		elseif isRE8 then
-			xform = find("app.PlayerUpdater")[1]
+			xform = find("app.PlayerUpdaterBase")[1]
 			player = xform and get_GameObject(xform)
 		elseif isRE7 then
 			xform = find("app.PlayerCamera")[1]
@@ -3448,10 +3447,14 @@ function clone_gameobject(gobj)
 		local idx_comps = {}
 		for i, component in ipairs(gobj.components) do 
 			local new_component = clonobj:call("createComponent", component:get_type_definition():get_runtime_type()) --clone(component) --
+			asdf = {clonobj, component, component:get_type_definition():get_runtime_type(), new_component}
 			if new_component then 
 				new_component = new_component:add_ref()
 				table.insert(idx_comps, {new=new_component, old=component})
 				comp_addresses[component] = i--clone(component)
+				print("created comp")
+			else	
+				print("failed to create comp")
 			end
 		end
 		
@@ -3502,8 +3505,8 @@ function clone_gameobject(gobj)
 		output.components = clonobj:call("get_Components"):get_elements()
 		return output
 	end
-end]]
-
+end
+]]
 --Check a SystemArray typedef for what trypedef the array contains. Caches results
 local cached_array_typedefs = {}
 local function evaluate_array_typedef_name(typedef, td_name)
@@ -4332,7 +4335,7 @@ end
 get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	
 	--log.info("checking name for " .. logv(m_obj))
-	if type(m_obj)~="userdata" then return "" end
+	if type(m_obj)~="userdata" or not m_obj.get_type_definition then return "" end
 	o_tbl = o_tbl or m_obj._ or create_REMgdObj(m_obj)
 	if not o_tbl then return end
 	
@@ -4345,7 +4348,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 		name = o_tbl.skeleton[idx]
 	elseif (type(m_obj) == "number") or (type(m_obj) == "boolean") or not can_index(m_obj) then
 		name = typedef:get_name()
-	elseif (type(m_obj) ~= "userdata") or (m_obj.x or m_obj[0]) then
+	elseif m_obj.x or m_obj[0] then
 		pcall(function()
 			name = (((o_tbl.is_vt or o_tbl.is_obj) and not o_tbl.is_lua_type) and (m_obj:get_type_definition():get_method("ToString()") and m_obj:call("ToString()"))) or typedef:get_name()
 		end)
@@ -4523,7 +4526,7 @@ local VarData = {
 		--o.is_sfix = o.ret_type:is_a("via.Sfix") or nil
 		
 		if (type(o.value_org)=="table") and o_tbl.counts and o_tbl.counts.method and o_tbl.xform and o_tbl.counts.method:get_name():find("Joint") then
-			skeleton = o_tbl.xform.skeleton or lua_get_system_array(o_tbl.xform:call("get_Joints") or {}, nil, true)
+			skeleton = o_tbl.xform._.skeleton or lua_get_system_array(o_tbl.xform:call("get_Joints") or {}, nil, true)
 			if skeleton and skeleton[1].call then  for i=1, #skeleton do skeleton[i] = skeleton[i]:call("get_Name") end end --set up a list of bone names for arrays relating to bones
 			if skeleton and #skeleton == #o.value_org then -- (math.floor(#skeleton / 2) <= #o.value_org) then --((o.count and o.count:call(obj)) or o_tbl.counts.method:call(obj))
 				if (#skeleton < ((o.count and o.count:call(obj)) or o_tbl.counts.method:call(obj))) then
@@ -4533,7 +4536,7 @@ local VarData = {
 				end
 				o.skeleton = skeleton
 			end
-			o_tbl.xform.skeleton = skeleton --keep a copy on the xform, without necessarily turning it into a REMgdObj 
+			o_tbl.xform._.skeleton = skeleton --keep a copy on the xform, without necessarily turning it into a REMgdObj 
 		end
 		
 		if o.field and o.value_org then
@@ -5063,6 +5066,36 @@ local REMgdObj = {
 
 --Function to initialize REMgdObj, used once at the start of the script
 --Binds managed objects to a global dictionary, metadata, which allows them to be indexed like normal tables
+--[[add_to_REMgdObj = function(obj)
+	log.info("Adding " .. tostring(obj) .. " to REMgdObj")
+	local mt = getmetatable(obj)
+	local oldIndex = mt.__index
+	local oldNewIndex = mt.__newindex
+	mt.__index = function(self, key)
+		if metadata[self] and metadata[self][key] then
+			return metadata[self][key] 
+		elseif key ~= "_" then
+			return oldIndex(self, key)
+		end
+	end
+	mt.__newindex = function(self, key, value)
+		--using "REMgdObj" as the key will call the constructor:
+		if key == "REMgdObj" then 
+			metadata[self] = REMgdObj:__new(self, value) or {}
+		--using "_" as the key will create an attached data table:
+		elseif key == "_" then
+			metadata[self] = metadata[self] or {}
+			metadata[self][key] = value
+		else 
+			try, out = pcall(oldNewIndex, self, key, value) 
+			if not try then
+				log.debug(out)
+				log.info(out)
+			end
+		end
+	end
+end]]
+
 add_to_REMgdObj = function(obj)
 	log.info("Adding " .. tostring(obj) .. " to REMgdObj")
 	local mt = getmetatable(obj)
@@ -5114,7 +5147,7 @@ getmetatable(Vector3f.new(0,0,0)).__is_vec3 = 1
 getmetatable(Vector2f.new(0,0)).__is_vec2 = 1
 getmetatable(tds.via_hid_keyboard_typedef).__is_td = true 
 getmetatable(scene).__is_obj = true
-getmetatable(REMgdObj_objects.SystemArray).__is_arr = true
+--getmetatable(REMgdObj_objects.SystemArray).__is_arr = true
 getmetatable(REMgdObj_objects.ValueType).__is_vt = true
 getmetatable(static_funcs.mk_gameobj).__is_method = true
 --getmetatable(REMgdObj_objects.BHVT).__is_bhvt = true
@@ -5132,7 +5165,7 @@ if REMgdObj_objects then
 		end
 	end
 	REMgdObj_objects = nil
-	mathex = (sdk.create_instance(tds.mathex:get_full_name(), true) or sdk.create_instance(tds.mathex:get_full_name(), true))
+	mathex = tds.mathex and (sdk.create_instance(tds.mathex:get_full_name(), true) or sdk.create_instance(tds.mathex:get_full_name(), true))
 	mathex = mathex and mathex:add_ref()
 	if mathex then 
 		create_REMgdObj(mathex, true) 
@@ -5887,6 +5920,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 					vd.gvalue_name = vd.gvalue_name or ""
 					vd.value = vd.value or vd.value_org
 					if editable_table_field("gvalue_name", vd.gvalue_name, vd, "Global Alias") == 1 then
+						re.msg(tostring(vd.gvalue_name))
 						_G[vd.gvalue_name] = vd.value
 						if static_funcs.mini_console then
 							command = vd.gvalue_name
@@ -7180,7 +7214,7 @@ show_imgui_mats = function(anim_object)
 			--anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. ((MDFFile and MDFFile.extensions[game_name]) or "")
 		end
 		
-		changed, anim_object.materials.save_path_text = imgui.input_text("Modify File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text) --
+		changed, anim_object.materials.save_path_text = imgui.input_text("Modify MDF File" .. ((anim_object.materials.save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.save_path_text) --
 		if changed or anim_object.materials.save_path_exists==nil then
 			anim_object.materials.save_path_exists = BitStream.checkFileExists(anim_object.materials.save_path_text:gsub("^reframework/data/", ""))
 		end
@@ -7188,7 +7222,7 @@ show_imgui_mats = function(anim_object)
 		local tooltip_msg = "Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh"
 		imgui.tooltip(tooltip_msg)
 		
-		if anim_object.materials.is_cmd then --SF6 CustomizeColors values
+		if anim_object.materials.is_cmd and rsz_parser and rsz_parser.IsInitialized() then --SF6 CustomizeColors values
 			if anim_object.materials.cmd_save_path_exists then
 				local real_path = anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", "")
 				if imgui.button("Save CMD") then
@@ -7215,12 +7249,12 @@ show_imgui_mats = function(anim_object)
 		end
 		
 		imgui.tooltip(tooltip_msg)
-		if anim_object.materials.mdfFile and imgui.tree_node("[MDF Lua]") then 
-			anim_object.materials.mdfFile:displayImgui()
+		if anim_object.materials.MDFFile and imgui.tree_node("[MDF Lua]") then 
+			anim_object.materials.MDFFile:displayImgui()
 			imgui.tree_pop()
 		end
-		if anim_object.materials.cmdFile and imgui.tree_node("[CMD Lua]") then 
-			anim_object.materials.cmdFile:displayImgui()
+		if anim_object.materials.UserFile and imgui.tree_node("[CMD Lua]") then 
+			anim_object.materials.UserFile:displayImgui()
 			imgui.tree_pop()
 		end
 	end
@@ -9725,14 +9759,16 @@ end)
 --Hooked copy of handle_address:
 object_explorer = merge_tables({old=object_explorer}, getmetatable(object_explorer))
 object_explorer.handle_address = function(self, address, skip_ctl_panel)
-    object_explorer.old:handle_address(address)
-    if not (SettingsCache.embed_mobj_control_panel or skip_ctl_panel) and imgui.tree_node("Managed Object Control Panel") then
-        if type(address)=="number" then
-            address = sdk.to_managed_object(address)
-        end
-        imgui.managed_object_control_panel(address)
-        imgui.tree_pop()
-    end
+	if object_explorer.old then
+		object_explorer.old:handle_address(address)
+		if not (SettingsCache.embed_mobj_control_panel or skip_ctl_panel) and imgui.tree_node("Managed Object Control Panel") then
+			if type(address)=="number" then
+				address = sdk.to_managed_object(address)
+			end
+			imgui.managed_object_control_panel(address)
+			imgui.tree_pop()
+		end
+	end
 end
 
 --Draw functions are currently broken in SF6:
@@ -9748,9 +9784,14 @@ end
 --On Frame ------------------------------------------------------------------------------------------------------------------------------------------------
 re.on_frame(function()
 	
+	
+	if isGNG and os.clock() < 30.0 then return end
+	
 	re.msgs_this_frame = 0
 	static_objs.cam = sdk.get_primary_camera()
-	last_camera_matrix = static_objs.cam and static_objs.cam:call("get_WorldMatrix") or last_camera_matrix
+	pcall(function() 
+		last_camera_matrix = static_objs.cam and static_objs.cam:call("get_WorldMatrix") or last_camera_matrix
+	end)
 	
 	tics = tics + 1
 	uptime = os.clock()
@@ -9759,6 +9800,7 @@ re.on_frame(function()
 	if tics == 1 then
 		init_settings()
 	end
+	
 	
 	--deferred_calls = {}
 	for instance, data in pairs(metadata) do

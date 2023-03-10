@@ -466,10 +466,10 @@ re.on_application_entry("UpdateMotion", function()
 				elseif (checked_object.mlist_idx == checked_object.loop_b[3] and checked_object.mot_idx == checked_object.loop_b[4]) and checked_object.layer:call("get_Frame") >= checked_object.loop_b[1] then 
 					if checked_object.mbank_idx ~= checked_object.loop_a[2] or checked_object.mlist_idx ~= checked_object.loop_a[3] or checked_object.mot_idx ~= checked_object.loop_a[4] then
 						if obj.display then
-							if checked_object.loop_a[2] ~= checked_object.mbank_idx then 
+							if checked_object.loop_a[2] ~= checked_object.mbank_idx then
 								obj:set_motionbank(checked_object.loop_a[2], checked_object.loop_a[3], checked_object.loop_a[4])
 							else
-								--log.info("setting " .. checked_object.name .. " to " .. checked_object.loop_a[2] .. ", " ..  checked_object.loop_a[3] .. ", " ..  checked_object.loop_a[4]  .. ", frame " .. checked_object.loop_a[1])
+								--re.msg("setting " .. checked_object.name .. " to " .. checked_object.loop_a[2] .. ", " ..  checked_object.loop_a[3] .. ", " ..  checked_object.loop_a[4]  .. ", frame " .. checked_object.loop_a[1])
 								obj:change_motion(checked_object.loop_a[3], checked_object.loop_a[4])
 							end
 						end
@@ -479,6 +479,7 @@ re.on_application_entry("UpdateMotion", function()
 					end
 				end
 				if current_frame then 
+					teest = { do_seek=true, current_frame=current_frame }
 					obj:control_action( { do_seek=true, current_frame=current_frame } )
 				end
 			end
@@ -1018,10 +1019,10 @@ GameObject.update_AnimObject = function(self, is_known_valid, fake_forced_mode)
 						
 						self.anim_finished = ((frames_in >= self.end_frame) and self.running and (self.end_frame > 10.0)) or nil
 						
-						self.anim_maybe_finished = (frames_in ~= 0 and (self.end_frame > 1) and (frames_in + (0.1 * self.play_speed)) >= self.end_frame - 1) or self.anim_finished or nil
+						--[[self.anim_maybe_finished = (frames_in ~= 0 and (self.end_frame > 1) and (frames_in + (0.1 * self.play_speed)) >= self.end_frame - 1) or nil
 						if (self.anim_maybe_finished or self.loop_a) and not self.looping and self.start_time and (math.abs(self.play_speed) == 1) and (uptime - self.start_time) > 5.0 then --1 * (self.end_frame / 60
 							self.anim_finished = true
-						end
+						end]]
 						--if self.anim_finished or self.anim_maybe_finished then 
 						--	log.info(self.name .. " " .. self.frame .. " " .. self.end_frame .. " " .. frames_in)
 						--end
@@ -1473,9 +1474,6 @@ GameObject.control_action = function(self, args) --args = { paused, do_restart, 
 	args.play_speed = args.play_speed or self.play_speed
 	args.current_frame = args.current_frame or self.frame
 	--log.info("running control action " .. logv(args))
-	if args.do_reset_gpuc then 
-		self:reset_physics()
-	end	
 	if self.layer then
 		if args.paused ~= nil then
 			self.motion:call("set_PlayState", bool_to_number[args.paused]) 
@@ -1490,23 +1488,24 @@ GameObject.control_action = function(self, args) --args = { paused, do_restart, 
 		end
 		self.layer:call("set_Frame", self.frame)
 		--if EMVSettings.seek_all or (self == selected) then-- or (SettingsCache.affect_children and is_child_of(self, selected))  then 
-			if args.do_seek then
-				if selected == self and args.current_frame > self.end_frame then
-					self.do_next = true
-				elseif args.current_frame < 0 then --selected == self and 
-					if args.current_frame < -40 then
-						self.do_prev = true
-					else
-						self.layer:call("set_Frame", 0)
-					end
+		if args.do_seek then
+			if selected == self and args.current_frame > self.end_frame then
+				self.do_next = true
+			elseif args.current_frame < 0 then --selected == self and 
+				if args.current_frame < -40 then
+					self.do_prev = true
 				else
-					self.layer:call("set_Frame", args.current_frame)
+					self.layer:call("set_Frame", 0)
 				end
-				self:reset_physics()
+			else
+				self.layer:call("set_Frame", args.current_frame)
 			end
-			self.layer:call("set_Speed", args.play_speed)
-		--end
+		end
+		self.layer:call("set_Speed", args.play_speed)
 	end
+	if args.do_reset_gpuc or args.do_seek then 
+		self:reset_physics(true)
+	end	
 	--[[if SettingsCache.affect_children and args.force_seek and self.children and EMVSettings.seek_all then
 		for i, child in ipairs(self.children) do 
 			held_transforms[child]:control_action(args)
@@ -2654,7 +2653,9 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 							end
 						else
 							for i, obj in ipairs(imgui_anims) do 
-								if (obj == game_object) or EMVSettings.seek_all then obj.loop_a = { obj.frame, obj.mbank_idx, obj.mlist_idx, obj.mot_idx} end
+								if (obj == game_object) or EMVSettings.seek_all then 
+									obj.loop_a = { obj.frame, obj.mbank_idx, obj.mlist_idx, obj.mot_idx} 
+								end
 							end
 						end
 					end
@@ -2770,16 +2771,27 @@ show_animation_controls = function(game_object, idx, embedded_mode)
 			
 			if control_changed or seek_changed then 
 				if EMVSettings.seek_all then
-					if do_reset_gpuc then 
+					--[[if do_reset_gpuc then 
 						for i, item in ipairs(merge_indexed_tables(findc("via.motion.Chain"), findc("app.PhysicsCloth"))) do
 							item:call("restart") 
 						end
+					end]]
+					local done_objects = {}
+					local function apply_action(object)
+						if not done_objects[object.xform] then
+							--re.msg(object.name)
+							done_objects[object.xform] = true
+							object.do_next = game_object.do_next
+							object.do_prev = game_object.do_prev
+							object.do_shuffle = game_object.do_shuffle
+							object:control_action( { paused=game_object.paused, do_restart=game_object.do_restart, do_seek=seek_changed, play_speed=game_object.play_speed, current_frame=current_frame, do_reset_gpuc=do_reset_gpuc } )
+							for i, child_xform in pairs(object.children or {}) do 
+								apply_action(held_transforms[child_xform] or GameObject:new_AnimObject{xform=child_xform})
+							end
+						end
 					end
 					for i, object in ipairs(imgui_anims or {game_object}) do
-						object.do_next = game_object.do_next
-						object.do_prev = game_object.do_prev
-						object.do_shuffle = game_object.do_shuffle
-						object:control_action( { paused=game_object.paused, do_restart=game_object.do_restart, do_seek=seek_changed, play_speed=game_object.play_speed, current_frame=current_frame, do_reset_gpuc=do_reset_gpuc } )
+						apply_action(object)
 					end
 				else
 					game_object:control_action( { paused=game_object.paused, do_restart=game_object.do_restart, do_seek=seek_changed, play_speed=game_object.play_speed, current_frame=current_frame, do_reset_gpuc=do_reset_gpuc } )
@@ -3245,6 +3257,7 @@ re.on_frame(function()
 		lights = {}
 		non_lights = {}
 		temp_anims, temp_others, unique_names = {}, {}, {}
+		
 		for i, anim_object in ipairs(total_objects) do
 			anim_object.total_objects_idx = i
 			local name = anim_object.name_w_parent
@@ -3288,7 +3301,7 @@ re.on_frame(function()
 				if not light_obj.IBL_bglist then 
 					light_obj.IBL_bglist = {}
 					local used_textures = {}
-					for i, tex_name in ipairs(res.backgrounds) do 
+					for i, tex_name in ipairs(res.backgrounds or {}) do 
 						table.insert(light_obj.IBL_bglist, tex_name)
 						used_textures[tex_name] = true
 					end
