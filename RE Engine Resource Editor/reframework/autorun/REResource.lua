@@ -1356,9 +1356,8 @@ RE_Resource = {
 				end
 				
 				if self.folders and self.folders[1] and imgui.tree_node("Folders") then
-					
 					for i, folder in ipairs(self.folders) do
-						self:displayGameObject(folder, i .. ". " .. (folder.name or ""), RSZ)
+						self:displayGameObject(folder, i .. ". " .. (folder.Name or folder.name or ""), RSZ)
 					end
 					imgui.text()
 					imgui.tree_pop()
@@ -1711,12 +1710,16 @@ RSZFile = {
 					bs:writeUInt(value:len())
 					if value == " " then
 						bs:writeUShort(0)
+					elseif value:len() == 1 then
+						bs:writeUShort(string.byte(value))
 					end
 				else
 					--log.info("writing string " .. value .. " @ " .. self.startOf+bs:tell() .. " " .. value:len()+1)
 					bs:writeUInt(getWStringSize(value)) --value:len()+1
 					bs:writeWString(value)
 				end
+			elseif field.LuaTypeName == "OBB" then
+				bs:writeArray(value, "<f")
 			else
 				last = {field, value}
 				bs["write" .. field.LuaTypeName](bs, value)
@@ -1725,7 +1728,6 @@ RSZFile = {
 			if field.LuaTypeName ~= "WString" then
 				self:seek(pos + field.elementSize)
 			end
-			
 		end
 		
 		if field.isList then 
@@ -2313,7 +2315,8 @@ SCNFile = {
 					idx = i,
 				}
 				info.folder.name = tostring(info.folder.instance.name)
-				info.name = info.folder.name
+				info.folder.Name = tostring(info.folder.instance.fields[1].value)
+				info.name =  info.folder.name
 				
 				if info.parentId == -1 then 
 					table.insert(self.folders, info.folder)
