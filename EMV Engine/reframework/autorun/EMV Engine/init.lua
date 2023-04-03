@@ -2267,7 +2267,7 @@ local function make_obj(name, flag)
 end
 
 --Gathers tables of data from a managed object in preparation to make it convertable to JSON by jsonify_table
-obj_to_json = function(obj, do_only_metadata, args)
+obj_to_json = function(obj, do_only_metadata, args, doForce)
 	
 	local try, otype = pcall(obj.get_type_definition, obj)
 	local is_vt = (try and otype and otype:is_value_type()) or (do_only_metadata == 1) or nil
@@ -2278,7 +2278,7 @@ obj_to_json = function(obj, do_only_metadata, args)
 	
 	local name_full = otype:get_full_name()
 	
-	if do_only_metadata or (otype:is_a("via.Component") or otype:is_a("via.GameObject")) or ((name_full:find("Layer$")  or name_full:find("Bank$")) and (not name_full:find("[_<>,%[%]]") and not name_full:find("Collections"))) then
+	if doForce or do_only_metadata or (otype:is_a("via.Component") or otype:is_a("via.GameObject")) or ((name_full:find("Layer$")  or name_full:find("Bank$")) and (not name_full:find("[_<>,%[%]]") and not name_full:find("Collections"))) then
 		local j_tbl = {} 
 		local used_fields = {}
 		
@@ -2302,8 +2302,12 @@ obj_to_json = function(obj, do_only_metadata, args)
 						elseif not count_method and getter then 
 							local try, item = pcall(getter.call, getter, obj) --normal values
 							prop_value = (try and not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror")))) and item or nil
-							if is_valid_obj(prop_value) and (prop_value:get_type_definition():is_a("via.Component") or prop_value:get_type_definition():is_a("via.GameObject")) then 
-								prop_value = nil
+							if is_valid_obj(prop_value) then
+								if (prop_value:get_type_definition():is_a("via.Component") or prop_value:get_type_definition():is_a("via.GameObject")) then 
+									prop_value = nil
+								elseif prop_value.add_ref then 
+									prop_value = prop_value:add_ref()
+								end
 							end
 						elseif getter then
 							--log.info("found count method " .. count_method:get_name() .. ", count is " .. tostring(count_method:call(obj))) 
@@ -2345,8 +2349,12 @@ obj_to_json = function(obj, do_only_metadata, args)
 						elseif method:get_num_params() == 0 then
 							local try, item = pcall(method.call, method, obj) --normal values
 							prop_value = (try and not (type(item)=="string" and ((item == "") or item:find("%.%.%.") or item:find("rror")))) and item or nil 
-							if is_valid_obj(prop_value) and (prop_value:get_type_definition():is_a("via.Component") or prop_value:get_type_definition():is_a("via.GameObject")) then 
-								prop_value = nil
+							if is_valid_obj(prop_value) then 
+								if (prop_value:get_type_definition():is_a("via.Component") or prop_value:get_type_definition():is_a("via.GameObject")) then 
+									prop_value = nil
+								elseif prop_value.add_ref then 
+									prop_value = prop_value:add_ref()
+								end
 							end
 						end
 						j_tbl[method_name] = prop_value
@@ -3532,9 +3540,9 @@ end
 
 --Manually writes a ValueType at a set offset
 local function write_valuetype(parent_obj, offset, value)
-	for i=0, value.type:get_valuetype_size()-1 do
-		parent_obj:write_byte(offset+i, value:read_byte(i))
-	end
+    for i=0, value.type:get_valuetype_size()-1 do
+        parent_obj:write_byte(offset+i, value:read_byte(i))
+    end
 end
 
 --Takes managed objects (as keys) from deferred_calls[] and call functions on them based on their arguments, during UpdateMotion or on_frame
@@ -6363,7 +6371,7 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 				--o_tbl.Name = o_tbl.Name or field_name
 				
 				if imgui.tree_node_colored(key_name.."o", "[Object Explorer] ", (game_object_name ~= "" and (game_object_name .. " -> ") or "")
-				..(o_tbl.name_full~=field_name and (" "..typedef:get_full_name()) or "").." "..field_name.." @ "..m_obj:get_address(), 0xFFF5D442) then
+				..(o_tbl.name_full~=field_name and (" "..typedef:get_full_name()) or "").." "..tostring(field_name).." @ "..m_obj:get_address(), 0xFFF5D442) then
 				--if imgui.tree_node_str_id(key_name .. "ObjEx",  "[Object Explorer]  "  .. complete_name .. " @ " .. m_obj:get_address() ) then  
 					
 					imgui_changed, o_tbl.sort_alphabetically = imgui.checkbox("Sort Alphabetically", o_tbl.sort_alphabetically)
@@ -6636,7 +6644,13 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 				local vt_as_string = m_obj:call("ToString()")
 				changed, vt_as_string = show_imgui_text_box("Parse String", vt_as_string, o_tbl, (not prop or prop.set) and not was_changed, key_name .. "Guid", true)
 				if changed then 
-					m_obj = m_obj:call("Parse(System.String)", vt_as_string) or m_obj
+					--m_obj = m_obj:call("Parse(System.String)", vt_as_string) or m_obj
+					--m_obj:call("Parse(System.String)", vt_as_string)
+					if m_obj[".ctor(System.String)"] then
+						m_obj = m_obj:call(".ctor(System.String)", vt_as_string) or m_obj
+					else
+						m_obj = m_obj:call("Parse(System.String)", vt_as_string) or m_obj
+					end
 				end
 				if o_tbl.type:is_a("System.Guid") then 
 					o_tbl.msg = o_tbl.msg or static_funcs.guid_method:call(nil, m_obj) 

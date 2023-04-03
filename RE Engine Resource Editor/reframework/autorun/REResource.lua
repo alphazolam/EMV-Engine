@@ -2121,6 +2121,7 @@ SCNFile = {
 	extensions = {
 		re2 = ((tdb_ver==66) and ".19") or ".20",
 		re3 = ".20",
+		re4 = ".20",
 		re8 = ".20",
 		re7 = ((tdb_ver==49) and ".18") or ".20",
 		dmc5 =".19",
@@ -2461,6 +2462,7 @@ PFBFile = {
 	extensions = {
 		re2 = ((tdb_ver==66) and ".16") or ".17",
 		re3 = ".17",
+		re4 = ".17",
 		re8 = ".17",
 		re7 = ((tdb_ver==49) and ".16") or ".17",
 		dmc5 =".16",
@@ -2684,6 +2686,7 @@ UserFile = {
 	extensions = {
 		re2 = ".2",
 		re3 = ".2",
+		re4 = ".2",
 		re8 = ".2",
 		re7 = ".2",
 		dmc5 = ".2",
@@ -2920,6 +2923,7 @@ MDFFile = {
 	extensions = {
 		re2 = ((tdb_ver==66) and ".10") or ".21",
 		re3 = ((tdb_ver==68) and ".13") or ".21",
+		re4 = ".32",
 		re8 = ".19",
 		re7 = ((tdb_ver==49) and ".6") or ".21",
 		dmc5 =".10",
@@ -2928,7 +2932,6 @@ MDFFile = {
 	},
 	
 	isMDF = true,
-	
 	ext2 = ".mdf2",
 	
 	-- Creates a new RE_Resource.MDFFile
