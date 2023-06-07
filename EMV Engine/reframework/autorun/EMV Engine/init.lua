@@ -1,10 +1,10 @@
---EMV_Engine.lua by alphaZomega
+--EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---July 12 2022
---if true then return end
+--June 7, 2023
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
+BitStream = require("EMV Engine/Bitstream")
 
 metadata = {}				--Tables used for indexing REManagedObjects, RETransforms, SystemArrays and ValueTypes
 metadata_methods = {}		--Cached table of functions, fields, etc ("propdata") for each type definition, indexed by full typedef name
@@ -20,6 +20,7 @@ shown_transforms = {}		--GameObjects in here will have their transforms shown as
 RSCache = {}				--Cached resources (files)
 RN = {} 					--Resource names (filenames)
 History = {}				--Previous console commands and their results	
+
 
 --Default Settings:
 local default_SettingsCache = {}
@@ -92,10 +93,9 @@ while scene_timer < 100 and not pcall(function()
 	scene = sdk.call_native_func(sdk.get_native_singleton("via.SceneManager"), sdk.find_type_definition("via.SceneManager"), "get_CurrentScene()")
 	scene_timer = nil
 end) do scene_timer = scene_timer + 1 end
-_G.isSF6 = not not scene:call("findGameObject(System.String)", "ResidentCFNTableHolder") or nil
 _G.isGNG = not not scene:call("findGameObject(System.String)", "St03_01_BrightnessRTT") or nil
 
-local game_name = (isSF6 and "sf6") or (isGNG and "gng") or reframework.get_game_name()
+local game_name = (isGNG and "gng") or reframework.get_game_name()
 
 local msg_ids = {}
 local saved_mats = {files=fs.glob([[EMV_Engine\\Saved_Materials\\.*.json]]), names_map={}, names_indexed={}} --Collection of auto-applied altered material settings for GameObjects (by name)
@@ -119,7 +119,7 @@ local tds = {
 	mathex = sdk.find_type_definition(({mhrise="via.MathEx", sf6="via.MathEx", re2="app.MathEx"})[game_name] or sdk.game_namespace("MathEx")),
 }
 
-static_objs = {
+local static_objs = {
 	cam = sdk.get_primary_camera(),
 	scene_manager = sdk.get_native_singleton("via.SceneManager"),
 	playermanager = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager")) or sdk.get_managed_singleton("snow.player.PlayerManager"),
@@ -127,13 +127,14 @@ static_objs = {
 	via_hid_mouse = sdk.get_native_singleton("via.hid.Mouse"),
 	via_hid_keyboard = sdk.get_native_singleton("via.hid.Keyboard"),
 	setn = ValueType.new(sdk.find_type_definition("via.behaviortree.SetNodeInfo")),
-	spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or (scene:call("findFolder", 
+	spawned_prefabs_folder = scene:call("findFolder", "ModdedTemporaryObjects") or scene:call("findFolder", 
+		(isRE4 and "Test") or 
 		(isRE2 and "GUI_Rogue") or 
 		(isRE3 and "RopewayGrandSceneDevelop") or
 		(isSF6 and "EmulatorContent") or 
 		(isDMC and "Develop") or 
 		(isMHR and "Item_b_000") or 
-		(isRE8 and "Debug") or "")
+		(isRE8 and "Debug") or ""
 	),
 }
 
@@ -206,6 +207,7 @@ local cog_names = {
 	["dmc5"] = "Hip", 
 	["mhrise"] = "Cog", 
 	["sf6"] = "C_Hip", 
+	["re4"] = "Hip", 
 }
 local mat_types = {
 	[1] = "MaterialFloat",
@@ -236,12 +238,14 @@ local typedef_to_function = {
 
 --List of object examples on which to implement REMgdObj class
 local REMgdObj_objects = {
-	--SystemArray = sdk.find_type_definition("System.Array"):get_method("CreateInstance"):call(nil, sdk.typeof("via.Transform"), 0):add_ref(),
 	ValueType = ValueType.new(sdk.find_type_definition("via.AABB")),
 	--REMgdObj_objects.BehaviorTree = findc("via.motion.MotionFsm2")[1],
 	RETransform = scene:call("get_FirstTransform"),
 	REManagedObject = scene,
 }
+if not isRE4 then
+	--REMgdObj_objects.SystemArray = sdk.find_type_definition("System.Array"):get_method("CreateInstance"):call(nil, sdk.typeof("via.Transform"), 0):add_ref()
+end
 
 --local addresses of important functions and tables defined later:
 EMV = {}
@@ -372,6 +376,20 @@ local function arrayRemove(tbl, keep_function)
         end
     end
     return tbl
+end
+
+--Get the arguments from a hooked RE Engine method
+local function get_args(args)
+	local result = {}
+	for i, arg in pairs(args) do 
+		if not pcall(function()
+			local mobj = sdk.to_managed_object(arg)
+			result[i] = (mobj and mobj:add_ref()) or sdk.to_int64(arg) or tostring(arg)
+		end) then
+			result[i] = sdk.to_int64(arg) or tostring(arg)
+		end
+	end
+	return result
 end
 
 --turn std::vector into table
@@ -1192,8 +1210,8 @@ local ImguiTable = {
 		o.is_vec = not not (tostring(args.tbl):find("::vector")) or nil
 		o.tbl = (o.is_vec and vector_to_table(args.tbl)) or args.tbl
 		
-		local tbl_size = get_table_size(o.tbl)
-		if tbl_size > 25000 then return {} end
+		--local tbl_size = get_table_size(o.tbl)
+		--if tbl_size > 25000 then return {} end
 		
 		o.skip_underscores = args.skip_underscores
 		o.pairs = o.is_array and ipairs or orderedPairs
@@ -4072,6 +4090,30 @@ local ChainGroup = {
 	uses_customsettings = (statics.tdb_ver >= 69),
 	
 	new = function(self, args, o)
+	
+		local function read_uint64(ptr)
+			local value_type = sdk.to_valuetype(ptr, "System.UInt64")
+			return value_type.mValue
+		end
+
+		local function read_uint32(ptr)
+			local value_type = sdk.to_valuetype(ptr, "System.UInt32")
+			return value_type.mValue
+		end
+
+		local function get_setting_id(group)
+			local setting = group:read_qword(0x18)
+			if setting == 0 then return end
+
+			local data = read_uint64(setting + 0x20)
+			if data == 0 then return end
+
+			local settingdata = read_uint64(data + 0x8)
+			if settingdata == 0 then return end
+
+			return read_uint32(settingdata + 0x18) 
+		end
+		
 		o = o or {}
 		self.__index = self  
 		o.group = args.group
@@ -4080,6 +4122,7 @@ local ChainGroup = {
 		o.chain = args.chain or o.anim_object.components_named.Chain or o.chain
 		o.settings_ref = o.group:read_qword(0x18)
 		o.settings = args.settings
+		o.all_settings = args.all_settings
 		o.terminal_name_hash = o.group:call("get_TerminalNameHash")
 		o.node_count = args.node_count or o.group:call("get_NodeCount")
 		o.terminal_name = args.terminal_name or " "--o.xform:call("getJointByHash", o.terminal_name_hash):call("get_Name")
@@ -4091,19 +4134,22 @@ local ChainGroup = {
 			table.insert(o.nodes, ChainNode:new{group_obj=o, idx=i-1})
 			if i == o.node_count then  o.terminal_name = o.nodes[#o.nodes].name end
 		end
+		o.settings_id = get_setting_id(o.group)
+		
         return setmetatable(o, self)
 	end,
 	
-	change_custom_setting = function(self, id)
+	change_custom_setting = function(self, blend_id)
 		if not (self.uses_customsettings) then return end
-		id = id or self.settings_id
-		local chain_setting = sdk.create_instance("via.motion.ChainCustomSetting")
+		local chain_setting = self.all_settings[self.settings_id] or sdk.create_instance("via.motion.ChainCustomSetting")
 		if chain_setting then 
 			chain_setting:call(".ctor")
-			if (self.settings_id ~= self.blend_id and self.chain:call("blendSetting", self.settings_id - 1, self.blend_id - 1, self.blend_ratio, chain_setting)) or (self.settings_id == self.blend_id and self.chain:call("copySetting", self.settings_id - 1, chain_setting)) then
+			blend_id = blend_id or self.settings_id
+			if (self.settings_id ~= blend_id and (self.chain:call("blendSetting", self.settings_id, blend_id, self.blend_ratio, chain_setting)) or (self.settings_id == blend_id and self.chain:call("copySetting", self.settings_id, chain_setting))) then
 				chain_setting = chain_setting:add_ref()
 				self.group:write_byte(0x20, 1) --set to use custom settings
 				pcall(sdk.call_object_func, self.group, "set_CustomSetting", chain_setting) --works overall but crashes if not in pcall()
+				self.all_settings[self.settings_id] = chain_setting
 				self.settings = chain_setting
 			end
 		end
@@ -4343,14 +4389,14 @@ end
 get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	
 	--log.info("checking name for " .. logv(m_obj))
-	if type(m_obj)~="userdata" or not m_obj.get_type_definition then return "" end
+	if type(m_obj)~="userdata" or not m_obj.get_type_definition or not is_valid_obj(m_obj) then return "" end
 	o_tbl = o_tbl or m_obj._ or create_REMgdObj(m_obj)
 	if not o_tbl then return end
 	
 	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition())
 	if not typedef then return tostring(m_obj) end
 	
-	if typedef:get_full_name():match("<(.+)>") then 
+	if typedef:get_full_name():match("<(.+)>") or typedef:is_a("System.Array") then 
 		name = o_tbl.name_full --Enumerators crashing
 	elseif o_tbl.skeleton then
 		name = o_tbl.skeleton[idx]
@@ -4533,7 +4579,7 @@ local VarData = {
 		
 		--o.is_sfix = o.ret_type:is_a("via.Sfix") or nil
 		
-		if (type(o.value_org)=="table") and o_tbl.counts and o_tbl.counts.method and o_tbl.xform and o_tbl.counts.method:get_name():find("Joint") then
+		--[[if (type(o.value_org)=="table") and o_tbl.counts and o_tbl.counts.method and o_tbl.xform and o_tbl.counts.method:get_name():find("Joint") then
 			skeleton = o_tbl.xform._.skeleton or lua_get_system_array(o_tbl.xform:call("get_Joints") or {}, nil, true)
 			if skeleton and skeleton[1].call then  for i=1, #skeleton do skeleton[i] = skeleton[i]:call("get_Name") end end --set up a list of bone names for arrays relating to bones
 			if skeleton and #skeleton == #o.value_org then -- (math.floor(#skeleton / 2) <= #o.value_org) then --((o.count and o.count:call(obj)) or o_tbl.counts.method:call(obj))
@@ -4545,7 +4591,7 @@ local VarData = {
 				o.skeleton = skeleton
 			end
 			o_tbl.xform._.skeleton = skeleton --keep a copy on the xform, without necessarily turning it into a REMgdObj 
-		end
+		end]]
 		
 		if o.field and o.value_org then
 			if o.field and (o.name == "_entries" or o.name == "mSlots") then
@@ -4693,12 +4739,17 @@ local VarData = {
 		local obj = o_tbl.obj
 		local is_obj = self.is_obj or self.is_vt
 		if is_obj and self.cvalue and not o_tbl.is_folder and random(25) then --set owner
-			if self.element_names then
-				for i, cv in ipairs(self.cvalue) do 
-					obj:__set_owner(cv)
+			if not pcall(function() 
+				if self.element_names then
+					for i, cv in ipairs(self.cvalue) do 
+						obj:__set_owner(cv)
+					end
+				else
+					obj:__set_owner(self.cvalue)
 				end
-			else
-				obj:__set_owner(self.cvalue)
+			end) then
+				log.error("Error updating property")
+				--testerr2 = {self, obj, o_tbl, obj.__set_owner}
 			end
 		end
 		local should_update_cvalue = (forced_update or self.update) or (self.cvalue == nil)
@@ -5055,8 +5106,9 @@ local REMgdObj = {
 			if o_tbl.name == "Chain" then
 				if forced_update or not o_tbl.cgroups  then 
 					o_tbl.cgroups = {}
+					local all_settings = {}
 					for i = 0, obj:call("getGroupCount") - 1 do 
-						table.insert(o_tbl.cgroups, ChainGroup:new { group=obj:call("getGroup", i), xform=o_tbl.xform } )
+						table.insert(o_tbl.cgroups, ChainGroup:new { group=obj:call("getGroup", i), xform=o_tbl.xform, all_settings=all_settings } )
 					end
 				end
 				if o_tbl.show_all_joints and o_tbl.cgroups and o_tbl.cgroups[1] then 
@@ -5104,6 +5156,7 @@ local REMgdObj = {
 	end
 end]]
 
+
 add_to_REMgdObj = function(obj)
 	log.info("Adding " .. tostring(obj) .. " to REMgdObj")
 	local mt = getmetatable(obj)
@@ -5116,20 +5169,22 @@ add_to_REMgdObj = function(obj)
 	end
 	mt.__newindex = function(self, key, value)
 		if key == "REMgdObj" then --using "REMgdObj" as the key will call the constructor
-			metadata[self] = REMgdObj:__new(self, value) or {}
+			metadata[self] = REMgdObj:__new(self) or {}
 		elseif not pcall(oldNewIndex, self, key, value) then
 			metadata[self] = metadata[self] or {}
 			metadata[self][key] = value
 		end
 	end
+	REMgdObj.__types[mt.__type.name] = true
+	--re.msg_safe("added " .. tostring(mt.__type.name), 124823958)
 end
+atr = add_to_REMgdObj
 
 --Function to make an REMgdObj object
 create_REMgdObj = function(managed_object, keep_alive, used_props)
 	local mt = getmetatable(managed_object)
 	if mt and mt.__type then
-		if not REMgdObj.__types[mt.__type.name] then
-			REMgdObj.__types[mt.__type.name] = true
+		if not REMgdObj.__types[mt.__type.name] or managed_object._ == 0 then
 			add_to_REMgdObj(managed_object)
 		end
 		managed_object.REMgdObj = used_props
@@ -5161,7 +5216,7 @@ getmetatable(static_funcs.mk_gameobj).__is_method = true
 --getmetatable(REMgdObj_objects.BHVT).__is_bhvt = true
 
 --Create initial REMgdObj:
-if REMgdObj_objects then
+--[[if REMgdObj_objects then
 	for name, object in pairs(REMgdObj_objects) do
 		if not pcall(function()
 			add_to_REMgdObj(object)
@@ -5172,14 +5227,13 @@ if REMgdObj_objects then
 			log.info(tostring(object) .. " add_to_REMgdObj type error")
 		end
 	end
-	REMgdObj_objects = nil
+	--REMgdObj_objects = nil
 	mathex = tds.mathex and (sdk.create_instance(tds.mathex:get_full_name(), true) or sdk.create_instance(tds.mathex:get_full_name(), true))
 	mathex = mathex and mathex:add_ref()
 	if mathex then 
 		create_REMgdObj(mathex, true) 
 	end
-end
-
+end]]
 
 
 --Functions to display managed objects in imgui --------------------------------------------------------------------------------------------------------------------------------------------------
@@ -5425,7 +5479,6 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 	
 	local chain_groups = via_chain._.cgroups or {}
 	local chain_settings = cached_chain_settings[via_chain] or {}
-	cached_chain_settings_names[via_chain] = cached_chain_settings_names[via_chain] or {}
 	
 	if #chain_groups > 0 and imgui.tree_node_str_id(game_object_name .. "Groups", "Chain Groups (" .. #chain_groups ..  ")") then 
 		
@@ -5441,39 +5494,36 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 					group:update()
 				end
 				
-				if not group.settings_id then --initial setup (requiring all other chain groups)
-					local ref_tbl, ctr = {}, 0
-					for j, other_group in ipairs(chain_groups) do 
-						if not ref_tbl[other_group.settings_ref] then 
-							ctr = ctr + 1
-							ref_tbl[other_group.settings_ref] = ctr
-							cached_chain_settings_names[via_chain][ctr] = "Settings " .. tostring(ctr)
-						end
+				if not group.setting_idx then --initial setup (requiring all other chain groups)
+					cached_chain_settings_names[via_chain] = cached_chain_settings_names[via_chain] or {}
+					for j, grp in ipairs(chain_groups) do 
+						insert_if_unique(cached_chain_settings_names[via_chain], "Settings " .. grp.settings_id)
+						grp.setting_idx = find_index(cached_chain_settings_names[via_chain], "Settings " .. grp.settings_id)
+						grp.blend_idx = grp.setting_idx
+						grp:change_custom_setting()
 					end
-					group.settings_id = ref_tbl[group.settings_ref]
-					group.blend_id = group.settings_id
-					group:change_custom_setting()
+					table.sort(cached_chain_settings_names[via_chain], function(a,b) return a < b end)
 				end
 				
 				if ChainGroup.uses_customsettings then 
-					changed, group.settings_id = imgui.combo("Set CustomSettings", group.settings_id, cached_chain_settings_names[via_chain])
+					changed, group.setting_idx = imgui.combo("Set CustomSettings", group.setting_idx, cached_chain_settings_names[via_chain])
 					if imgui.button("Reset CustomSettings") or changed then 
 						group:change_custom_setting()
 					end
 					imgui.same_line()
 				end
 				
-				changed, group.show_positions = imgui.checkbox("Show Positions", group.show_positions) 
+				changed, group.show_positions = imgui.checkbox("Show Names", group.show_positions) 
 				
 				if ChainGroup.uses_customsettings then 
 					imgui.same_line()
 					changed, group.do_blend = imgui.checkbox("Blend", group.do_blend)
 					if group.do_blend then 
 						imgui.text("Note: Only blends original settings to original settings")
-						changed, group.blend_ratio = imgui.drag_float("Blend Ratio", group.blend_ratio, 0.01, -1, 1)
-						changed, group.blend_id = imgui.combo("Blend-To", group.blend_id, cached_chain_settings_names[via_chain])
+						changed, group.blend_ratio = imgui.drag_float("Blend Ratio", group.blend_ratio, 0.01, 0, 1)
+						changed, group.blend_idx = imgui.combo("Blend-To", group.blend_idx or 1, cached_chain_settings_names[via_chain])
 						if changed then
-							group:change_custom_setting()
+							group:change_custom_setting(tonumber(cached_chain_settings_names[via_chain][group.blend_idx]:match(" (.+)")))
 						end
 					end
 					if imgui.tree_node("CustomSettings") then 
@@ -5502,7 +5552,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	
 	local value, is_obj, skip, changed, was_changed
 	local o_tbl = parent_managed_object._
-	local vd = prop or (field and o_tbl.field_data[name:match("%<(.+)%>") or name]) or o_tbl --this is a clusterfuck, with tables being passed as parent_managed_object
+	local vd = prop or (field and o_tbl.field_data[name:match("%<(.+)%>") or name]) or o_tbl
 	local display_name = vd.display_name or name
 	local found_array = return_type:get_full_name():find("<") or o_tbl.mysize or o_tbl.element_names
 	local Name -- = ""
@@ -5552,7 +5602,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		end
 		vd = tbl[element_idx]
 	end
-	
+
 	vd.is_static = vd.is_static or (field and field:is_static() and "STATIC") or nil --or prop and prop.get and prop.get:is_static()
 	
 	--if field or vd.is_arr_element then  
@@ -5578,7 +5628,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				value = enum[ enum_names[value]:sub(1, enum_names[value]:find("%(")-1) ]
 			end
 		else
-			changed, value = imgui.drag_int(display_name .. " (Enum)", value, 1, 0, 4294967294)
+			changed, value = imgui.drag_int(display_name .. " (Enum)", value, 1, 0, 4294967296)
 		end
 	elseif values_type == "number" or values_type == "boolean" or return_type:is_primitive() then
 		if return_type:is_a("System.Single") then
@@ -5586,7 +5636,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		elseif return_type:is_a("System.Boolean") then
 			changed, value = imgui.checkbox(display_name, value)
 		elseif return_type:is_a("System.UInt32") or return_type:is_a("System.UInt64") or return_type:is_a("System.UInt16") then
-			changed, value = imgui.drag_int(display_name, value, 1, 0, 4294967294)
+			changed, value = imgui.drag_int(display_name, value, 1, 0, 4294967296, "%u")
 		else
 			changed, value = imgui.drag_int(display_name, value, 1, -2147483647, 2147483647)
 		end
@@ -5626,6 +5676,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				changed, new_value[i] = show_imgui_vec4(value[i], "Row[" .. i .. "]", nil, vd.increment)
 				was_changed = changed or was_changed
 				if i == 3 and new_value[i].w == 1 then 
+					o_tbl.name = tostring(o_tbl.name)
 					do_offer_worldpos = { new_value[i], (o_tbl and (o_tbl.Name or o_tbl.name) or "") .. " " .. display_name, key_name, parent_managed_object, (field or prop.get) }
 					--vdl.is_pos = true is_pos, is_rot = name:find("Position"), name:find("Rotation")
 				end
@@ -6175,7 +6226,7 @@ local function show_field(managed_object, field, key_name)
 	if changed then
 		local value = value
 		deferred_calls[managed_object] = {vardata=field_data, fn=function()
-			if can_index(value) and value:get_type_definition():is_value_type() then --fixme
+			if can_index(value) and value.type and value:get_type_definition():is_value_type() then --fixme
 				--log.debug("writing valuetype " .. tostring(key_name))
 				write_valuetype(managed_object, field:get_offset_from_base(), value)
 			else
@@ -7188,7 +7239,7 @@ show_imgui_mats = function(anim_object)
 	end
 	
 	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
-	if _G.RE_Resource and _G.BitStream and mesh then
+	if _G.RE_Resource and BitStream and mesh then
 	
 		local function ctx_menu(filetype, real_path)
 			imgui.tooltip("Right click for more options")
@@ -7236,29 +7287,35 @@ show_imgui_mats = function(anim_object)
 		local tooltip_msg = "Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the original MDF file for this mesh"
 		imgui.tooltip(tooltip_msg)
 		
-		if anim_object.materials.is_cmd and rsz_parser and rsz_parser.IsInitialized() then --SF6 CustomizeColors values
-			if anim_object.materials.cmd_save_path_exists then
-				local real_path = anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", "")
-				if imgui.button("Save CMD") then
-					local cmdFile = UserFile:new{filepath=real_path}
-					cmdFile:save(real_path, false, false, anim_object.materials)
-					anim_object.materials.UserFile = cmdFile
+		if anim_object.materials.is_cmd and rsz_parser then 
+			if rsz_parser.IsInitialized() then --SF6 CustomizeColors values
+				if anim_object.materials.cmd_save_path_exists then
+					local real_path = anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", "")
+					if imgui.button("Save CMD") then
+						local cmdFile = UserFile:new{filepath=real_path}
+						cmdFile:save(real_path, false, false, anim_object.materials)
+						anim_object.materials.UserFile = cmdFile
+						imgui.same_line()
+					end
+					ctx_menu("UserFile", real_path)
 					imgui.same_line()
 				end
-				ctx_menu("UserFile", real_path)
-				imgui.same_line()
-			end
-			
-			if anim_object.materials.cmd_save_path_text == nil then
-				pcall(function()
-					local color_slot = anim_object.parent_obj.components_named.PlayerColorController.ColorNum + 1
-					anim_object.materials.cmd_save_path_text = ("$natives/stm/product/model/esf/esf999/001/esf999_001_cmd_471.user.2"):gsub("esf999", "esf"..anim_object.name:match("esf(.+)v")):gsub("_471", "_"..string.format("%03d", color_slot))
-				end)
-			end
-			
-			changed, anim_object.materials.cmd_save_path_text = imgui.input_text("Modify CMD File" .. ((anim_object.materials.cmd_save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.cmd_save_path_text) --
-			if changed or anim_object.materials.cmd_save_path_exists==nil then
-				anim_object.materials.cmd_save_path_exists = BitStream.checkFileExists(anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", ""))
+				
+				if anim_object.materials.cmd_save_path_text == nil then
+					pcall(function()
+						local esf_no = anim_object.name:match("esf(.+)v")
+						local color_slot = string.format("%03d", anim_object.parent_obj.components_named.PlayerColorController.ColorNum + 1)
+						local costume_slot = anim_object.parent_obj.components_named.PlayerColorController.ColorData:get_Path():match("esf%d%d%d/(.+)/")
+						anim_object.materials.cmd_save_path_text = ("$natives/stm/product/model/esf/esf"..esf_no.."/"..costume_slot.."/esf"..esf_no.."_"..costume_slot.."_cmd_"..color_slot..".user.2")
+					end)
+				end
+				
+				changed, anim_object.materials.cmd_save_path_text = imgui.input_text("Modify CMD File" .. ((anim_object.materials.cmd_save_path_exists and "") or " (Does Not Exist)"), anim_object.materials.cmd_save_path_text) --
+				if changed or anim_object.materials.cmd_save_path_exists==nil then
+					anim_object.materials.cmd_save_path_exists = BitStream.checkFileExists(anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", ""))
+				end
+			else
+				imgui.text_colored("Save CMD: Failed to initialize reframework\\data\\rsz\\rszsf6.json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0xFF0000FF)
 			end
 		end
 		
@@ -8148,7 +8205,7 @@ local BHVTCoreHandle = {
 --Class for holding behaviortree managed objects:
 BHVT = {
 	
-	nodes_failed = not isDMC and statics.tdb_ver <= 67,
+	--nodes_failed = not isDMC and statics.tdb_ver <= 67,
 	
 	new = function(self, args, o)
 		o = o or {}
@@ -8187,7 +8244,7 @@ BHVT = {
         return o
 	end,
 	
-	imgui_bhvt_nodes = function(self, node, name, imgui_keyname, dfcall_template, dfcall_json)
+	imgui_bhvt_nodes = function(self, node, name, imgui_keyname, dfcall_template, dfcall_json, array_location_tbl)
 		if not name then 
 			imgui.text("NO NAME")
 			return
@@ -8205,16 +8262,24 @@ BHVT = {
 				self:set_node(name, node.tree_idx)
 			end
 			
-			if (node.children or node.transitions or node.actions) then 
+			
+			--if (node.children or node.transitions or node.actions) then 
 				name = name or BHVTNode:get_node_full_name(node.obj)
 				imgui_keyname = imgui_keyname or self.imgui_keyname
 				dfcall_template = dfcall_template or {obj=self.obj, func="setCurrentNode(System.String, System.UInt32, via.behaviortree.SetNodeInfo)"}
 				--dfcall_template = dfcall_template or {obj=node.layer.layer, func="setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)"}
 				imgui.same_line()
-				if imgui.tree_node_str_id(name.."C", "") then
+				if imgui.tree_node_str_id(node.obj.id, "") then
+					if imgui.button("Reload") then
+						array_location_tbl[1][array_location_tbl[2] ] = BHVTNode:new(node)
+					end
+					imgui.same_line()
+					if imgui.button("Assign to 'node'") then
+						_G.node = node.obj
+					end
 					if node.children and imgui.tree_node("Children") then
 						for i, child_node_obj in pairs(node.children) do 
-							self:imgui_bhvt_nodes(child_node_obj, child_node_obj.name, imgui_keyname, dfcall_template, dfcall_json)
+							self:imgui_bhvt_nodes(child_node_obj, child_node_obj.name, imgui_keyname, dfcall_template, dfcall_json, {node.children, i})
 						end
 						imgui.tree_pop()
 					end
@@ -8236,7 +8301,7 @@ BHVT = {
 					end]]
 					imgui.tree_pop()
 				end
-			end
+			--end
 		if is_running then imgui.end_rect(1); imgui.end_rect(2) end
 	end,
 	
@@ -8339,7 +8404,7 @@ BHVT = {
 								imgui.tree_pop()
 							end
 							for j, node_tbl in ipairs(core_handle.parent_nodes or {}) do 
-								self:imgui_bhvt_nodes(node_tbl, node_tbl.name, self.imgui_keyname, dfcall_template, dfcall_json)
+								self:imgui_bhvt_nodes(node_tbl, node_tbl.name, self.imgui_keyname, dfcall_template, dfcall_json, {core_handle.parent_nodes, j})
 							end
 							imgui.tree_pop()
 						end
@@ -8360,7 +8425,7 @@ BHVT = {
 					imgui.tree_pop()
 				end
 				
-				self._.sequencer = self._.sequencer or (not BHVT.nodes_failed and MoveSequencer:new({obj=self.obj}, self._.sequencer)) or {}
+				--[[self._.sequencer = self._.sequencer or (not BHVT.nodes_failed and MoveSequencer:new({obj=self.obj}, self._.sequencer)) or {}
 				
 				if self._.sequencer.display_imgui then --next(self._.sequencer.Hotkeys) then
 					local seq_detach = self._.sequencer and self._.sequencer.detach
@@ -8384,7 +8449,7 @@ BHVT = {
 					if seq_detach then
 						imgui.end_window()
 					end
-				end
+				end]]
 				
 				if imgui.tree_node(self.name) then
 					imgui.managed_object_control_panel(self.obj)
@@ -9320,7 +9385,7 @@ GameObject = {
 		for i=1, materials_count do 
 			local new_args = {anim_object=self, id=i-1, do_change_defaults=do_change_defaults}
 			local new_mat = Material:new((args and merge_tables(new_args, args) or new_args))
-			self.materials.is_cmd = new_mat.is_cmd
+			self.materials.is_cmd = self.materials.is_cmd or new_mat.is_cmd
 			table.insert(self.materials, new_mat)
 		end
 		if do_change_defaults and SettingsCache.affect_children and self.children then 
@@ -9654,7 +9719,7 @@ local function dump_settings(no_resources)
 		json.dump_file("EMV_Engine\\SettingsCache.json", jsonify_table(SettingsCache))
 		json.dump_file("EMV_Engine\\CachedActions.json", jsonify_table(CachedActions))
 		CachedGlobals = {}
-		if not isRE7 then
+		if not isRE7 and not isRE4 then
 			for key, value in pairs(_G) do 
 				if type(key) == "string" and ({pcall(sdk.is_managed_object, value)})[2] == true then 
 					CachedGlobals[key] = value
@@ -9785,19 +9850,8 @@ object_explorer.handle_address = function(self, address, skip_ctl_panel)
 	end
 end
 
---Draw functions are currently broken in SF6:
-if isSF6 then
-	draw.world_to_screen = function(coords)
-		return nil
-	end
-	draw.world_text = function(coords)
-		return nil
-	end
-end
-
 --On Frame ------------------------------------------------------------------------------------------------------------------------------------------------
 re.on_frame(function()
-	
 	
 	if isGNG and os.clock() < 30.0 then return end
 	
@@ -9824,8 +9878,8 @@ re.on_frame(function()
 				o_tbl.last_opened = o_tbl.last_opened or uptime
 			end
 			if o_tbl.invalid or (o_tbl.last_opened and (uptime - o_tbl.last_opened) > 5) then
-				log.info("REMgdObj deleting " .. o_tbl.name)
 				metadata[instance] = nil
+				log.info("REMgdObj deleting " .. o_tbl.name)
 			elseif not o_tbl.is_vt then
 				instance:__update(nil, o_tbl.clear)
 				o_tbl.clear = nil
@@ -10135,9 +10189,6 @@ re.on_draw_ui(function()
 	update_lists_once = nil
 end)
 
---BitStream writer Lua class
---alphaZomega, July 19, 2022
-
 
 --These functions available by require() ------------------------------------------------------------------------------------------
 EMV = {
@@ -10269,6 +10320,7 @@ EMV = {
 	get_GameObject = get_GameObject,
 	get_fields_and_methods = get_fields_and_methods,
 	nextValue = nextValue,
+	get_args = get_args,
 }
 
 return EMV

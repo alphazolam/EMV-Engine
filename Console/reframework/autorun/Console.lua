@@ -291,7 +291,9 @@ local function show_history(do_minimal, new_first_history_idx)
 		
 		if not SettingsCache.use_child_windows then 
 			--imgui.text(History.command_output)
-			imgui.text(logv(History.command_output, nil, 1))
+			pcall(function()
+				imgui.text(logv(History.command_output, nil, 1))
+			end)
 		end
 	end
 	

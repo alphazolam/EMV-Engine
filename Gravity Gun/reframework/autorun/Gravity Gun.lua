@@ -137,7 +137,7 @@ GGSettings.ray_layers_tables = {
 	["re8"] =		{1, 4, 5, 6, 9, 10, 11, 12, 13, 15, 16, 17, 20, 22, 21, 23, 24, 27, 28, 29, 30, 31, 32},
 	["dmc5"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 	["sf6"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
-	["re4"] =		{1, 2, 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
+	["re4"] =		{0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21, 22, 23, 24 , 25, 26, 27, 28, 29, 30, 31, 32},
 }
 
 ----------------------------------------------------------------------------------------------------------[[REMgdObj Functions]]
@@ -502,14 +502,14 @@ GameObject.new_GrabObject = function(self, args, o)
 			if not isRE7 and #self.shapes == 0 and typedef:is_a("via.physics.Colliders") then  --
 				for c = 0, comp:call("get_NumColliders") do 
 					local collider = comp:call("getColliders", c)
-					if collider then 
+					--[[if collider then 
 						self.colliders = self.colliders or {}
 						table.insert(self.components, collider)
 						table.insert(self.colliders, collider)
 						local shape = collider:call("get_Shape")
 						local t_shape = collider:call("get_TransformedShape")
 						table.insert(self.shapes, t_shape)--table.pack(shape, t_shape))
-					end
+					end]]
 				end
 			end
 			if not self.think and comp_name:find("Think") then 
@@ -919,173 +919,6 @@ local function on_pre_forced_func(args)
 		end
 	end
 end
-
-
---[[args_table = {}
-
-local function on_pre_destroy_gameobj(args)
-	if not is_calling_hooked_function then 
-		--counter = counter + 1
-		--args_table = args
-		--log.debug("4 " .. tostring(sdk.is_managed_object(sdk.to_managed_object(args[4]))))
-		--log.debug("2 " .. tostring(sdk.is_managed_object(sdk.to_managed_object(args[3])))) 
-		--log.debug("1 " .. tostring(sdk.is_managed_object(sdk.to_managed_object(args[1])))) 
-		--spawned_prefabs[sdk.to_managed_object(args[3]):call("get_Transform")] then 
-		--return sdk.PreHookResult.SKIP_ORIGINAL
-	end
-end
-
-local function on_post_forced_func(retval)
-	return retval
-end
-]]
---[[
-
-local function on_pre_resource_path(args)	
-	local try, object = pcall(sdk.to_managed_object, args[2])
-	if try and object then 
-		local name = object:get_type_definition():get_full_name()
-		resource_exts[name] = object:call("ToString()"):match("^.+%.(.+)%]")
-	end
-end
-
-local function on_post_resource_path(retval)
-	if res_obj then
-		
-		res_obj = nil
-	end
-	return retval
-end
-
-sdk.hook(sdk.find_type_definition("via.ResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.SceneResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.PrefabResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.nnfc.nfp.NFPResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.areamap.AreaMapResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.areamap.AreaQueryResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.autoplay.AutoPlayResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.movie.MovieResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.browser.BrowserConfigHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.puppet.PuppetResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.effect.EffectResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.effect.EffectCollisionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.effect.lensflare.LensflareResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.uvsequence.UVSequenceResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.BankResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.ContainableResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.EventListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.MemorySettingsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.PlugInsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.PackageResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SetStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.FreeAreaListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.BankInfoResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.BankListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.ContainerListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.FloatEnumConverterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.GameParameterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.GetGameParameterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SetGameParameterListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.GlobalUserVariablesSetStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.JointAngleListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.JointMaterialListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.JointRotationListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.MaterialObsOclListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.MaterialSwitchListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.MarkerStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.MotionSwitchListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.PackageListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.RagdollListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.RigidBodyListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SpaceDeterminationAuxSendsListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SpaceDeterminationFeatureListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SpaceDeterminationStateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.StateListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SwitchListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.SwitchByNameListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.TriggerListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.TwistAngleListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.VelocityListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.JointMoveListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.DistanceListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.FootContactListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.EncodedMediaResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.TargetOperationTriggerSettingsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.wwise.TargetOperationTriggerResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.fsm.FsmResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.timeline.TimelineBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.timeline.ClipResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.timeline.TimelineResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.timeline.UserCurveResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.timeline.UserCurveListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.userdata.UserVariablesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.PSOPatchHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.ShaderResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.MasterMaterialResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.TextureResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.RenderTargetTextureResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.SSSProfileResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.LodResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.MeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.MeshMaterialResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.IESLightResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.SparseShadowTreeHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.ProbesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.SceneStructureResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.render.LightProbesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.network.AutoSessionRulesResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.network.NetworkConfigHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionBlendResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionTreeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionListBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.JointMapResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionBankBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionBankResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionCameraBankResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionFsmResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionFsm2ResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.ChainResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.SkeletonResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.FbxSkeletonResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.JointConstraintsResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.DevelopRetargetResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.IkDamageActionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionCameraResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.motion.MotionCameraListResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.hid.VibrationResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.CollisionDefinitionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.CollisionBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.CollisionFilterResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.CollisionMaterialResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.CollisionMeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.CollisionSkinningMeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.RequestSetColliderResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.physics.TerrainResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.navigation.AIMapResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.navigation.NavigationFilterSettingResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.navigation.AIMapAttributeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.GUISoundResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.BaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.GUIResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.GUIConfigResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.OutlineFontResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.IconFontResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.TextAnimationResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.gui.MessageResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.RigidBodySetResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.RagdollResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.RagdollControllerResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.RigidBodyMeshResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.DefinitionResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.GpuClothResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.dynamics.GpuCloth2ResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.behaviortree.BehaviorTreeBaseResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.behaviortree.FSMv2TreeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-sdk.hook(sdk.find_type_definition("via.behaviortree.BehaviorTreeResourceHolder"):get_method("ToString()"), on_pre_resource_path, on_post_resource_path)
-]]
 
 
 if not isRE7 then 
@@ -1615,6 +1448,7 @@ re.on_draw_ui(function()
 		changed, GGSettings.load_json = imgui.checkbox("Persistent Settings", GGSettings.load_json); setting_was_changed = setting_was_changed or changed
 		changed, GGSettings.action_monitor = imgui.checkbox("Action Monitor", GGSettings.action_monitor); setting_was_changed = setting_was_changed or changed
 		changed, GGSettings.force_functions = imgui.checkbox("Forced functions", GGSettings.force_functions); setting_was_changed = setting_was_changed or changed
+		
 		if isRE2 or isRE3 then 
 			changed, GGSettings.block_input = imgui.checkbox("Block input when UI", GGSettings.block_input); setting_was_changed = setting_was_changed or changed
 		end
