@@ -5178,7 +5178,7 @@ add_to_REMgdObj = function(obj)
 	REMgdObj.__types[mt.__type.name] = true
 	--re.msg_safe("added " .. tostring(mt.__type.name), 124823958)
 end
-atr = add_to_REMgdObj
+--atr = add_to_REMgdObj
 
 --Function to make an REMgdObj object
 create_REMgdObj = function(managed_object, keep_alive, used_props)
@@ -6928,6 +6928,11 @@ local Material = {
 			self.multi[v] = self.multi[v] or {}
 			changed, self.multi[v].do_multi = imgui.checkbox("Change Multiple", self.multi[v].do_multi)
 			
+			if self.is_cmd and (var_name:find("Customize") or (UserFile and find_index(UserFile.sf6_cmd_param_names, var_name))) then
+				imgui.same_line()
+				imgui.text_colored("CMD", 0xFFAAFFFF)
+			end
+			
 			local new_var =  self.variable_types[v] == 4 and Vector4f.new(self.variables[v].x, self.variables[v].y, self.variables[v].z, self.variables[v].w) or self.variables[v]
 			
 			if self.variable_types[v] == 1 then 
@@ -6938,6 +6943,7 @@ local Material = {
 			else
 				changed, new_var = imgui.checkbox(var_name, new_var)
 			end
+			
 			if changed then 
 				self.anim_object.update_materials = true
 				table.insert(self.deferred_vars, v)

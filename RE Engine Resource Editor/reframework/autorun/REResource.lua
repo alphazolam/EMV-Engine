@@ -1784,6 +1784,7 @@ RSZFile = {
 				end
 			end
 		else
+			
 			local startPos = self:tell()
 			if fieldTbl.is4ByteArray then
 				fieldTbl.value = self.bs:readArray(math.floor(fieldTbl.elementSize / 4), fieldTbl.LuaTypeName, self:tell(), true)
@@ -2697,6 +2698,25 @@ UserFile = {
 		sf6 = ".2",
 	},
 	
+	sf6_cmd_param_names = {
+		"CustomizeColors",
+		"Emissive",
+		"Cloth_DetailA_AOColor",
+		"ClothAniso_PrimalySpecularColor",
+		"FakeCloth_Color",
+		"Stitch_A_AOColor",
+		"Stitch_B_AOColor",
+		"OcclutionColor",
+		"PrimalySpecularColor",
+		"SecondarySpecularColor",
+		"PrimalyColorOffset",
+		"SecondaryColorOffset",
+		"Rimlight_Color",
+		"SpecularIntensity",
+		"PrimalySpec_Sharpness",
+		"SecondSpec_Sharpness",
+	},
+	
 	isUser = true,
 	
 	ext2 = ".user",
@@ -2776,26 +2796,112 @@ UserFile = {
 		
 		self.RSZ.startOfs = self.header.dataOffset
 		
+		--Saves a Street Fighter 6 "CMD" color file using "materials" table from an EMV GameObject
 		if cmd_materials then
+			
+			local material, recurse
+			
 			local fn = EMV.static_funcs.calc_color
+			
+			local function process_field_tbl(field_value, val_to_find, val_to_save)
+				if field_value[1] then
+					for i, entry in ipairs(field_value) do
+						if type(entry) == "table" and entry.rawDataTbl then
+							if recurse(entry, val_to_find, val_to_save) then 
+								return true 
+							end
+						end
+					end
+				elseif field_value.rawDataTbl then
+					return recurse(field_value, val_to_find, val_to_save)
+				end
+			end
+			
+			recurse = function(rsz_instance, to_find, passed_value)
+				for i, field in ipairs(rsz_instance.fields or {}) do
+					if field.name == to_find then
+						
+						local idx = material.var_names_dict[to_find] or 0
+						local emv_var = passed_value or material.variables[idx]
+						local is_customize_colors = (to_find == "CustomizeColors")
+						
+						if is_customize_colors or emv_var ~= nil then 	
+							if is_customize_colors or (type(field.value) == "table" and field.value.rawDataTbl) then
+								if is_customize_colors then
+									for c, cc_field in ipairs(field.value) do
+										local cc_idx = material.var_names_dict["CustomizeColor_"..c-1] 
+										if material.variables[cc_idx] and material.variables[cc_idx] ~= material.orig_vars[cc_idx] then
+											cc_field.fields[1].value, cc_field.fields[1].rawField.value = true, 1
+											process_field_tbl(cc_field, "Color", material.variables[cc_idx])
+										end
+										local met_idx = material.var_names_dict["CustomizeMetal_"..c-1] 
+										if material.variables[met_idx] and material.variables[met_idx] ~= material.orig_vars[met_idx] then
+											process_field_tbl(cc_field.fields[3].value.fields[1].value, "Enable", true)
+											process_field_tbl(cc_field.fields[3].value.fields[1].value, "_Value", material.variables[met_idx])
+										end
+										local rgh_idx = material.var_names_dict["CustomizeRoughness_"..c-1] 
+										if material.variables[rgh_idx] and material.variables[rgh_idx] ~= material.orig_vars[rgh_idx] then
+											process_field_tbl(cc_field.fields[3].value.fields[2].value, "Enable", true)
+											process_field_tbl(cc_field.fields[3].value.fields[2].value, "_Value", material.variables[rgh_idx])
+										end
+										local blend_idx = material.var_names_dict["CustomizeColor_"..(c-1).. "_BlendRate"] 
+										if material.variables[blend_idx] and material.variables[blend_idx] ~= material.orig_vars[blend_idx] then
+											process_field_tbl(cc_field.fields[3].value.fields[3].value, "Enable", true)
+											process_field_tbl(cc_field.fields[3].value.fields[3].value, "_Value", material.variables[blend_idx])
+										end
+									end
+								elseif idx==0 or material.variables[idx] ~= material.orig_vars[idx] then
+									process_field_tbl(field.value, "Enable", true)
+									if to_find == "Emissive" then
+										process_field_tbl(field.value, "_Value", emv_var)
+									elseif EMV.can_index(emv_var) then
+										if to_find:find("Color") then
+											process_field_tbl(field.value, "Value", emv_var)
+										else
+											process_field_tbl(field.value, "_ValueX", emv_var.x)
+											process_field_tbl(field.value, "_ValueY", emv_var.y)
+											process_field_tbl(field.value, "_ValueZ", emv_var.z)
+											process_field_tbl(field.value, "_ValueW", emv_var.w)
+										end
+									else
+										if not process_field_tbl(field.value, "Value", emv_var) then
+											process_field_tbl(field.value, "_Value", emv_var)
+										end
+									end
+									return true
+								end
+							else
+								local new_value = emv_var
+								if EMV.can_index(emv_var)  then
+									new_value = string.unpack("<i", string.pack("<BBBB", fn(emv_var.x), fn(emv_var.y), fn(emv_var.z), fn(emv_var.w)))
+								end
+								field.value = new_value
+								if type(new_value) == "boolean" then
+									field.rawField.value = bool_to_number[new_value]
+								else
+									field.rawField.value = new_value
+								end
+							end
+						end
+					elseif type(field.value) == "table" then
+						process_field_tbl(field.value, to_find, passed_value)
+					end
+				end
+			end
+			
 			for i, part in ipairs(self.RSZ.objects[1].fields[1].value) do
 				for j, cluster in ipairs(part.fields[2].value) do
 					local mat_idx = EMV.find_index(cmd_materials, cluster.title, "name")
-					if mat_idx then
-						for c, c_color in ipairs(cluster.fields[2].value) do
-							local idx = cmd_materials[mat_idx].var_names_dict["CustomizeColor_"..c-1] or 0
-							local real_cc = cmd_materials[mat_idx].variables[idx]
-							if real_cc then
-								local as_int = string.unpack("<i", string.pack("<BBBB", fn(real_cc.x), fn(real_cc.y), fn(real_cc.z), fn(real_cc.w)))
-								c_color.fields[2].rawField.value = as_int
-								c_color.fields[2].value = as_int
-							end
+					material = mat_idx and cmd_materials[mat_idx]
+					if material then
+						for k, var_name in ipairs(self.sf6_cmd_param_names) do 
+							recurse(cluster, var_name)
 						end
 					end
 				end
 			end
 		end
-		--$natives\stm\product\model\esf\esf004\001\esf004_001_cmd_010.user.2
+		
 		self.RSZ:writeBuffer()
 		self.bs:writeBytes(self.RSZ.bs:getBuffer())
 		
@@ -2803,7 +2909,6 @@ UserFile = {
 		self.header.resourceCount = #self.resourceInfos
 		self.header.userdataCount = #self.userdataInfos
 		self:writeStruct("header", self.header)
-		--self.backup = self.bs
 		
 		if (self.bs:save(filepath) and filepath) then
 			if not noPrompt then re.msg("Saved to " .. filepath) end
