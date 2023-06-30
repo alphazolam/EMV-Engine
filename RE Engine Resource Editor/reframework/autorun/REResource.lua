@@ -2830,8 +2830,11 @@ UserFile = {
 								if is_customize_colors then
 									for c, cc_field in ipairs(field.value) do
 										local cc_idx = material.var_names_dict["CustomizeColor_"..c-1] 
-										if material.variables[cc_idx] and material.variables[cc_idx] ~= material.orig_vars[cc_idx] then
-											cc_field.fields[1].value, cc_field.fields[1].rawField.value = true, 1
+										print("CC_IDX: "..tostring(cc_idx))
+										if material.variables[cc_idx] then
+											if material.variables[cc_idx] ~= material.orig_vars[cc_idx] then
+												cc_field.fields[1].value, cc_field.fields[1].rawField.value = true, 1
+											end
 											process_field_tbl(cc_field, "Color", material.variables[cc_idx])
 										end
 										local met_idx = material.var_names_dict["CustomizeMetal_"..c-1] 
@@ -2889,8 +2892,8 @@ UserFile = {
 				end
 			end
 			
-			for i, part in ipairs(self.RSZ.objects[1].fields[1].value) do
-				for j, cluster in ipairs(part.fields[2].value) do
+			for i, body_part in ipairs(self.RSZ.objects[1].fields[1].value) do
+				for j, cluster in ipairs(body_part.fields[2].value) do
 					local mat_idx = EMV.find_index(cmd_materials, cluster.title, "name")
 					material = mat_idx and cmd_materials[mat_idx]
 					if material then

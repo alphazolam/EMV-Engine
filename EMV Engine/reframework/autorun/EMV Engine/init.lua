@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---June 20, 2023
+--June 30, 2023
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -939,7 +939,7 @@ local function run_command(input)
 end
 
 --Shows a floating message over an imgui element when hovered:
-imgui.tooltip = function(msg, delay)
+function imgui.tooltip(msg, delay)
 	delay = delay or 0.5
 	if imgui.is_item_hovered() then
 		if delay then 
@@ -3069,11 +3069,11 @@ end
 local function look_at(self, xform_or_joint, matrix)
 	xform_or_joint = (self.joints and self.joints[self.lookat_joint_index]) or xform_or_joint
 	matrix = matrix or (static_objs.cam:call("get_WorldMatrix"))
-	--[[if xform_or_joint and matrix then 
-		xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, 0, -matrix[3].z), Vector3f.new(0, 1, 0)) 
+	--if xform_or_joint and matrix then 
+	--	xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, 0, -matrix[3].z), Vector3f.new(0, 1, 0)) 
 		--xform_or_joint:call("lookAt", Vector3f.new(-matrix[3].x, -matrix[3].y, -matrix[3].z), Vector3f.new(0, 1, 0)) 
-		return 
-	end]]
+	--	return 
+	--end
 end
 
 --Resource Management functions -----------------------------------------------------------------------------------------------------------------------------------
@@ -4697,7 +4697,7 @@ local VarData = {
 						self.array_count = (self.array_count and out:call("get_Count")) or self.array_count
 					end
 					local old_value = (index and self.cvalue and self.cvalue[#self.value+1]) or (not index and self.cvalue) or nil
-					if (old_value ~= nil) and (old_value ~= out) and old_value._  then
+					if (old_value ~= nil) and (old_value ~= out) and metadata[old_value]  then
 						metadata[old_value] = nil --clear old metadata for values being replaced
 					end
 				end
@@ -7267,19 +7267,17 @@ show_imgui_mats = function(anim_object)
 			end
 		end
 		
-		if _G.MDFFile and (anim_object.materials.save_path_exists) then
-			if anim_object.materials.save_path_exists then
-				local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
-				if imgui.button("Save MDF") then
-					local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
-					if mdfFile:save(real_path) then 
-						re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
-					end
-					anim_object.materials.MDFFile = mdfFile
+		if anim_object.materials.save_path_exists then
+			local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
+			if imgui.button("Save MDF") then
+				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
+				if mdfFile:save(real_path) then 
+					re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
 				end
-				ctx_menu("MDFFile", real_path)
-				imgui.same_line()
+				anim_object.materials.MDFFile = mdfFile
 			end
+			ctx_menu("MDFFile", real_path)
+			imgui.same_line()
 		end
 		
 		if anim_object.materials.save_path_text==nil then
@@ -8778,20 +8776,39 @@ GameObject = {
 		
 		self.poser = self.poser or {
 			name=self.key_name:gsub("/", "."),
-			slots={},
-			current_slot_idx=1, 
-			current_object_idx=1,
-			prop_idx=1,
-			prop_names={"_LocalEulerAngle", "_LocalPosition", }, --"_EulerAngle", "_Position"
-			use_gizmos=false,
-			undo={},
+			slots = {},
+			current_slot_idx = 1, 
+			current_object_idx = 1,
+			prop_idx = 1,
+			prop_names = {"_LocalEulerAngle", "_LocalPosition", }, --"_EulerAngle", "_Position"
+			use_gizmos = false, --(self.body_part ~= "Face"),
+			undo = {{last={}},{last={}}},
+			last_undo_idxs = {},
+			sensitivity = 0.01,
+			load_all = (self.body_part == "Face"),
+			load_to_selected = false,
+			do_alphanumeric = false,
+			closest_to_mouse = {},
 		}
 		local poser = self.poser
+		local undo = poser.undo[poser.prop_idx]
+		frozen_joints[self.xform] = frozen_joints[self.xform] or {}
+		local fj = frozen_joints[self.xform]
+		local alt_pressed =  check_key_released(via.hid.KeyboardKey.Menu, 0.0)
+		local ctrl_pressed = check_key_released(via.hid.KeyboardKey.Control, 0.0)
+		local prop_changed_joint
+		local text_pos = {statics.width/4*3, statics.height/4*3}
+		poser.freeze_total = 0
+		poser.is_open = uptime
+		
+		if poser.use_gizmos and kb_state.released[via.hid.KeyboardKey.Control] and poser.closest_to_mouse[5] and tics - poser.closest_to_mouse[5] <= 2 then
+			prop_changed_joint = poser.closest_to_mouse[1]
+			undo[prop_changed_joint].start = 0
+		end
 		
 		local function clear_joint(joint)
 			frozen_joints[self.xform][joint] = frozen_joints[self.xform][joint] or {false, false}
 			frozen_joints[self.xform][joint][poser.prop_idx] = false
-			--if joint._ then joint._.props_named[poser.prop_name].freeze = false end
 			if not frozen_joints[self.xform][joint][1] and not frozen_joints[self.xform][joint][2] then 
 				frozen_joints[self.xform][joint] = nil 
 			end
@@ -8806,6 +8823,8 @@ GameObject = {
 				table.insert(poser.slot_names, name)
 				poser.slots[name] = tbl
 			end
+			poser.current_slot_idx = find_index(poser.slot_names, poser.save_name) or poser.current_slot_idx
+			poser.save_name = ""
 			poser.paths=fs.glob([[EMV_Engine\\Poses\\.*.json]])
 			poser.names = {}
 			for i, filepath in ipairs(poser.paths) do 
@@ -8814,15 +8833,23 @@ GameObject = {
 			poser.current_object_idx = find_index(poser.names, poser.current_name) or table.binsert(poser.names, poser.current_name)
 		end
 		
-		poser.is_open = uptime
-		
-		frozen_joints[self.xform] = frozen_joints[self.xform] or {}
-		local fj = frozen_joints[self.xform]
-		
 		if imgui.tree_node("[Lua]") then
 			read_imgui_element(poser)
 			imgui.tree_pop()
 		end
+		
+		if not next(undo, "last") then
+			for i=1, 2 do
+				for j, joint in ipairs(poser.all_joints or {}) do 
+					poser.undo[i][joint] = {prev_rot={}, start=uptime, }
+				end
+			end
+		end
+		
+		if imgui.button("+") then
+			poser.show_add_json = not poser.show_add_json
+		end
+		imgui.same_line()
 		
 		changed, poser.current_object_idx = imgui.combo("Json File", poser.current_object_idx, poser.names)
 		if changed then 
@@ -8831,118 +8858,158 @@ GameObject = {
 			poser.current_slot_idx = 1
 		end
 		
-		changed, poser.new_object_name = imgui.input_text("New Json Name", poser.new_object_name)
+		if poser.show_add_json then 
+			imgui.text("    ") imgui.same_line()
+			changed, poser.new_object_name = imgui.input_text("New Json Name", poser.new_object_name)
+		end
 		
-		changed, poser.current_slot_idx = imgui.combo("Slot", poser.current_slot_idx, poser.slot_names)
+		imgui.push_id(999)
+			if imgui.button("+") then
+				poser.show_add_slot = not poser.show_add_slot
+			end
+		imgui.pop_id()
+		imgui.same_line()
+		
+		changed, poser.current_slot_idx = imgui.combo("Pose", poser.current_slot_idx, poser.slot_names)
 		
 		local current_slot_name = poser.slot_names[poser.current_slot_idx]
 		
 		imgui.same_line()
-		local clear_slot = imgui.button("X")
-		imgui.tooltip("Delete the selected pose")
+		local clear_slot = imgui.button("Del")
+		imgui.tooltip("Delete the selected pose", 0)
 		
-		changed, poser.save_name = imgui.input_text("New Slot Name", poser.save_name)
+		if poser.show_add_slot or #poser.slot_names == 0 then
+			imgui.text("    ") imgui.same_line()
+			changed, poser.save_name = imgui.input_text("New Pose Name", poser.save_name)
+		end
 		
-		changed, poser.prop_idx = imgui.combo("Property Type", poser.prop_idx, poser.prop_names)
+		changed, poser.prop_idx = imgui.combo("Pose Type", poser.prop_idx, poser.prop_names)
+		imgui.tooltip("Pose joints by their rotations or positions")
 		
 		poser.prop_name = poser.prop_names[poser.prop_idx]
-		poser.is_local = not not poser.prop_name:find("ocal") or nil
-		poser.is_pos = not not poser.prop_name:find("osition") or nil
 		
 		changed, poser.use_gizmos = imgui.checkbox("Use Gizmos", poser.use_gizmos)
+		imgui.tooltip("Use gizmos on the screen to rotate and move bones")
 		
 		imgui.same_line()
+		changed, poser.do_alphanumeric = imgui.checkbox("Sort Alphabetically", poser.do_alphanumeric)
+		imgui.tooltip("Sort bones alphabetically")
+		local changed_alphanumeric = changed
 		
-		changed, poser.load_all = imgui.checkbox("Import All Properties", poser.load_all)
-		changed = nil
+		if not poser.all_joints or (#poser.all_joints > #self.joints) and not imgui.same_line() then
+			changed, poser.save_only_this = imgui.checkbox("Only this object", poser.save_only_this)
+			imgui.tooltip("Save and Load only bones from this object, not from any children (except for the body)")
+		end
+		
+		changed, poser.load_to_selected = imgui.checkbox("Load to Selected", poser.load_to_selected)
+		imgui.tooltip("Load json bones only to bones that are selected")
+		
+		imgui.same_line()
+		changed, poser.load_all = imgui.checkbox("Save/Load Position and Rotation Together", poser.load_all)
+		imgui.tooltip("Import Postions and Rotations at the same time")
 		
 		if imgui.button("Save Pose") or clear_slot then 
 			local current_name = (poser.new_object_name ~= "" and poser.new_object_name) or poser.current_name
 			local current_file = json.load_file("EMV_Engine\\Poses\\" .. current_name .. ".json") or {}
-			if not clear_slot  then
+			local save_name = (poser.save_name ~= "" and poser.save_name) or poser.slot_names[poser.current_slot_idx]
+			
+			if save_name and not clear_slot  then
 				local pose = {}
-				for i, joint in ipairs(poser.all_joints or {}) do
-					joint._ = joint._ or create_REMgdObj(joint, nil, {"get_LocalEulerAngle", "get_LocalPosition" })
-					if fj[joint] and fj[joint][poser.prop_idx] then
-						pose[joint._.Name] = obj_to_json(joint, true, {[poser.prop_name]=jsonify_table({joint:call("get" .. poser.prop_name)})[1]})
+				for i=1, 2 do
+					if poser.load_all or poser.prop_idx == i then
+						for j, joint in ipairs((poser.save_only_this and (poser.body_joints or self.joints)) or poser.all_joints or {}) do
+							local name = joint:get_Name()
+							pose[name] = pose[name] or {}
+							pose[name][poser.prop_names[i] ] = jsonify_table({joint:call("get"..poser.prop_names[i])})[1]
+						end
 					end
 				end
 				for name, joint in pairs(pose) do 
-					pose[name] = merge_tables(current_file[poser.save_name] and current_file[poser.save_name][name] or {}, pose[name])
+					pose[name] = merge_tables(current_file[save_name] and current_file[save_name][name] or {}, pose[name])
 				end
-				current_file[poser.save_name] = pose
-			else
+				current_file[save_name] = pose
+			elseif current_slot_name then
 				current_file[current_slot_name] = nil
 				table.remove(poser.slot_names, poser.current_slot_idx)
-				 poser.current_slot_idx = (poser.current_slot_idx > 1 and poser.current_slot_idx-1) or 1
+				poser.current_slot_idx = (poser.current_slot_idx > 1 and poser.current_slot_idx-1) or 1
 			end
 			
 			json.dump_file("EMV_Engine\\Poses\\" .. current_name .. ".json", current_file)
 			json.current_name = current_name
+			poser.current_name = current_name
 			poser.names = nil
 		end
+		imgui.tooltip("Save frozen joints to a json file as a named pose")
 		
 		imgui.same_line()
 		if imgui.button("Load Pose") then 
-			old_deferred_calls = {}
 			local pose = json.load_file("EMV_Engine\\Poses\\" .. poser.current_name .. ".json")
 			pose = pose and pose[current_slot_name]
 			if pose then
-				for i, joint in pairs(poser.all_joints) do 
+				for i, joint in pairs((poser.save_only_this and (poser.body_joints or self.joints)) or poser.all_joints) do 
 					local saved_joint = pose[joint:get_Name()]
 					if saved_joint then 
-						local joint_tbl = {__address=saved_joint.__address, __typedef=saved_joint.__typedef}
 						for key, value in pairs(saved_joint) do 
-							if poser.load_all or key == poser.prop_name then 
+							local prop_idx = find_index(poser.prop_names, key)
+							local undo_tbl = poser.undo[prop_idx]
+							if (poser.load_all or key == poser.prop_name) and (not poser.load_to_selected or (undo[joint] and undo[joint].selected_to_load)) and type(value)=="string" then 
 								fj[joint] = fj[joint] or {false, false}
-								fj[joint][poser.prop_idx] = Vector3f.new(table.unpack(split(value:sub(5,-1), " ")))
-								joint_tbl[key] = value
+								local splitted = split(value:sub(5,-1), " ")
+								if #splitted == 3 then 
+									fj[joint][prop_idx] = Vector3f.new(table.unpack(splitted))
+									table.insert(undo_tbl.last, joint) 
+									table.insert(undo_tbl[joint].prev_rot, joint["get"..key](joint))
+									table.insert(poser.last_undo_idxs, prop_idx)
+								end
 							end
 						end
-						--jsonify_table(joint_tbl, true, {set_props=true, obj_to_load_to=joint} )
 					end
 				end
 			end
 			poser.names = nil
 		end
+		imgui.tooltip("Load frozen joints from a json file to this skeleton")
 		
 		imgui.same_line()
 		if imgui.same_line and imgui.button("Freeze All") then  
-			for i, joint in ipairs(poser.all_joints or {}) do
-				fj[joint] = fj[joint] or {false, false}
-				fj[joint][poser.prop_idx] = joint["get"..poser.prop_name](joint)
-			end
-		end
-		
-		imgui.same_line()
-		if imgui.same_line and imgui.button("Unfreeze All") then 
-			local frozen_total = 0
-			for i, joint in ipairs(poser.all_joints or {}) do  
-				if fj[joint] and fj[joint][poser.prop_idx] then
-					frozen_total = frozen_total + 1
-					clear_joint(joint)
+			for i=1, 2 do 
+				if poser.load_all or i == poser.prop_idx then
+					for j, joint in ipairs((poser.save_only_this and (poser.body_joints or self.joints)) or poser.all_joints) do
+						fj[joint] = fj[joint] or {false, false}
+						fj[joint][i] = joint["get"..poser.prop_names[i] ](joint)
+						table.insert(poser.undo[i].last, joint) 
+						table.insert(poser.undo[i][joint].prev_rot, joint["get"..poser.prop_names[i] ](joint))
+						table.insert(poser.last_undo_idxs, i)
+					end
 				end
 			end
 		end
-		
-		SettingsCache.exception_methods["via.Joint"] = nil
-		imgui.text("Hotkeys:\n	[Z] - Undo\n	[Shift] - Freeze hovered joint\n	[Alt] - Unfreeze hovered joint\n	[Ctrl] - Stop changing gizmos")
-		imgui.same_line()
-		changed, poser.do_alphanumeric = imgui.checkbox("Sort Alphanumerically", poser.do_alphanumeric)
-		
-		local changed_alphanumeric = changed 
-		local text_pos = {statics.width/4*3, statics.height/4*3}
-		local closest_to_mouse =  {}
-		local prop_changed
-		
-		local pressed_undo = imgui.button("Undo")
-		
-		local alt_pressed =  check_key_released(via.hid.KeyboardKey.Menu, 0.0)
-		local shift_pressed = check_key_released(via.hid.KeyboardKey.Shift, 0.0)
-		local ctrl_pressed = check_key_released(via.hid.KeyboardKey.Control, 0.0)
-		poser.freeze_total = 0
+		imgui.tooltip("Freeze all joints, depending on the checkboxes above")
 		
 		imgui.same_line()
+		if imgui.button("Unfreeze All") then 
+			poser.last_undo_idxs = {}
+			frozen_joints[self.xform] = {}
+			for i=1, 2 do 
+				poser.undo[i].last = {}
+				for j, joint in ipairs((poser.save_only_this and (poser.body_joints or self.joints)) or poser.all_joints) do  
+					poser.undo[i][joint] = poser.undo[i][joint] or {}
+					poser.undo[i][joint].prev_rot = {}
+				end
+			end
+		end
+		imgui.tooltip("Unfreeze all joints and clear undo history, depending on the checkboxes above")
+		
+		imgui.same_line()
+		local pressed_undo = imgui.button("Undo [" .. #poser.last_undo_idxs .. "]") or check_key_released(via.hid.KeyboardKey.Z)
+		
+		imgui.same_line()
+		if imgui.button("Show Help") then
+			poser.opened_help = not poser.opened_help 
+		end
+		
+		changed, poser.sensitivity = imgui.drag_float("Sensitivity", poser.sensitivity, 0.001, 0.0001, 1.0)
+		
 		changed, poser.search_text = imgui.input_text("Filter", poser.search_text)
 		imgui.tooltip("Filter bones by name\nSeparate multiple terms with spaces")
 		
@@ -8950,24 +9017,37 @@ GameObject = {
 			
 			search_terms = split(poser.search_text:lower(), " ")
 			search_terms[1] = search_terms[1] or ""
-			poser.searched_joints = {}
+			
 			poser.all_joints = {}
+			
 			local uniques = {}
+			
 			if self.same_joints_constraint and self.parent then
 				for j, joint in ipairs(lua_get_system_array(self.parent:get_Joints())) do
 					uniques[joint:get_Name()] = true
 				end
-			end
+			end 
+			
 			for i, child in ipairs(merge_indexed_tables({self.xform}, self.children) or {}) do
 				if i == 1 or child:get_SameJointsConstraint() then
+					local is_body = ((i == 1) or (get_body_part(child:get_GameObject():get_Name()) == "Body"))
 					for j, joint in ipairs(lua_get_system_array(child:get_Joints())) do 
 						if not uniques[joint:get_Name()] then
 							uniques[joint:get_Name()] = true
 							table.insert(poser.all_joints, joint)
+							if is_body then
+								poser.body_joints = poser.body_joints or {}
+								table.insert(poser.body_joints, joint)
+							end
 						end
 					end
 				end
 			end
+			
+			--if not poser.searched_joints then
+			--	imgui.set_next_item_open(true)
+			--end
+			poser.searched_joints = {}
 			
 			for i, joint in ipairs(poser.all_joints) do
 				for t, term in ipairs(search_terms) do 
@@ -8981,8 +9061,59 @@ GameObject = {
 			end
 		end
 		
+		if poser.opened_help then
+			imgui.text_colored("- Right click a joint in the list below to have it look at the camera", 0xFFF5D442)
+			imgui.text_colored("- Freeze joints by moving them in the list or with gizmos, then click 'Save Pose' to save to a json file", 0xFFF5D442)
+			imgui.text_colored("- Freeze facial animations by saving both their Positions and EulerAngles (Rotations)", 0xFFF5D442)
+			imgui.text_colored("- Load only specific joints of a pose by checking the boxes next to them and importing with 'Load to Selected' checked", 0xFFF5D442)
+			imgui.text_colored("- Search through long lists of joints by typing keywords into the 'Filters' text box. Separate keywords with spaces", 0xFFF5D442)
+			imgui.text_colored("- Poses are saved to 'reframework\\data\\EMV Engine\\Poses' in your game folder", 0xFFF5D442)
+			imgui.text_colored("- Hotkeys:\n	[Z] - Undo\n	[Ctrl] - Freeze hovered joint, or select gizmo/joint from on-screen\n	[Alt] - Unfreeze hovered joint", 0xFFF5D442)--\n	[Shift] - Stop changing gizmos")
+		end
+		
+		local next_joint
+		local mouse_tables = {}
 		local do_subtables = (#poser.searched_joints > SettingsCache.max_element_size)
+		local cam_xform = poser.use_gizmos and self.joint_positions and sdk.get_primary_camera():get_GameObject():get_Transform()
+		local cam_xform_data = cam_xform and {
+			cam_joint = cam_xform:getJointByName("Camera"),
+			last_xform = {cam_xform:get_Position(), cam_xform:get_Rotation()},
+		}
+			
 		if #poser.searched_joints > 0 then
+			
+			for i, joint in ipairs(poser.all_joints) do
+				if fj[joint] and fj[joint][poser.prop_idx] then 
+					poser.freeze_total = poser.freeze_total + 1
+				end
+			end
+			
+			if cam_xform_data then
+				cam_xform:set_Rotation(cam_xform_data.cam_joint:get_Rotation()) 
+				cam_xform:set_Position(cam_xform_data.cam_joint:get_Position()) --must temporarily move the cam_xform to the cam joint in order for draw.world_to_screen to work
+				closest_delta = 99999
+				for i, joint in ipairs(poser.all_joints) do
+					local mat = self.joint_positions[joint] 
+					if mat then
+						local pos = mat[3]:to_vec3() --world pos
+						local cam_dist = (pos - cam_xform:call("get_WorldMatrix")[3]):length()
+						local mat_screen = draw.world_to_screen(pos)
+						if mat_screen then
+							local mouse_delta = (mat_screen - imgui.get_mouse()):length()
+							mouse_tables[joint] = {joint, mat_screen, mat, mouse_delta, tics}
+							if mouse_delta < closest_delta then
+								if ctrl_pressed and self.last_show_joints == nil then 
+									self.last_show_joints = self.show_joints 
+									self.show_joints = true
+								end
+								closest_delta = mouse_delta
+								poser.closest_to_mouse = mouse_tables[joint] 
+							end
+						end
+					end
+				end
+			end
+			
 			for j = 1, #poser.searched_joints, ((do_subtables and SettingsCache.max_element_size) or #poser.searched_joints) do 
 				j = math.floor(j)
 				local this_limit = math.floor((j+SettingsCache.max_element_size-1 < #poser.searched_joints and j+SettingsCache.max_element_size-1) or #poser.searched_joints)
@@ -8991,149 +9122,138 @@ GameObject = {
 						local joint = poser.searched_joints[i]
 						local j_o_tbl = joint._ or create_REMgdObj(joint, nil, {"get_LocalEulerAngle", "get_LocalPosition" }) --"get_EulerAngle", "get_Position"
 						j_o_tbl.last_opened = uptime
-						local var_metadata = j_o_tbl.props_named[poser.prop_name]
-						--[[if imgui.tree_node(joint:call("ToString()")) then
-							read_imgui_element(joint._ )
-							imgui.tree_pop()
-						end]]
-						var_metadata.display_name = j_o_tbl.Name
-						if fj[joint] and fj[joint][poser.prop_idx] then 
-							poser.freeze_total = poser.freeze_total + 1
-						end
+						local frozen_prop_data = fj[joint] and fj[joint][poser.prop_idx]
 						imgui.push_id(i)
-							local selected_changed
-							selected_changed, j_o_tbl.selected = imgui.checkbox("", poser.freeze_total > 0 and (poser.undo.last and ((#poser.undo.last > 0) and (poser.undo.last[#poser.undo.last] == joint))) ) -- or ((not poser.undo.last or #poser.undo.last==0) and j_o_tbl.selected))
-							local hovered = imgui.is_item_hovered()
+							
+							j_o_tbl.selected = poser.freeze_total > 0 and #undo.last > 0 and (undo.last[#undo.last] == joint)
+							if j_o_tbl.selected then imgui.begin_rect() imgui.begin_rect() end
+							
+							changed, undo[joint].selected_to_load = imgui.checkbox("", undo[joint].selected_to_load)
+							if (ctrl_pressed or alt_pressed) and imgui.is_item_hovered() then
+								undo[joint].selected_to_load = ctrl_pressed
+							end
+							imgui.tooltip("Import poses to this bone with 'Load to Selected' checked")
 							
 							imgui.same_line()
-							local changed, new_value = imgui.drag_float3(j_o_tbl.Name, joint["get"..poser.prop_name](joint), 0.01, -1000000, 1000000)
-							if changed then
-								prop_changed = joint
+							local changed, new_value = imgui.drag_float3(j_o_tbl.Name, joint["get"..poser.prop_name](joint), poser.sensitivity, -1000000, 1000000)
+							local hovered = imgui.is_item_hovered()
+							
+							if changed or (not frozen_prop_data and hovered and ctrl_pressed) then
+								prop_changed_joint = joint
 								fj[joint] = fj[joint] or {false, false}
 								fj[joint][poser.prop_idx] = new_value
+								if not changed then undo[joint].start = 0 end
 							end
 							
-							--var_metadata.update = true
-							local mat_screen, mat_screen_top
-							local mat = joint:get_LocalMatrix()
-							mat[3] = joint:get_Position():to_vec4()
-							local pos = mat[3]:to_vec3() --world pos
-							
-							if shift_pressed or j_o_tbl.selected then
-								local cam_dist = (pos - static_objs.cam:call("get_WorldMatrix")[3]):length()
-								mat_screen = draw.world_to_screen(pos)
-								mat_screen_top = draw.world_to_screen(pos + Vector3f.new(0, 0.08 * cam_dist, 0))
-							end
-							if mat_screen and mat_screen_top then --if frozen or selected
-								local delta = (mat_screen - mat_screen_top):length()
-								local mouse_delta = (mat_screen - imgui.get_mouse()):length()
-								if j_o_tbl.selected then
-									poser.selected = {joint, mat_screen, mat, mouse_delta}
-								end
-								if j_o_tbl.selected or ((mouse_delta <= delta)) then
-									if not closest_to_mouse[1] or (mouse_delta < closest_to_mouse[4]) then
-										closest_to_mouse = {joint, mat_screen, mat, mouse_delta}
-									end
-								end
+							local do_lookat = false
+							if poser.prop_idx == 1 and imgui.begin_popup_context_item("ctx") then
+								do_lookat = imgui.menu_item("Look at camera")
+								imgui.end_popup() 
 							end
 							
-							hovered = hovered or imgui.is_item_hovered()
-							if selected_changed or ((not fj[joint] or not fj[joint][poser.prop_idx]) and hovered and shift_pressed)  then 
-								if selected_changed then
-									poser.undo[joint] = poser.undo[joint] or { prev_rot={} }
-									poser.undo[joint].start = uptime
-									poser.undo.last = poser.undo.last or {}
-									table.insert(poser.undo.last, joint) 
-								end
-								j_o_tbl.selected = true
-								fj[joint] = fj[joint] or {false, false}
-								fj[joint][poser.prop_idx] = new_value
-							end
-							
-							if fj[joint] and fj[joint][poser.prop_idx] then 
+							if frozen_prop_data then 
 								imgui.same_line() 
-								pressed_undo = (poser.undo[joint] and #poser.undo[joint].prev_rot > 0 and (imgui.button((#poser.undo[joint].prev_rot) or "X")) ) or pressed_undo
-								imgui.same_line()
+								if undo[joint] and #undo[joint].prev_rot > 0 then
+									if imgui.button(#undo[joint].prev_rot) then
+										pressed_undo = true
+										next_joint = joint
+									end
+									imgui.tooltip("Undo one action for this joint")
+									imgui.same_line()
+								end
 								if imgui.button("X") or (hovered and alt_pressed) then
-									poser.undo[joint] = nil
+									undo[joint].prev_rot = {}
 									clear_joint(joint)
 								end
+								imgui.tooltip("Unfreeze this joint and clear its undo history")
 							end
+							
+							if do_lookat then
+								table.insert(undo.last, joint) 
+								table.insert(undo[joint].prev_rot, joint["get"..poser.prop_name](joint))
+								table.insert(poser.last_undo_idxs, poser.prop_idx)
+								local mat = sdk.find_type_definition("via.matrix"):get_method("makeLookAtLH"):call(nil, joint:get_Position(), static_objs.cam:get_GameObject():get_Transform():getJointByName("Camera"):get_Position(), last_camera_matrix[1])
+								joint:set_EulerAngle(mat:to_quat():conjugate():to_euler())
+								fj[joint] = fj[joint] or {false, false}
+								fj[joint][1] = joint:get_LocalEulerAngle()
+							end
+							
+							if j_o_tbl.selected then imgui.end_rect(2) imgui.end_rect(3) end
 						imgui.pop_id()
-						var_metadata.display_name = nil
+					end
+					if do_subtables then 
+						imgui.tree_pop()
 					end
 				end
 			end
 		end
-		if not closest_to_mouse[1] and poser.selected and (poser.undo.last and #poser.undo.last > 0) then 
-			closest_to_mouse = poser.selected
-		elseif ctrl_pressed and not poser.is_changing_gizmo then 
-			closest_to_mouse = poser.last_closest_to_mouse
-		else
-			poser.last_closest_to_mouse = closest_to_mouse
+		
+		local gizmo_tbl = (not ctrl_pressed and mouse_tables[(undo.last[#undo.last] or 0)]) or poser.closest_to_mouse
+		if poser.use_gizmos and gizmo_tbl[1] then 
+			
+			local joint = gizmo_tbl[1]
+			local mat = gizmo_tbl[3]:clone()
+			
+			if (ctrl_pressed or poser.freeze_total > 0) then
+				if (not ctrl_pressed and poser.closest_to_mouse[4] < 200) or (ctrl_pressed and poser.closest_to_mouse[4] < 25) then
+					mat[3].w = 1
+					
+					changed, mat = draw.gizmo(joint:get_address(), mat)
+					
+					if changed then
+						prop_changed_joint = joint
+						poser.prop_idx = (mat[3]:to_vec3() ~= gizmo_tbl[3][3]:to_vec3() and 2) or 1
+						poser.prop_name = poser.prop_names[poser.prop_idx]
+						undo = poser.undo[poser.prop_idx]
+						joint:set_Rotation(mat:to_quat())
+						joint:set_Position(mat[3]:to_vec3())
+						fj[joint] = fj[joint] or {false, false}
+						fj[joint][poser.prop_idx] = joint["get"..poser.prop_name](joint)
+					end
+					draw.text("\n" .. joint:get_Name(), text_pos[1], text_pos[2], 0xFFFFFFFF)
+					draw.line(gizmo_tbl[2].x, gizmo_tbl[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
+					if not ctrl_pressed and self.last_show_joints ~= nil then
+						self.show_joints, self.last_show_joints = self.last_show_joints, nil
+					end
+				end
+			end
 		end
 		
-		poser.is_changing_gizmo = nil
-		if poser.use_gizmos and (closest_to_mouse[1]) then 
-			
-			local joint = closest_to_mouse[1]
-			local mat = closest_to_mouse[3]:clone()
-			
-			if poser.freeze_total > 0 then
-				mat[3].w = 1
-				changed, mat = draw.gizmo(joint:get_address(), mat, (poser.is_pos and imgui.ImGuizmoOperation.TRANSLATE) or imgui.ImGuizmoOperation.ROTATE, (poser.is_local and imgui.ImGuizmoMode.LOCAL) or imgui.ImGuizmoMode.WORLD)
-			end
-			--imgui.text(mat4_to_string(mat))
-			--if poser.is_local and poser.is_pos then 
-			--	mat[3] = joint:call("get_BaseLocalPosition") + (mat[3] - self.joint_positions[joint][3])
-			--end             
-			
-			if changed or ((not fj[joint] or not fj[joint][poser.prop_idx]) and shift_pressed) then 
+		if prop_changed_joint then
+			local joint = prop_changed_joint
+			if (uptime - undo[joint].start) > 0.33 then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint._.props_named[poser.prop_name].cvalue - undo[joint].prev_rot):length() > 0.1
+				table.insert(undo.last, joint)
+				table.insert(poser.last_undo_idxs, poser.prop_idx)
 				fj[joint] = fj[joint] or {false, false}
-				fj[joint][poser.prop_idx] = (poser.prop_idx==1 and mat:to_quat():to_euler()) or mat[3]:to_vec3()
-				prop_changed = joint
-				poser.is_changing_gizmo = true
+				if not pressed_undo and fj[joint][1] == false and fj[joint][2] == false then
+					fj[joint][poser.prop_idx] = joint["get"..poser.prop_name](joint)
+				end
+				table.insert(undo[joint].prev_rot, fj[joint][poser.prop_idx])
 			end
-			if poser.freeze_total > 0 then
-				draw.text("\n" .. joint._.Name, text_pos[1], text_pos[2], 0xFFFFFFFF)
-				draw.line(closest_to_mouse[2].x, closest_to_mouse[2].y, text_pos[1], text_pos[2] + 30, 0xFFFFFFFF )
-			end
-			if alt_pressed then
-				poser.undo[joint] = nil
-				clear_joint(joint)
-			end
-		end
-
-		if prop_changed then
-			local joint = prop_changed
-			if not poser.undo[joint] or (((uptime - poser.undo[joint].start) > 0.33)  ) then --or not mouse_state.down[via.hid.MouseButton.L] then --and (joint._.props_named[poser.prop_name].cvalue - poser.undo[joint].prev_rot):length() > 0.1
-				poser.undo.last = poser.undo.last or {}
-				table.insert(poser.undo.last, joint) 
-				poser.undo[joint] = poser.undo[joint] or { prev_rot={} } --{start=uptime, prev_rot=joint._.props_named[poser.prop_name].cvalue}
-				table.insert(poser.undo[joint].prev_rot, joint._.props_named[poser.prop_name].cvalue)
-			end
-			poser.undo[joint].start = uptime
+			undo[joint].start = uptime
 		end
 		
-		::goback::
-		if poser.undo.last and (pressed_undo or check_key_released(via.hid.KeyboardKey.Z)) then 
-			local joint = poser.undo.last[#poser.undo.last]
-			poser.undo.last[#poser.undo.last] = nil
-			if poser.undo.last[1] and (not joint or not poser.undo[joint] or not poser.undo[joint].prev_rot[1]) then
-				if joint and poser.undo[joint] then 
-					clear_joint(joint)
+		if pressed_undo then 
+			local prop_idx = poser.last_undo_idxs[#poser.last_undo_idxs]
+			local undo_tbl = poser.undo[prop_idx]
+			local joint = next_joint or (undo_tbl and undo_tbl.last[#undo_tbl.last])
+			if joint and undo_tbl then
+				undo_tbl.last[#undo_tbl.last] = nil
+				poser.last_undo_idxs[#poser.last_undo_idxs] = nil
+				fj[joint] = fj[joint] or {}
+				fj[joint][prop_idx] = joint["get"..poser.prop_names[prop_idx] ](joint)
+				if undo_tbl[joint] and undo_tbl[joint].prev_rot then
+					fj[joint][prop_idx] = undo_tbl[joint].prev_rot[#undo_tbl[joint].prev_rot]
+					undo_tbl[joint].prev_rot[#undo_tbl[joint].prev_rot] = nil
 				end
-				goto goback
-			elseif joint and joint._ then
-				joint._.props_named[poser.prop_name].freeze = 1
-				if poser.undo[joint] and poser.undo[joint].prev_rot then
-					deferred_calls[joint] = {func="set" .. poser.prop_name, args=poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot], vardata=joint._.props_named[poser.prop_name]}
-					poser.undo[joint].prev_rot[#poser.undo[joint].prev_rot] = nil
-				end
-				if not poser.undo[joint].prev_rot or not poser.undo[joint].prev_rot[1] then
+				if not undo_tbl[joint].prev_rot or not undo_tbl[joint].prev_rot[1] then
 					clear_joint(joint)
 				end
 			end
+		end
+		if cam_xform_data then
+			cam_xform:set_Rotation(cam_xform_data.last_xform[2]) 
+			cam_xform:set_Position(cam_xform_data.last_xform[1])
 		end
 	end,
 	
@@ -9287,19 +9407,22 @@ GameObject = {
 				end					
 				if self.joints and self.joint_positions then
 					local output_str = "\n"
-					for i, joint in ipairs(self.joints) do 
+					local active_poser = self.poser and (uptime - self.poser.is_open) < 5
+					for i, joint in ipairs((active_poser and self.poser.all_joints) or self.joints) do 
 						output_str = output_str .. joint:call("get_Name") .. " = " .. joint:call("get_NameHash") .. ",\n"
 						local joint_pos = self.joint_positions[joint][3]
 						local parent = joint:call("get_Parent")
-						local parent_pos = parent and self.joint_positions[parent][3]
-						local this_vec2 = draw.world_to_screen(joint_pos)
-						if self.show_joint_names or (parent and (parent_pos-joint_pos):length() > 1) then 
-							draw.world_text(joint:call("get_Name"), joint_pos, 0xFFFFFFFF) 
-						end
-						if parent and this_vec2 then 
-							local parent_vec2 = draw.world_to_screen(parent_pos)
-							if parent_vec2 then 
-								draw.line(parent_vec2.x, parent_vec2.y, this_vec2.x, this_vec2.y, 0xFF00FFFF)  
+						if not parent or self.joint_positions[parent] ~= nil then 
+							local parent_pos = parent and self.joint_positions[parent][3]
+							local this_vec2 = draw.world_to_screen(joint_pos)
+							if self.show_joint_names or (parent and (parent_pos-joint_pos):length() > 1) then 
+								draw.world_text(joint:call("get_Name"), joint_pos, 0xFFFFFFFF) 
+							end
+							if parent and this_vec2 then 
+								local parent_vec2 = draw.world_to_screen(parent_pos)
+								if parent_vec2 then 
+									draw.line(parent_vec2.x, parent_vec2.y, this_vec2.x, this_vec2.y, 0xFF00FFFF)  
+								end
 							end
 						end
 					end
@@ -9592,17 +9715,10 @@ GameObject = {
 		for xform, obj in pairs(held_transforms) do 
 			if obj.joints  then
 				local active_poser = obj.poser and (uptime - obj.poser.is_open) < 5
-				local do_local = active_poser and obj.poser.is_local
 				if (obj.show_joints or active_poser) and is_valid_obj(xform) then
 					obj.joint_positions = obj.joint_positions or {}
-					for i, joint in pairs(obj.joints) do 
-						if do_local then 
-							obj.joint_positions[joint] = joint:call("get_LocalMatrix")
-							obj.joint_positions[joint][3] = joint:call("get_WorldMatrix")[3]--:to_vec4()
-							--obj.joint_positions[joint] = joint:call("get_WorldMatrix")
-						else
-							obj.joint_positions[joint] = joint:call("get_WorldMatrix")
-						end
+					for i, joint in pairs((active_poser and obj.poser.all_joints) or obj.joints) do 
+						obj.joint_positions[joint] = joint:call("get_WorldMatrix")
 					end
 				end
 			end
@@ -9843,16 +9959,7 @@ re.on_application_entry("UpdateMotion", function()
 		end
 	end
 	
-	for xform, joints in pairs(frozen_joints) do
-		for joint, tbl in pairs(joints) do
-			if tbl[1] then
-				joint:call("set_LocalEulerAngle", tbl[1])
-			end
-			if tbl[2] then
-				joint:call("set_LocalPosition", tbl[2])
-			end
-		end
-	end
+
 end)
 
 re.on_application_entry("PrepareRendering", function()
@@ -9872,6 +9979,21 @@ re.on_application_entry("PrepareRendering", function()
 		--end
 		for managed_object, args in pairs(deferred_calls) do 
 			deferred_call(managed_object, args)
+		end
+	end
+	
+	for xform, joints in pairs(frozen_joints) do
+		if is_valid_obj(xform) then
+			for joint, tbl in pairs(joints) do
+				if tbl[1] then
+					joint:call("set_LocalEulerAngle", tbl[1])
+				end
+				if tbl[2] then
+					joint:call("set_LocalPosition", tbl[2])
+				end
+			end
+		else
+			frozen_joints[xform] = nil
 		end
 	end
 end)
