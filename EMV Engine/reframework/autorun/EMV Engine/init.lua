@@ -4408,11 +4408,12 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	o_tbl = o_tbl or m_obj._ or create_REMgdObj(m_obj)
 	if not o_tbl then return end
 	
-	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition())
+	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition()), nil
 	if not typedef then return tostring(m_obj) end
+	local td_name = typedef:get_full_name()
 	
-	if typedef:get_full_name():match("<(.+)>") or typedef:is_a("System.Array") then 
-		name = o_tbl.name_full --Enumerators crashing
+	if typedef:is_a("System.Array") or td_name:match("<(.+)>") then --arrays
+		name = (o_tbl.elements and o_tbl.elements[1] and (o_tbl.elements[1]:get_type_definition():get_full_name().."["..#o_tbl.elements.."] -- "..get_mgd_obj_name(o_tbl.elements[1]))) or td_name:match("<(.+)>") or o_tbl.name_full:gsub("%[%]", "")
 	elseif o_tbl.skeleton then
 		name = o_tbl.skeleton[idx]
 	elseif (type(m_obj) == "number") or (type(m_obj) == "boolean") or not can_index(m_obj) then
@@ -4422,7 +4423,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 			name = (((o_tbl.is_vt or o_tbl.is_obj) and not o_tbl.is_lua_type) and (m_obj:get_type_definition():get_method("ToString()") and m_obj:call("ToString()"))) or typedef:get_name()
 		end)
 	elseif typedef:is_a("via.Component") then 
-		name = typedef:get_full_name() .. ((typedef:is_a("via.Transform") and (" (" .. get_GameObject(m_obj, true) .. ")")) or "")
+		name = td_name .. ((typedef:is_a("via.Transform") and (" (" .. get_GameObject(m_obj, true) .. ")")) or "")
 	elseif typedef:is_a("via.GameObject") then
 		try, name = pcall(sdk.call_object_func, m_obj, "get_Name")
 		name = try and name
