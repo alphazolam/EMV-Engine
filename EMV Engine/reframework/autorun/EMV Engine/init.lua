@@ -3565,6 +3565,19 @@ local function write_valuetype(parent_obj, offset, value)
     end
 end
 
+--Manually reads a unicode string at an address
+local function read_unicode_string(ptr, is_offset)
+	ptr = (is_offset and sdk.to_valuetype(ptr, "System.UInt64").mValue) or ptr
+	local offs = ptr
+	local str = ""
+	while offs - ptr < 256 and (sdk.to_valuetype(offs, "System.Int16") or {mValue=0}).mValue ~= 0 do
+		local rByte = sdk.to_valuetype(offs, "System.Byte").mValue
+		str = str .. utf8.char(rByte)
+		offs = offs + 2
+	end
+    return str
+end
+
 --Takes managed objects (as keys) from deferred_calls[] and call functions on them based on their arguments, during UpdateMotion or on_frame
 deferred_call = function(managed_object, args, index, on_frame)
 	
@@ -4877,6 +4890,7 @@ local REMgdObj = {
 			o_tbl.parent = obj:call("get_Parent")
 			o_tbl.children = lua_get_enumerator(obj:call("get_Children"), o_tbl)
 			o_tbl.child_folders = lua_get_enumerator(obj:call("get_Folders"), o_tbl) or {}
+			o_tbl.scn_path = read_unicode_string(obj:get_address()+0x38, true)
 		end
 		
 		local propdata = metadata_methods[o_tbl.name_full] or get_fields_and_methods(otype)
@@ -6596,6 +6610,12 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 				imgui.tree_pop()
 			end
 			imgui.spacing()
+			
+			if o_tbl.scn_path then 
+				imgui.text("       Scene Path:")
+				imgui.same_line()
+				imgui.text_colored(o_tbl.scn_path, 0xFFAAFFFF)
+			end
 			
 			if o_tbl.do_auto_expand or ((o_tbl.fields or o_tbl.props) and imgui.tree_node_str_id(key_name .. "F", is_xform and "via.Transform" or "Fields & Properties")) then
 				
@@ -10531,6 +10551,7 @@ EMV = {
 	get_fields_and_methods = get_fields_and_methods,
 	nextValue = nextValue,
 	get_args = get_args,
+	read_unicode_string = read_unicode_string,
 }
 
 return EMV

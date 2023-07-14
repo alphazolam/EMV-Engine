@@ -348,13 +348,14 @@ RE_Resource = {
 	
 	displayInstance = function(self, instance, displayName, parentField, parentFieldListIdx, rszBufferFile)
 		
-		local copied, pasted
+		local copied, pasted, pasted_with_children
 		local id = imgui.get_id(parentFieldListIdx or "") .. (displayName or "[Invalid ObjectId]")
 		
 		local tree_opened = imgui.tree_node_str_id(id, displayName or "")
 		if imgui.begin_popup_context_item(displayName) then  
 			copied = imgui.menu_item("Copy")
 			pasted = copyBuffer.instance and imgui.menu_item("Paste" .. (shift_key_down and " after" or ""))
+			pasted_with_children = copyBuffer.instance and imgui.menu_item("Paste with children after")
 			imgui.end_popup() 
 		end
 		imgui.same_line()
@@ -543,32 +544,62 @@ RE_Resource = {
 		end
 		
 		if copied then
-			copyBuffer.instance = instance
+			copyBuffer.instance = instance.rawDataTbl or instance
 		end
-		if pasted  then
+		
+
+		
+		if pasted or pasted_with_children then
+			
+			local function find_child_instances(sorted_instance)
+				local children = {}
+				for i, value in ipairs(sorted_instance.fields) do
+					local values = (value.count and value.value) or {value.value}
+					local objIDs = (value.objectIndex and value.count and value.objectIndex) or {value.objectIndex}
+					for j, field_value in ipairs(values) do
+						if not children[objIDs[j] ] and type(field_value) == "table" and field_value.fields then
+							children[objIDs[j] ] = field_value.rawDataTbl
+							children = EMV.merge_tables(children, find_child_instances(field_value))
+						end
+					end
+				end
+				return children
+			end
+		
 			local owner = self.owner or self
 			local instance = instance.rawDataTbl or instance
 			local newInstance = EMV.merge_tables({}, copyBuffer.instance.rawDataTbl or copyBuffer.instance)
-			local name = rsz_parser.GetRSZClassName(newInstance.typeId)
 			local isRSZObject = EMV.find_index(rszBufferFile.objectTable, newInstance.index, "instanceId")
-			local addAmt = shift_key_down and 1 or 0 --self.backup
-			local objectTblInsertPt = rszBufferFile:addInstance(name, instance.index+addAmt, newInstance, isRSZObject)
+			local addAmt = (shift_key_down or pasted_with_children) and 1 or 0
+			local uniqueInstances = (pasted_with_children and EMV.merge_tables({[newInstance.index]=newInstance}, find_child_instances(newInstance.sortedTbl))) or {[newInstance.index]=newInstance}
+			local newInstances, newTypenames = {}, {}
+			for i, instance in pairs(uniqueInstances) do 
+				table.insert(newInstances, instance) 
+			end
+			table.sort(newInstances, function(a, b) return a.index < b.index end)
+			for i, instance in ipairs(newInstances) do 
+				table.insert(newTypenames, rsz_parser.GetRSZClassName(instance.typeId)) 
+			end
+			local objectTblInsertPt = rszBufferFile:addInstance(newTypenames, instance.index+addAmt, newInstances, isRSZObject)
+			if parentField.count then
+				parentField.count = parentField.count + 1
+				table.insert(parentField.rawField.value, instance.index + #newInstances)
+			end
 			local RSZ = self.RSZ or self
 			RSZ:writeBuffer()
-			--RSZ.bs:save("test97.scn")
 			RSZ:readBuffer()
 			owner:updateSCNObjectIds(objectTblInsertPt, instance.index+addAmt, isRSZObject)
 			owner:save(nil, true)
 			owner:read()
 		end
 		
+		
+		
 	end,
 	
-	updateSCNObjectIds = function(self, objectTblInsertPt, newInstanceInsertIdx, isComponent)
+	updateSCNObjectIds = function(self, objectTblInsertPt, newInstanceInsertIdx)
 		
 		if self.gameObjectInfos and objectTblInsertPt then
-			
-			local addedComponent = isComponent and false
 			
 			for g, gInfo in ipairs(self.gameObjectInfos or {}) do 
 				if gInfo.parentId >= objectTblInsertPt-1 then gInfo.parentId = gInfo.parentId+1 end
@@ -1060,7 +1091,7 @@ RE_Resource = {
 			imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder")
 			
 			if imgui.button("Save") then--imgui.button(((self.isMDF and "Inject") or "Save") .. " File") then
-				self:save(nil, nil, true)
+				self:save(self.filepath, nil, true)
 			end
 			imgui.tooltip("Save to the same filepath, overwriting")
 			imgui.same_line()
@@ -1947,10 +1978,10 @@ RSZFile = {
 		newInstances[1] = newInstances[1] or (typeNames[1] and self:createInstance(typeNames[1], atIndex))
 		newInstances = EMV.deep_copy(newInstances) --purge all references
 		
-		local addAmt = 0
-		for i, newInstance in ipairs(newInstances) do 
-			if gameObjObjectId or newInstance.objectId then addAmt = addAmt + 1 end 
-		end
+		local addAmt = #newInstances --0
+		--for i, newInstance in ipairs(newInstances) do 
+		--	if gameObjObjectId or newInstance.objectId then addAmt = addAmt + 1 end 
+		--end
 		
 		for i, objectTblObj in ipairs(self.objectTable) do 
 			if objectTblObj.instanceId >= atIndex then 
@@ -2760,7 +2791,7 @@ UserFile = {
 	end,
 	
 	-- Updates the UserFile and RSZFile BitStreams with data from owned Lua tables, and saves the result to a new file
-	save = function(self, filepath, doOverwrite, noPrompt, cmd_materials)
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt, cmd_materials)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then 
 			filepath = (filepath or self.filepath):gsub("%.user", ".NEW.user")
@@ -2913,7 +2944,7 @@ UserFile = {
 		self.header.userdataCount = #self.userdataInfos
 		self:writeStruct("header", self.header)
 		
-		if (self.bs:save(filepath) and filepath) then
+		if not onlyUpdateBuffer and (self.bs:save(filepath) and filepath) then
 			if not noPrompt then re.msg("Saved to " .. filepath) end
 			ResourceEditor.textBox = filepath
 			return true

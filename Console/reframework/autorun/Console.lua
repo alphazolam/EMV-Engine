@@ -258,7 +258,12 @@ local function show_history(do_minimal, new_first_history_idx)
 			if History.first_history_idx ~= #History.history_idx + 1 then
 				imgui.new_line()
 				imgui.end_rect(3)
-				imgui.text("Output: \n" .. logv(History.command_output, nil, 1))
+				local try, out = pcall(function()
+					imgui.text("Output: \n" .. logv(History.command_output, nil, 1))
+				end)
+				if not try then
+					imgui.text("Output: \n" .. out)
+				end
 			end
 			imgui.end_child_window()
 		end
