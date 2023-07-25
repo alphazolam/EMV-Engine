@@ -58,6 +58,9 @@ if rsz_parser and not rsz_parser.IsInitialized() then
 	rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json")
 end
 
+local displayStruct
+local displayStructList
+
 -- Core resource class with important file methods shared by all specific resource types:
 RE_Resource = {
 	
@@ -74,7 +77,10 @@ RE_Resource = {
 		Vec3=16,
 		Vec4=16,
 		GUID=16,
-		
+		Float=4,
+		Float3=12,
+		Float4=16,
+		Float5=20,
 	},
 	
 	validExtensions = {},
@@ -150,12 +156,13 @@ RE_Resource = {
 			elseif methodName == "align" then
 				self.bs:align(keyOrOffset)
 			else
+				--asdfg = {self, keyOrOffset, structName, methodName}
 				output[ keyOrOffset ] = self.bs[ "read" .. methodName ](self.bs)
 				if fieldTbl.isOffset or fieldTbl[3] or keyOrOffset:find("Offse?t?") then
 					local pos = self.bs:tell()
 					table.insert(self.offsets, {ownerTbl=output, name=keyOrOffset, readAddress=self.bs:tell()-8, offsetTo=output[keyOrOffset], relativeStart=relativeOffset})
 					if fieldTbl[3] then --read strings from string offsets:
-						output[ fieldTbl[3][2] ] = self.bs[ "read" .. fieldTbl[3][1] ](self.bs, output[keyOrOffset])-- + (relativeOffset or 0))
+						output[ fieldTbl[3][2] ] = output[keyOrOffset] > 0 and self.bs[ "read" .. fieldTbl[3][1] ](self.bs, output[keyOrOffset]) or "" -- + (relativeOffset or 0))
 						self.offsets[#self.offsets].dataType = fieldTbl[3][1]
 						self.offsets[#self.offsets].dataName = fieldTbl[3][2]
 						--self.offsets[#self.offsets].dataValue = output[ fieldTbl[3][2] ] 
@@ -326,6 +333,8 @@ RE_Resource = {
 			currentItem = SCNFile:new(lowerC)
 		elseif lowerC:find("%.user") then 
 			currentItem = UserFile:new(lowerC)
+		elseif lowerC:find("%.chain") then 
+			currentItem = ChainFile:new(lowerC)
 		end
 		
 		currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
@@ -1076,7 +1085,6 @@ RE_Resource = {
 	-- Displays a RE_Resource in imgui with editable fields, showing only the important structs of the file. Contains special functions for RSZ data
 	displayImgui = function(self)
 		
-		local display_struct
 		local font_succeeded = pcall(imgui.push_font, utf16_font)
 		
 		if self.filepath then
@@ -1166,6 +1174,7 @@ RE_Resource = {
 				self:saveAsSCN(path:gsub("%.pfb", ""))
 			end
 			
+			--test stuff to change RE2 RSZ to RE3 and back
 			if re23ConvertJsonPath and not imgui.same_line() and imgui.button("Save as " .. (isRE2 and "RE3" or "RE2")) then
 				
 				if not re23ConvertJson then
@@ -1240,8 +1249,24 @@ RE_Resource = {
 			imgui.tooltip("View debug information")
 		end
 		
-		local function display_struct(s, struct, structPrototype, structName, doExpand)
-			
+
+		
+		displayStruct = function(s, struct, structPrototype, structName, doExpand)
+			local function contextMenu()
+				if imgui.begin_popup_context_item(structName .. s) then 
+					if imgui.menu_item("Copy data") then 
+						copyBuffer.structData = EMV.deep_copy(struct)
+					end
+					if copyBuffer.structData and imgui.menu_item("Paste data") then 
+						for key, value in pairs(struct) do
+							if copyBuffer.structData[key] ~= nil then
+								struct[key] = copyBuffer.structData[key]
+							end
+						end
+					end 
+					imgui.end_popup() 
+				end
+			end
 			local doExpand = doExpand or (#structPrototype == 1)
 			if doExpand or imgui.tree_node(s .. ". " .. (struct.name or "")) then
 				imgui.begin_rect()
@@ -1250,7 +1275,8 @@ RE_Resource = {
 					local key = (fieldTbl[3] and fieldTbl[3][2]) or fieldTbl[2]
 					--imgui.text(structName .. ", " .. key .. ", " .. tostring(struct[key]))
 					if type(key)=="string" and not key:find("Offset$") then
-						EMV.editable_table_field(key, struct[key], struct, ((doExpand and s .. ". ") or "") .. key)
+						EMV.editable_table_field(key, struct[key], struct, ((doExpand and s .. ".") or "") .. key)
+						contextMenu()
 					end
 				end
 				if self.customStructDisplayFunction then 
@@ -1260,9 +1286,10 @@ RE_Resource = {
 				imgui.end_rect(2)
 				if not doExpand then imgui.tree_pop() end
 			end
+			contextMenu()
 		end
 		
-		local function displayStructList(structList, structPrototype, structName)
+		displayStructList = function(structList, structPrototype, structName)
 			
 			local toRemoveIdx, toAddIdx
 			for s, struct in ipairs(structList or {}) do
@@ -1286,7 +1313,7 @@ RE_Resource = {
 						end
 					imgui.pop_id()
 					imgui.same_line()
-					display_struct(s, struct, structPrototype, structName)
+					displayStruct(s, struct, structPrototype, structName)
 				end
 			end
 			
@@ -1321,10 +1348,11 @@ RE_Resource = {
 			for i, structName in ipairs(self.structs.structOrder) do 
 				local structPrototype = self.structs[structName]
 				local pluralName = (self[structName] and structName) or structName.."s"
-				if pluralName and imgui.tree_node(pluralName) then
+				
+				if pluralName and self[pluralName] and imgui.tree_node(pluralName) then
 					
 					if pluralName==structName and structName ~= "objectTable" then
-						display_struct(pluralName, self[pluralName], structPrototype, structName, true)
+						displayStruct(pluralName, self[pluralName], structPrototype, structName, true)
 					else
 						local thisInfos, isList = self[pluralName], false
 						displayStructList(thisInfos, structPrototype, structName)
@@ -2785,7 +2813,7 @@ UserFile = {
 		
 		self:seek(self.header.dataOffset)
 		if self.RSZ then self.RSZ.bs:close() end
-		stream = self.bs:extractStream()
+		local stream = self.bs:extractStream()
 		self.RSZ = RSZFile:new({file=stream, startOf=self.header.dataOffset, owner=self})
 		
 	end,
@@ -3225,24 +3253,6 @@ MDFFile = {
 		end
 	end,
 	
-	-- Recreates the strings buffer from the Lua tables so that each string is unique in the file
-	--[[updateStringsBuffer = function(self)
-		local newStringsBuffer = BitStream:new()
-		for i, offsetTbl in ipairs(self.offsets) do
-			if offsetTbl.dataType == "WString" then
-				self.bs:writeUInt64(self.stringsStart + newStringsBuffer:tell(), offsetTbl.readAddress)
-				newStringsBuffer:writeWString(offsetTbl.ownerTbl[offsetTbl.dataName])
-			end
-		end
-		newStringsBuffer:padToAlignment(self.stringsSize) 
-		local diff = newStringsBuffer:fileSize() - self.stringsSize
-		self.bs:removeBytes(self.stringsSize, self.stringsStart)
-		self.bs:insertBytes(newStringsBuffer:fileSize(), self.stringsStart)
-		self.bs:writeBytes(newStringsBuffer:getBuffer(), self.stringsStart)
-		self:scanFixStreamOffsets(0, self:fileSize(), self.stringsStart + self.stringsSize + diff - 16, self:fileSize() + diff, diff, 8)
-		self:read() --reload the buffer into tables
-	end,]]
-	
 	--Is used during displayImgui to add extra stuff to structs 
 	customStructDisplayFunction = function(self, struct)
 		if struct.parameter then 
@@ -3313,9 +3323,546 @@ if tdb_ver == 49 then --RE7
 	table.insert(MDFFile.structs.matHeader, 3, {"UInt64", "uknRE7"})
 end
 
+-- Class for Chain physics files
+ChainFile = {
+	
+	--Chain file extensions by game
+	extensions = {
+		re2 = ((tdb_ver==66) and ".21") or ".46",
+		re3 = ((tdb_ver==68) and ".39") or ".46",
+		re4 = ".53",
+		re8 = ".39",
+		re7 = ((tdb_ver==49) and ".5") or ".46",
+		dmc5 =".21",
+		mhrise = ".48",
+		sf6 = ".52",
+	},
+	
+	isChain = true,
+	ext2 = ".chain",
+	
+	-- Creates a new RE_Resource.ChainFile
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o = RE_Resource:newResource(args, setmetatable(o, self))
+		if o.bs:fileSize() > 0 then
+			o:read()
+		end
+		o:seek(0)
+		return o
+	end,
+	
+	-- Reads the BitStream and packs the data into organized Lua tables
+	read = function(self, start)
+		self.bs:seek(start or 0)
+		self.offsets = {}
+		self.header = self:readStruct("header")
+		
+		self.chainSettings = {}
+		for m = 1, self.header.settingCount do 
+			self.bs:seek(self.header.settingsOffset + self.structSizes.chainSetting * (m-1))
+			self.chainSettings[m] = self:readStruct("chainSetting")
+			self.chainSettings[m].name = "ChainSetting -- ID: " .. tostring(self.chainSettings[m].id)
+		end
+		
+		self.chainCollisions = {}
+		for m = 1, self.header.modelCollisionCount do 
+			self.bs:seek(self.header.modelCollisionsOffset + self.structSizes.chainCollision * (m-1))
+			self.chainCollisions[m] = self:readStruct("chainCollision")
+			self.chainCollisions[m].name = "Collision -- " .. self.chainCollisions[m].jointNameHash .. (self.chainCollisions[m].pairJointNameHash~=0 and (" to " .. self.chainCollisions[m].pairJointNameHash) or "")
+		end
+		
+		self.chainGroups = {}
+		for m = 1, self.header.groupCount do 
+			self.bs:seek(self.header.groupsOffset + self.structSizes.chainGroup * (m-1))
+			self.chainGroups[m] = self:readStruct("chainGroup")
+			self.chainGroups[m].name = "ChainGroup -- " .. self.chainGroups[m].terminalNodeName
+			self.chainGroups[m].nodes = {}
+			for g = 1, self.chainGroups[m].nodeCount do 
+				self.bs:seek(self.chainGroups[m].nodesOffset + self.structSizes.chainNode * (g-1))
+				self.chainGroups[m].nodes[g] = self:readStruct("chainNode")
+				self.chainGroups[m].nodes[g].name = (g == self.chainGroups[m].nodeCount and self.chainGroups[m].terminalNodeName) or self.chainGroups[m].terminalNodeName:gsub("_end", "_"..string.format("%02d", g-1))
+				if self.chainGroups[m].nodes[g].jiggleData and self.chainGroups[m].nodes[g].jiggleData > 0 then
+					self.bs:seek(self.chainGroups[m].nodes[g].jiggleData)
+					self.chainGroups[m].nodes[g].jiggle = self:readStruct("chainJiggle")
+					self.chainGroups[m].nodes[g].jiggle.name = "ChainJiggle"
+				end
+			end
+		end
+		
+		self.windSettings = {}
+		for m = 1, self.header.windSettingCount do 
+			self.bs:seek(self.header.windSettingsOffset + self.structSizes.windSetting * (m-1))
+			self.windSettings[m] = self:readStruct("windSetting")
+			self.windSettings[m].name = "WindSetting -- ID: " .. tostring(self.windSettings[m].id) --self.windSettings[m].matName
+		end
+		
+		self.chainLinks = {}
+		for m = 1, self.header.linkCount do 
+			self.bs:seek(self.header.linksOffset + self.structSizes.chainLink * (m-1))
+			self.chainLinks[m] = self:readStruct("chainLink")
+			self.chainLinks[m].name = "ChainLink -- " .. tostring(self.chainLinks[m].terminalNodeNameAHash)
+			self.chainLinks[m].chainLinkNodes = {}
+			for c = 1, self.chainLinks[m].nodesCount do 
+				self.bs:seek(self.chainLinks[m].nodesOffset + self.structSizes.chainLinkNode * (c-1))
+				self.chainLinks[m].chainLinkNodes[c] = self:readStruct("chainLinkNode")
+				self.chainLinks[m].chainLinkNodes[c].name = tostring("ChainLinkNode -- " .. self.chainLinks[m].chainLinkNodes[c].collisionRadius)
+			end
+		end
+	end,
+	
+	-- Saves a new Chain file using data from owned Lua tables
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt, chainObjTbl)
+		
+		if not doOverwrite and (not filepath or filepath == self.filepath) then
+			filepath = (filepath or self.filepath):gsub("%.chain", ".NEW.chain")
+		end
+		
+		self.bs = BitStream:new()
+		self.bs.filepath = onlyUpdateBuffer and self.filepath or filepath
+		self.bs.fileExists = BitStream.checkFileExists(filepath)
+		
+		self:writeStruct("header", self.header)
+		self.bs:align(16)
+		print("start\n\n\n")
+		if chainObjTbl then --apply chain settings from EMV
+			for i, cgroup in ipairs(chainObjTbl.cgroups) do
+				if not cgroup.settings then 
+					cgroup:change_custom_setting()
+				end
+				local fileChainSettings = cgroup.settings and self.chainSettings[EMV.find_index(self.chainSettings, cgroup.settings_id, "id") or 0]
+				--bb = fileChainSettings or bb
+				if fileChainSettings then
+					cgroup.settings._ = cgroup.settings._ or EMV.create_REMgdObj(cgroup.settings)
+					for key, tbl in pairs(cgroup.settings._.props_named) do
+						local fileKey = key:gsub("^_", ""); fileKey = fileKey:sub(1,1):lower()..fileKey:sub(2, -1)
+						--print(tostring(fileChainSettings[fileKey]) .. " " .. tostring(fileKey) .. " " .. tostring(key))
+						if fileChainSettings[fileKey] ~= nil then
+							--re.msg(fileKey .. " " .. key)
+							--print(fileKey .. " is found")
+							fileChainSettings[fileKey] = tbl.value
+						elseif i == 1 then 
+							print(fileKey .. " is missing")
+						end
+					end
+				end
+			end
+		end
+		
+		self.header.settingsOffset = self.bs:tell()
+		for m = 1, self.header.settingCount do
+			self:writeStruct("chainSetting", self.chainSettings[m])
+		end
+		self.bs:align(16)
+		
+		self.header.modelCollisionsOffset = self.bs:tell()
+		for m = 1, self.header.modelCollisionCount do 
+			self:writeStruct("chainCollision", self.chainCollisions[m])
+		end
+		self.bs:align(16)
+		
+		self.header.groupsOffset = self.bs:tell()
+		for m = 1, self.header.groupCount do 
+			self:writeStruct("chainGroup", self.chainGroups[m])
+		end
+		self.bs:align(16)
+		
+		
+		for m = 1, self.header.groupCount do 
+			self.chainGroups[m].terminalNodeNameOffset = self.bs:tell()
+			if m > 1 then
+				self.chainGroups[m-1].nextChainNameOffset = self.bs:tell()
+			end
+			self.bs:writeWString(self.chainGroups[m].terminalNodeName)
+			self.bs:align(16)
+			self.chainGroups[m].nodesOffset = self.bs:tell() 
+			for i, node in ipairs(self.chainGroups[m].nodes) do
+				self:writeStruct("chainNode", node)
+			end
+			self.bs:align(16)
+			for i, node in ipairs(self.chainGroups[m].nodes) do
+				if node.jiggle then
+					node.jiggleData = self.bs:tell()
+					self:writeStruct("chainJiggle", node.jiggle)
+					self:writeStruct("chainNode", node, node.startOf) --rewrite with offset
+				end
+			end
+			self.bs:align(16)
+		end
+		self.bs:align(16)
+		
+		self.chainGroups[#self.chainGroups].nextChainNameOffset = self.bs:tell()
+		self.header.windSettingsOffset = self.bs:tell()
+		
+		for m = 1, self.header.windSettingCount do 
+			self:writeStruct("windSetting", self.windSettings[m])
+		end
+		self.bs:align(16)
+		
+		self.header.linksOffset = self.bs:tell()
+		for m = 1, self.header.linkCount do 
+			self:writeStruct("chainLink", self.chainLinks[m])
+		end
+		self.bs:align(16)
+		
+		for m = 1, self.header.linkCount do 
+			if self.chainLinks[m].chainLinkNodes[1] then
+				self.chainLinks[m].nodesOffset = self.bs:tell()
+				for c, chainLinkNode in ipairs(self.chainLinks[m].chainLinkNodes) do 
+					self:writeStruct("chainLinkNode", chainLinkNode)
+				end
+			end
+		end
+		
+		self.bs:seek(0) 
+		self:writeStruct("header", self.header) --rewrite header now with offsets
+		
+		self.bs:seek(self.header.groupsOffset) 
+		for m = 1, self.header.groupCount do 
+			self:writeStruct("chainGroup", self.chainGroups[m]) --rewrite chainGroups now with offsets
+		end
+		
+		self.bs:seek(self.header.linksOffset) 
+		for m = 1, self.header.linkCount do 
+			self:writeStruct("chainLink", self.chainLinks[m]) --rewrite chainLinks now with offsets
+		end
+		
+		if not onlyUpdateBuffer and (self.bs:save(filepath) and filepath) then
+			if not noPrompt then re.msg("Saved to " .. filepath) end
+			ResourceEditor.textBox = filepath
+			return true
+		end
+	end,
+	
+	--Is used during displayImgui to add extra stuff to structs 
+	customStructDisplayFunction = function(self, struct)
+		if struct.nodeCount and imgui.tree_node("Nodes") then 
+			displayStructList(struct.nodes, self.structs.chainNode, "chainNodes")
+			imgui.tree_pop()
+		end
+		if struct.jiggle then 
+			displayStruct(1, struct.jiggle, self.structs.chainJiggle, "chainJiggle", false)
+		end
+		if struct.chainLinkNodes and imgui.tree_node("Chain Link Nodes") then 
+			displayStructList(struct.chainLinkNodes, self.structs.chainLinkNode, "chainLinkNodes")
+			imgui.tree_pop()
+		end
+	end,
+	
+	-- Structures comprising a MDF file:
+	structs = {
+		header = {
+			{"UInt", "version"},
+			{"UInt", "magic"},
+			{"UInt", "ErrFlags"},
+			{"UInt", "masterSize"},
+			{"UInt64", "collisionAttrAssetOffset", {"WString", "collisionAttrAsset"}},
+			{"UInt64", "modelCollisionsOffset"},
+			{"UInt64", "extraDataOffset", {"WString", "extraData"}},
+			{"UInt64", "groupsOffset"},
+			{"UInt64", "linksOffset"},
+			--if version >= 53
+			--	{"UInt64", "uknTbl"},
+			{"UInt64", "settingsOffset"},
+			{"UInt64", "windSettingsOffset"},
+			{"UByte", "groupCount"},
+			{"UByte", "settingCount"},
+			{"UByte", "modelCollisionCount"},
+			{"UByte", "windSettingCount"},
+			{"UByte", "linkCount"},
+			{"Byte", "execOrderMax"},
+			{"Byte", "defaultSettingIdx"},
+			{"Byte", "calculateMode"},
+			{"UInt", "ChainAttrFlags"},
+			{"UInt", "parameterFlag"},
+			{"Float", "calculateStepTime"},
+			{"Byte", "modelCollisionSearch"},
+			{"Byte", "LegacyVersion"},
+			{"Short", "Padding"},
+			{"UInt64", "collisionFilterHit"},
+		},
+		
+		
+		chainSetting = {
+			{"UInt64", "colliderFilterInfoPathOffset", {"WString", "colliderFilterInfoPath"}},
+			{"Float", "sprayArc"},
+			{"Float", "sprayFrequency"},
+			{"Float", "sprayCurve1"},
+			{"Float", "sprayCurve2"},
+			{"UInt", "id"},
+			{"Byte", "chainType"},
+			{"Byte", "SettingAttrFlags"},
+			{"Byte", "muzzleDirection"},
+			{"Byte", "windId"},
+			
+			{"Float3", "gravity"},
+			{"Float3", "muzzleVelocity"},
+			
+			{"Float", "damping"},
+			{"Float", "secondDamping"},
+			{"Float", "secondDampingSpeed"},
+			--[[if (version >= 24)
+				{"Float", "minDamping"},
+				{"Float", "secondMinDamping"},
+				{"Float", "dampingPow"},
+				{"Float", "secondDampingPow"},
+				{"Float", "collideMaxVelocity"},
+			]]
+			{"Float", "springForce"},
+			--[[if (version >= 24)
+				{"Float", "springLimitRate"},
+				{"Float", "springMaxVelocity"},
+				{"Byte", "springCalcType"},
+				{"Byte", "padding0"},
+				{"Byte", "padding1"},
+				{"Byte", "padding2"},
+			if (version >= 53)
+				{"Float", "unknChainSettingValue2"},
+				{"Float", "unknChainSettingValue3"},]]
+			
+			{"Float", "reduceDistance"},
+			{"Float", "secondReduceDistance"},
+			{"Float", "secondReduceDistanceSpeed"},
+			{"Float", "friction"},
+			{"Float", "shockAbsorptionRate"},
+			{"Float", "elasticCoef"},
+			{"Float", "coefOfExternalForces"},
+			{"Float", "stretchInteractionRatio"},
+			{"Float", "angleLimitInteractionRatio"},
+			{"Float", "shootingElasticLimitRate"},
+			{"UInt", "groupDefaultAttr"},
+			{"Float", "envWindEffectCoef"},
+			{"Float", "velocityLimit"},
+			{"Float", "hardness"},
+			--[[if (version >= 46)
+				{"Float", "ukn00"},
+				{"Float", "ukn01"},
+			if (version >= 52)	
+				{"Float", "ukn02"},
+				{"Float", "ukn03"},]]
+		},
+		
+		chainCollision = {
+			{"UInt64", "subDataTbl"},
+			{"Float3", "pos"},
+			{"Float3", "pairPos"},
+			--[[if (version >= 35)	
+				{"Vec4", "rotOffset"},
+			if (version ~= 35)	
+				{"Float", "ukn"},]]
+			{"UInt", "jointNameHash"},
+			{"UInt", "pairJointNameHash"},
+			{"Float", "radius"},
+			{"Float", "lerp"},
+			--if version >= 48
+			--	{"Float", "ukn"},
+			{"UByte", "shape"},
+			{"UByte", "div"},
+			{"UByte", "subDataCount"},
+			{"UByte", "empty0"},
+			{"Int", "collisionFilterFlags"},
+			--if version == 39 || version == 46 || version == 44
+			--	{"UInt", "ukn1"},
+		},
+		
+		chainGroup = {
+			{"UInt64", "terminalNodeNameOffset", {"WString", "terminalNodeName"}},
+			{"UInt64", "nodesOffset"},
+			{"UInt", "settingID"},
+			{"UByte", "nodeCount"},
+			{"UByte", "execOrder"},
+			{"UByte", "autoBlendCheckNodeNo"},
+			{"UByte", "windID"},
+			{"UInt", "terminalNameHash"},
+			{"UInt", "attrFlags"},
+			{"Int", "collisionFilterFlags"},
+			{"Float3", "extraNodeLocalPos"},
+			--[[if (version >= 35)
+				{"Vec4", "tags"},
+				{"Float", "dampingNoise"},
+				{"Float", "dampingNoise"},
+				{"Float", "endRotConstMax"},
+				{"UByte", "tagCount"},
+				{"UByte", "angleLimitDirectionMode"},
+				{"Short", "padding0"},
+			if (version >= 48)
+				{"UByte", "unknownBoneHash"},
+				{"UByte", "unknown"},
+				{"UByte", "unknownI64"},
+			if (version >= 52)
+				{"UByte", "ukn"},
+			if (version >= 44)
+				{"UInt64", "nextChainNameOffset", {"WString", "nextChainName"}},]]
+		},
+		
+		
+		chainNode = {
+			{"Vec4", "angleLimitDirection"},
+			{"Float", "angleLimitRad"},
+			{"Float", "angleLimitDistance"},
+			{"Float", "angleLimitRestitution"},
+			{"Float", "angleLimitRestituteStopSpeed"},
+			{"Float", "collisionRadius"},
+			{"Int", "collisionFilterFlags"},
+			{"Float", "capsuleStretchRate1"},
+			{"Float", "capsuleStretchRate2"},
+			{"UInt", "attributeFlag"},
+			{"UInt", "constraintJntNameHash"},
+			{"Float", "windCoef"},
+			{"Byte", "angleMode"},
+			{"Byte", "collisionShape"},
+			{"Byte", "attachType"},
+			{"Byte", "rotationType"},
+			--[[if (version >= 35)
+				{"UInt64", "jiggleData"},
+				{"Float", "ukn0"},
+				{"Float", "ukn1"},]]
+		},
+		
+		chainJiggle = {
+			{"Vec4", "range"},
+			{"Vec4", "rangeOffset"},
+			{"Vec4", "rangeAxis"},
+			{"UInt", "rangeShape"},
+			{"Float", "springForce"},
+			{"Float", "gravityCoef"},
+			{"Float", "damping"},
+			{"UInt", "flags"},
+			--{"UInt", "padding"},
+			{"Float", "ukn"},
+		},
+		
+		windSetting = {
+			{"UInt", "id"},
+			{"Byte", "windDirection"},
+			{"Byte", "windCount"},
+			{"Byte", "windType"},
+			{"Byte", "padding"},
+			{"Float", "randomDamping"},
+			{"Float", "randomDampingCycle"},
+			{"Float", "randomCycleScaling"},
+			{"UInt", "reserved"},
+			{"Float3", "direction0"},
+			{"Float3", "direction1"},
+			{"Float3", "direction2"},
+			{"Float3", "direction3"},
+			{"Float3", "direction4"},
+			{"Float5", "min"},
+			{"Float5", "max"},
+			{"Float5", "phaseShift"},
+			{"Float5", "cycle"},
+			{"Float5", "interval"},
+		},
+		
+		chainLink = {
+			{"UInt64", "nodesOffset"},
+			{"UInt", "terminalNodeNameAHash"},
+			{"UInt", "terminalNodeNameBHash"},
+			{"Float", "distanceShrinkLimitCoef"},
+			{"Float", "distanceExpandLimitCoef"},
+			
+			{"UByte", "LinkMode"},
+			{"Byte", "connectFlags"},
+			{"Short", "linkAttrFlags"},
+			
+			{"UByte", "nodesCount"},
+			{"UByte", "skipGroupA"},
+			{"UByte", "skipGroupB"},
+			{"UByte", "linkOrder"},
+		},
+		
+		chainLinkNode = {
+			{"Float", "collisionRadius"},
+			{"Int", "collisionFilterFlags"},
+		},
+		
+		structOrder = {"header", "chainSetting", "chainCollision", "chainGroup", "chainJiggle", "windSetting", "chainLink", "chainLinkNode"}
+	},
+}
+
+-- ChainFile struct adjustments for different TDB versions:
+if tdb_ver >= 66  then --RE2+
+	local x24 = 66
+	local x35 = 66
+	local x44 = 66
+	local x46 = 66
+	local x48 = 66
+	local x52 = 66
+	local x53 = 72
+	
+	--header
+	if tdb_ver > x53 then
+		table.insert(ChainFile.structs.header, 10, {"UInt64", "uknTbl"})
+	end
+	
+	--chainSettings
+	if tdb_ver >= x46 then
+		table.insert(ChainFile.structs.chainSetting, {"Float", "ukn00"})
+		table.insert(ChainFile.structs.chainSetting, {"Float", "ukn01"})
+		if tdb_ver >= x52 then
+			table.insert(ChainFile.structs.chainSetting, {"Float", "ukn02"})
+			table.insert(ChainFile.structs.chainSetting, {"Float", "ukn03"})
+		end
+	end
+	local idx = EMV.find_index(ChainFile.structs.chainSetting, "secondDampingSpeed", 2)+1
+	if tdb_ver >= x53 then
+		table.insert(ChainFile.structs.chainSetting, idx+1, {"Float", "unknChainSettingValue2"})
+		table.insert(ChainFile.structs.chainSetting, idx+1, {"Float", "unknChainSettingValue1"})
+	end
+	table.insert(ChainFile.structs.chainSetting, idx+1, {"UInt", "springCalcType"})
+	table.insert(ChainFile.structs.chainSetting, idx+1, {"Float", "springMaxVelocity"})
+	table.insert(ChainFile.structs.chainSetting, idx+1, {"Float", "springLimitRate"})
+	table.insert(ChainFile.structs.chainSetting, idx, {"Float", "collideMaxVelocity"})
+	table.insert(ChainFile.structs.chainSetting, idx, {"Float", "secondDampingPow"})
+	table.insert(ChainFile.structs.chainSetting, idx, {"Float", "dampingPow"})
+	table.insert(ChainFile.structs.chainSetting, idx, {"Float", "secondMinDamping"})
+	table.insert(ChainFile.structs.chainSetting, idx, {"Float", "minDamping"})
+	
+	--chainCollisions
+	if tdb_ver >= x35 then
+		if tdb_ver >= x48 then
+			table.insert(ChainFile.structs.chainCollision, 8, {"Float", "ukn1"})
+		end
+		table.insert(ChainFile.structs.chainCollision, 4, {"Vec4", "rotOffset"})
+		table.insert(ChainFile.structs.chainCollision, 4, {"Float", "ukn0"})
+		if tdb_ver == x39 or tdb_ver == x46 or tdb_ver == x44 then
+			table.insert(ChainFile.structs.chainCollision, 4, {"UInt", "ukn1"})
+		end
+	end
+	
+	--chainGroups
+	if tdb_ver >= x35 then
+		if tdb_ver >= x44 then
+			table.insert(ChainFile.structs.chainGroup, 12, {"UInt64", "nextChainNameOffset", {"WString", "nextChainName"}})
+		end
+		if tdb_ver >= x52 then
+			table.insert(ChainFile.structs.chainGroup, 12, {"Int64", "ukn"})
+		end
+		if tdb_ver >= x48 then
+			table.insert(ChainFile.structs.chainGroup, 12, {"UInt64", "unknownI64"})
+			table.insert(ChainFile.structs.chainGroup, 12, {"UInt", "unknown"})
+			table.insert(ChainFile.structs.chainGroup, 12, {"UInt", "unknownBoneHash"})
+			table.insert(ChainFile.structs.chainGroup, 12, {"UInt64", "uknI64_00"})
+		end
+		table.insert(ChainFile.structs.chainGroup, 12, {"Short", "padding0"})
+		table.insert(ChainFile.structs.chainGroup, 12, {"UByte", "angleLimitDirectionMode"})
+		table.insert(ChainFile.structs.chainGroup, 12, {"UByte", "tagCount"})
+		table.insert(ChainFile.structs.chainGroup, 12, {"Float", "endRotConstMax"})
+		table.insert(ChainFile.structs.chainGroup, 12, {"Float", "dampingNoise"})
+		table.insert(ChainFile.structs.chainGroup, 12, {"Float", "dampingNoise"})
+		table.insert(ChainFile.structs.chainGroup, 12, {"Vec4", "tags"})
+	end
+	--chainNodes
+	if tdb_ver >= x35 then
+		table.insert(ChainFile.structs.chainNode, {"UInt64", "jiggleData"})
+		table.insert(ChainFile.structs.chainNode, {"Float", "ukn0"})
+		table.insert(ChainFile.structs.chainNode, {"Float", "ukn1"})
+	end
+end
 
 --setup struct sizes:
-for className, class in pairs({RSZFile, PFBFile, SCNFile, UserFile, MDFFile}) do
+for i, class in ipairs({RSZFile, PFBFile, SCNFile, UserFile, MDFFile, ChainFile}) do
 	class.structSizes = {}
 	for name, structArray in pairs(class.structs) do
 		local totalBytes = 0
@@ -3521,6 +4068,7 @@ RE_Resource.validExtensions = {
 	["pfb"] = PFBFile,
 	["user"] = UserFile,
 	["mdf2"] = MDFFile,
+	["chain"] = ChainFile,
 }
 
 local function imgui_file_picker()
@@ -3587,7 +4135,7 @@ EMV.displayResourceEditor = function()
 			doOpen = true
 		end
 
-		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmu][fcds][bnfe][2r]?")) then 
+		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF/Chain File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmuc][fcdsh][bnfea][2ri]?")) then 
 			RE_Resource.openResource(ResourceEditor.textBox)
 		end
 		

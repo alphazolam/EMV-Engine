@@ -2207,8 +2207,8 @@ hashing_method = function(str)
 end
 
 local get_gameobj_path = function(gameobj) 
-	local folder = gameobj:call("get_Folder")
-	return (((folder and (folder:call("get_Path") or "") .. "/") or "") .. gameobj:call("get_Name"))
+	local try, folder = pcall(gameobj.call, gameobj, "get_Folder")
+	return try and (((folder and (folder:call("get_Path") or "") .. "/") or "") .. gameobj:call("get_Name"))
 end
 
 --Get or create a GameObject or AnimObject class from a gameobj -----------------------------------------------------------------------------
@@ -4411,17 +4411,20 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition()), nil
 	if not typedef then return tostring(m_obj) end
 	local td_name = typedef:get_full_name()
+	local indexable = can_index(m_obj)
 	
 	if typedef:is_a("System.Array") or td_name:match("<(.+)>") then --arrays
-		name = (o_tbl.elements and o_tbl.elements[1] and (o_tbl.elements[1]:get_type_definition():get_full_name().."["..#o_tbl.elements.."] -- "..get_mgd_obj_name(o_tbl.elements[1]))) or td_name:match("<(.+)>") or o_tbl.name_full:gsub("%[%]", "")
+		name = (o_tbl.elements and o_tbl.elements[1] and (o_tbl.elements[1]:get_type_definition():get_full_name().."["..#o_tbl.elements.."] -- "..get_mgd_obj_name(o_tbl.elements[1]))) or td_name:match("<(.+)>") 
+		name = name or (o_tbl.name_full and o_tbl.name_full:gsub("%[%]", "")) or td_name:gsub("%[%]", "")
 	elseif o_tbl.skeleton then
 		name = o_tbl.skeleton[idx]
 	elseif (type(m_obj) == "number") or (type(m_obj) == "boolean") or not can_index(m_obj) then
 		name = typedef:get_name()
-	elseif m_obj.x or m_obj[0] then
+	elseif indexable and (m_obj.x or m_obj[0]) then
 		pcall(function()
-			name = (((o_tbl.is_vt or o_tbl.is_obj) and not o_tbl.is_lua_type) and (m_obj:get_type_definition():get_method("ToString()") and m_obj:call("ToString()"))) or typedef:get_name()
+			name = (((o_tbl.is_vt or o_tbl.is_obj) and not o_tbl.is_lua_type) and (m_obj:get_type_definition():get_method("ToString()") and m_obj:call("ToString()")))
 		end)
+		name = name or typedef:get_name()
 	elseif typedef:is_a("via.Component") then 
 		name = td_name .. ((typedef:is_a("via.Transform") and (" (" .. get_GameObject(m_obj, true) .. ")")) or "")
 	elseif typedef:is_a("via.GameObject") then
@@ -5491,15 +5494,68 @@ local function show_imgui_vec4(value, name, is_int, increment, normalize)
 	return changed, value
 end
 
+local function resource_ctx_menu(filetype, real_path, lua_obj_tbl)
+	imgui.tooltip("Right click for more options")
+	if imgui.begin_popup_context_item(filetype) then  
+		if imgui.menu_item("Overwrite") then
+			local file = _G[filetype]:new{filepath=real_path}
+			ass = {real_path, true, false, lua_obj_tbl}
+			file:save(real_path, false, true, false, lua_obj_tbl)
+			lua_obj_tbl[filetype] = file
+		end
+		if imgui.menu_item("Backup") and BitStream.copyFile(real_path, real_path..".bak") and BitStream.checkFileExists(real_path..".bak") then
+			re.msg("Backed up to " .. real_path..".bak")
+		end
+		if BitStream.checkFileExists(real_path..".bak") and imgui.menu_item("Restore") and BitStream.copyFile(real_path..".bak", real_path) then
+			re.msg("Restored from " .. real_path..".bak")
+		end
+		imgui.end_popup() 
+	end
+end
+
 --Displays settings for via.Chain objects in imgui:
 local function imgui_chain_settings(via_chain, xform, game_object_name)
 	
-	local chain_groups = via_chain._.cgroups or {}
+	local o_tbl = via_chain._
+	local chain_groups = o_tbl.cgroups or {}
 	local chain_settings = cached_chain_settings[via_chain] or {}
 	
 	if #chain_groups > 0 and imgui.tree_node_str_id(game_object_name .. "Groups", "Chain Groups (" .. #chain_groups ..  ")") then 
 		
-		changed, via_chain._.show_all_joints = imgui.checkbox("Show All Joints", via_chain._.show_all_joints)
+		changed, o_tbl.show_all_joints = imgui.checkbox("Show All Joints", o_tbl.show_all_joints)
+		
+		--[[if _G.RE_Resource and BitStream then
+			if o_tbl.chain_save_path_exists then
+				local real_path = o_tbl.chain_save_path_text:gsub("^reframework/data/", "")
+				if imgui.button("Save Chain") then
+					local chainFile = ChainFile:new{filepath=real_path, mobject=via_chain}
+					if chainFile:save(real_path) then 
+						re.msg("Saved Chain file to:\n" .. o_tbl.chain_save_path_text)
+					end
+					o_tbl.ChainFile = chainFile
+				end
+				resource_ctx_menu("ChainFile", real_path, o_tbl)
+				imgui.same_line()
+			end
+			
+			if o_tbl.chain_save_path_text==nil then
+				local path = via_chain:get_ChainAsset() and via_chain:get_ChainAsset():get_ResourcePath() or ""
+				o_tbl.chain_save_path_text = "$natives/" .. (((sdk.get_tdb_version() <= 67) and "x64/") or "stm/") .. path .. ((ChainFile and ChainFile.extensions[game_name]) or "")
+			end
+			
+			changed, o_tbl.chain_save_path_text = imgui.input_text("Modify Chain File" .. ((o_tbl.chain_save_path_exists and "") or " (Does Not Exist)"), o_tbl.chain_save_path_text) --
+			if changed or o_tbl.chain_save_path_exists==nil then
+				o_tbl.chain_save_path_exists = BitStream.checkFileExists(o_tbl.chain_save_path_text:gsub("^reframework/data/", ""))
+			end
+			
+			local tooltip_msg = "Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder.\nInput the location of the chain file for this via.motion.Chain"
+			imgui.tooltip(tooltip_msg)
+			
+			if o_tbl.ChainFile and imgui.tree_node("ChainFile") then
+				o_tbl.ChainFile:displayImgui()
+				imgui.tree_pop()
+			end
+		end]]
 		
 		for i, group in ipairs(chain_groups) do 
 		
@@ -5507,7 +5563,7 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 			
 			if imgui.tree_node_str_id(game_object_name .. "Groups" .. i-1, i-1 .. ". Group " .. group.terminal_name) then 
 				
-				if not via_chain._.show_all_joints then
+				if not o_tbl.show_all_joints then
 					group:update()
 				end
 				
@@ -5560,6 +5616,7 @@ local function imgui_chain_settings(via_chain, xform, game_object_name)
 			--	group.group._.is_open = nil
 			end
 		end
+		
 		imgui.tree_pop()
 	end
 end
@@ -7269,24 +7326,6 @@ show_imgui_mats = function(anim_object)
 	
 	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
 	if _G.RE_Resource and BitStream and mesh then
-	
-		local function ctx_menu(filetype, real_path)
-			imgui.tooltip("Right click for more options")
-			if imgui.begin_popup_context_item(filetype) then  
-				if imgui.menu_item("Overwrite") then
-					local file = _G[filetype]:new{filepath=real_path}
-					file:save(real_path, true, false, anim_object.materials)
-					anim_object.materials[filetype] = file
-				end
-				if imgui.menu_item("Backup") and BitStream.copyFile(real_path, real_path..".bak") and BitStream.checkFileExists(real_path..".bak") then
-					re.msg("Backed up to " .. real_path..".bak")
-				end
-				if BitStream.checkFileExists(real_path..".bak") and imgui.menu_item("Restore") and BitStream.copyFile(real_path..".bak", real_path) then
-					re.msg("Restored from " .. real_path..".bak")
-				end
-				imgui.end_popup() 
-			end
-		end
 		
 		if anim_object.materials.save_path_exists then
 			local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
@@ -7297,11 +7336,11 @@ show_imgui_mats = function(anim_object)
 				end
 				anim_object.materials.MDFFile = mdfFile
 			end
-			ctx_menu("MDFFile", real_path)
+			resource_ctx_menu("MDFFile", real_path, anim_object.materials)
 			imgui.same_line()
 		end
 		
-		if anim_object.materials.save_path_text==nil then
+		if anim_object.materials.save_path_text==nil and anim_object.mpaths.mdf2_path then
 			anim_object.materials.save_path_text = "$natives/" .. (((sdk.get_tdb_version() <= 67) and "x64/") or "stm/") .. anim_object.mpaths.mdf2_path .. ((MDFFile and MDFFile.extensions[game_name]) or "")
 			--anim_object.materials.save_path_text = "reframework/data/REResources/" .. anim_object.mpaths.mdf2_path:match("^.+/(.+)$") .. ((MDFFile and MDFFile.extensions[game_name]) or "")
 		end
@@ -7324,7 +7363,7 @@ show_imgui_mats = function(anim_object)
 						anim_object.materials.UserFile = cmdFile
 						imgui.same_line()
 					end
-					ctx_menu("UserFile", real_path)
+					resource_ctx_menu("UserFile", real_path, anim_object.materials)
 					imgui.same_line()
 				end
 				
@@ -9149,56 +9188,58 @@ GameObject = {
 							j_o_tbl.selected = poser.freeze_total > 0 and #undo.last > 0 and (undo.last[#undo.last] == joint)
 							if j_o_tbl.selected then imgui.begin_rect() imgui.begin_rect() end
 							
-							changed, undo[joint].selected_to_load = imgui.checkbox("", undo[joint].selected_to_load)
-							if (ctrl_pressed or alt_pressed) and imgui.is_item_hovered() then
-								undo[joint].selected_to_load = ctrl_pressed
-							end
-							imgui.tooltip("Import poses to this bone with 'Load to Selected' checked")
-							
-							imgui.same_line()
-							local changed, new_value = imgui.drag_float3(j_o_tbl.Name, joint["get"..poser.prop_name](joint), poser.sensitivity, -1000000, 1000000)
-							local hovered = imgui.is_item_hovered()
-							
-							if changed or (not frozen_prop_data and hovered and ctrl_pressed) then
-								prop_changed_joint = joint
-								fj[joint] = fj[joint] or {false, false}
-								fj[joint][poser.prop_idx] = new_value
-								if not changed then undo[joint].start = 0 end
-							end
-							
-							local do_lookat = false
-							if poser.prop_idx == 1 and imgui.begin_popup_context_item("ctx") then
-								do_lookat = imgui.menu_item("Look at camera")
-								imgui.end_popup() 
-							end
-							
-							if frozen_prop_data then 
-								imgui.same_line() 
-								if undo[joint] and #undo[joint].prev_rot > 0 then
-									if imgui.button(#undo[joint].prev_rot) then
-										pressed_undo = true
-										next_joint = joint
+							--undo[joint] = undo[joint] or {}
+							if undo[joint] then
+								changed, undo[joint].selected_to_load = imgui.checkbox("", undo[joint].selected_to_load)
+								if (ctrl_pressed or alt_pressed) and imgui.is_item_hovered() then
+									undo[joint].selected_to_load = ctrl_pressed
+								end
+								imgui.tooltip("Import poses to this bone with 'Load to Selected' checked")
+								
+								imgui.same_line()
+								local changed, new_value = imgui.drag_float3(j_o_tbl.Name, joint["get"..poser.prop_name](joint), poser.sensitivity, -1000000, 1000000)
+								local hovered = imgui.is_item_hovered()
+								
+								if changed or (not frozen_prop_data and hovered and ctrl_pressed) then
+									prop_changed_joint = joint
+									fj[joint] = fj[joint] or {false, false}
+									fj[joint][poser.prop_idx] = new_value
+									if not changed then undo[joint].start = 0 end
+								end
+								
+								local do_lookat = false
+								if poser.prop_idx == 1 and imgui.begin_popup_context_item("ctx") then
+									do_lookat = imgui.menu_item("Look at camera")
+									imgui.end_popup() 
+								end
+								
+								if frozen_prop_data then 
+									imgui.same_line() 
+									if undo[joint] and #undo[joint].prev_rot > 0 then
+										if imgui.button(#undo[joint].prev_rot) then
+											pressed_undo = true
+											next_joint = joint
+										end
+										imgui.tooltip("Undo one action for this joint")
+										imgui.same_line()
 									end
-									imgui.tooltip("Undo one action for this joint")
-									imgui.same_line()
+									if imgui.button("X") or (hovered and alt_pressed) then
+										undo[joint].prev_rot = {}
+										clear_joint(joint)
+									end
+									imgui.tooltip("Unfreeze this joint and clear its undo history")
 								end
-								if imgui.button("X") or (hovered and alt_pressed) then
-									undo[joint].prev_rot = {}
-									clear_joint(joint)
+								
+								if do_lookat then
+									table.insert(undo.last, joint) 
+									table.insert(undo[joint].prev_rot, joint["get"..poser.prop_name](joint))
+									table.insert(poser.last_undo_idxs, poser.prop_idx)
+									local mat = sdk.find_type_definition("via.matrix"):get_method("makeLookAtLH"):call(nil, joint:get_Position(), static_objs.cam:get_GameObject():get_Transform():getJointByName("Camera"):get_Position(), last_camera_matrix[1])
+									joint:set_EulerAngle(mat:to_quat():conjugate():to_euler())
+									fj[joint] = fj[joint] or {false, false}
+									fj[joint][1] = joint:get_LocalEulerAngle()
 								end
-								imgui.tooltip("Unfreeze this joint and clear its undo history")
 							end
-							
-							if do_lookat then
-								table.insert(undo.last, joint) 
-								table.insert(undo[joint].prev_rot, joint["get"..poser.prop_name](joint))
-								table.insert(poser.last_undo_idxs, poser.prop_idx)
-								local mat = sdk.find_type_definition("via.matrix"):get_method("makeLookAtLH"):call(nil, joint:get_Position(), static_objs.cam:get_GameObject():get_Transform():getJointByName("Camera"):get_Position(), last_camera_matrix[1])
-								joint:set_EulerAngle(mat:to_quat():conjugate():to_euler())
-								fj[joint] = fj[joint] or {false, false}
-								fj[joint][1] = joint:get_LocalEulerAngle()
-							end
-							
 							if j_o_tbl.selected then imgui.end_rect(2) imgui.end_rect(3) end
 						imgui.pop_id()
 					end

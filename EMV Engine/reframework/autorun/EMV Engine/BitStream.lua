@@ -485,6 +485,16 @@ BitStream = {
 		)
 	end,
 	
+	readFloat3 = function(self, pos)
+		local npos = pos or self.pos
+		return self:readArray(3, "Float", npos, not pos)
+	end,
+	
+	readFloat5 = function(self, pos)
+		local npos = pos or self.pos
+		return self:readArray(5, "Float", npos, not pos)
+	end,
+	
 	readVec4 = function(self, pos)
 		local npos = pos or self.pos
 		return Vector4f.new(table.unpack(self:readArray(4, "Float", npos, not pos)))
@@ -615,6 +625,16 @@ BitStream = {
 	writeVec3 = function(self, vec3, pos)
 		local npos = pos or self.pos
 		return self:writeArray((type(vec3)=="table" and vec3) or {vec3.x, vec3.y, vec3.z}, "Float", npos, not pos)
+	end,
+	
+	writeFloat3 = function(self, value, pos)
+		local npos = pos or self.pos
+		return self:writeArray(value, "Float", npos, not pos)
+	end,
+	
+	writeFloat5 = function(self, value, pos)
+		local npos = pos or self.pos
+		return self:writeArray(value, "Float", npos, not pos)
 	end,
 	
 	writeVec2 = function(self, vec2, pos)
