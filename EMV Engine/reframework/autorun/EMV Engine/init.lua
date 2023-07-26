@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---June 30, 2023
+--July 26, 2023
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -48,6 +48,7 @@ SettingsCache = {
 	objs_to_update = {},
 	update_module_idx = 1,
 	use_color_bytes = false,
+	show_enable_checkboxes = true,
 	Collection_data = {
 		collection_xforms = {},
 		worldmatrix = Matrix4x4f.identity(),
@@ -1413,6 +1414,10 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 							local is_vec = (not do_update and e_d.is_vec) or tostring_name:find(":vector") or nil
 							local is_vt = not is_vec and ((not do_update and e_d.is_vt) or tostring_name:find("::ValueType") or tostring_name:find("::SystemArray")) or nil
 							local is_obj = is_vt or (not is_vec and ((not do_update and e_d.is_obj) or sdk.is_managed_object(element))) or nil --tostring_name:find("%.REManagedObject") or tostring_name:find("%.RETransform")
+							local is_valid = is_obj and is_valid_obj(element)
+							local td = is_valid and element:get_type_definition()
+							local gameobj = is_valid and ((td:is_a("via.Component") and element:get_GameObject()) or td:is_a("via.GameObject") and element)
+							local enable_method = is_valid and (e_d.enable_method or (element.get_Enabled or element.get_Enable or element.get_Visible))
 							local elem_key = tostring(index)
 							
 							if is_obj or is_vec or ((type(element) == "table" and next(element) ~= nil)) then 
@@ -1430,7 +1435,44 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 								tbl_obj.names[i] = name
 								
 								if is_obj then 
-									if is_vt or is_valid_obj(element) then
+									if is_vt or is_valid then
+										if SettingsCache.show_enable_checkboxes then
+											if gameobj then
+												imgui.begin_rect()
+												imgui.begin_rect()
+													imgui.push_id(element:get_address())
+														changed, e_d.draw = imgui.checkbox("", gameobj:get_Draw())
+													imgui.pop_id()
+													if changed then
+														gameobj:set_DrawSelf(e_d.draw)
+														gameobj:write_byte((isSF6 and 0x11) or 0x13, bool_to_number[e_d.draw]) --draw
+														--gameobj:set_UpdateSelf(e_d.draw)
+													end
+													imgui.tooltip("Draw Self")
+													imgui.same_line()
+													imgui.push_id(element:get_address()+1)
+														changed, e_d.updateself = imgui.checkbox("", gameobj:get_Update())
+													imgui.pop_id()
+													if changed then
+														gameobj:set_UpdateSelf(e_d.updateself)
+													end
+													imgui.tooltip("Update Self")
+												imgui.end_rect(2)
+												imgui.end_rect(3)
+												imgui.same_line()
+											end
+											if enable_method then
+												local setter = element[enable_method:get_name():gsub("get", "set")]
+												imgui.push_id(element:get_address()+2)
+													changed, e_d.enabled = imgui.checkbox("", enable_method:call(element)) 
+												imgui.pop_id()
+												imgui.tooltip("Enabled")
+												if changed and setter then 
+													setter:call(element, e_d.enabled)
+												end
+												imgui.same_line()
+											end
+										end
 										if imgui.tree_node_str_id(elem_key, name) then --RE objects
 											imgui.managed_object_control_panel(element, key .. elem_key) 
 											imgui.tree_pop()
@@ -1461,7 +1503,7 @@ read_imgui_pairs_table = function(tbl, key, is_array, editable)
 							elseif not editable or not editable_table_field(index, element, tbl, nil, edit_args) then 
 								imgui.text(logv(element, elem_key, 2, 0)) --primitives, strings, lua types, matrices
 							end
-							tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, }
+							tbl_obj.element_data[i] = (not do_update and tbl_obj.element_data[i]) or {is_vec=is_vec, is_vt=is_vt, is_obj=is_obj, enable_method=enable_method}
 						else
 							imgui.text(logv(ordered_idxes[i])) --unreadable sol classes
 						end
@@ -8620,10 +8662,7 @@ GameObject = {
 			end
 			return
 		end
-		--local try = true 	
-		--if o.xform and not o.gameobj then 
-		--	try, o.gameobj =  pcall(sdk.call_object_func, o.xform, "get_GameObject") 
-		--end
+		
 		o.gameobj = (o.gameobj and is_valid_obj(o.gameobj) and o.gameobj) or (o.xform and get_GameObject(o.xform))
 		o.xform = o.xform or (o.gameobj and o.gameobj:call("get_Transform"))
 		o.gameobj = o.gameobj or (o.xform and get_GameObject(o.xform))
@@ -10403,15 +10442,17 @@ re.on_draw_ui(function()
 			imgui.tree_pop()
 		end
 		
-		if not _G.search and imgui.tree_node("Table Settings") then 
+		if imgui.tree_node("ImguiTable Settings") then 
 			changed, SettingsCache.max_element_size = imgui.drag_int("Elements Per Grouping", SettingsCache.max_element_size, 1, 10, 1000); csetting_was_changed = csetting_was_changed or changed
 			changed, SettingsCache.always_update_lists = imgui.checkbox("Always Update Lists", SettingsCache.always_update_lists); csetting_was_changed = csetting_was_changed or changed 
 			changed, SettingsCache.show_editable_tables = imgui.checkbox("Editable Tables", SettingsCache.show_editable_tables); csetting_was_changed = csetting_was_changed or changed 
 			if isDMC then
 				changed, SettingsCache.add_DMC5_names = imgui.checkbox("Add Character Names", SettingsCache.add_DMC5_names); csetting_was_changed = csetting_was_changed or changed 
 			end
+			changed, SettingsCache.show_enable_checkboxes = imgui.checkbox("Enable/Disable Checkboxes", SettingsCache.show_enable_checkboxes); csetting_was_changed = csetting_was_changed or changed 
+			imgui.tooltip("Shows Enable/Disable checkboxes for GameObjects, Components and some Managed Objects")
 			
-			imgui.same_line() 
+			--imgui.same_line() 
 			if imgui.button("Reset Settings") then 
 				SettingsCache = deep_copy(default_SettingsCache)
 				changed = true

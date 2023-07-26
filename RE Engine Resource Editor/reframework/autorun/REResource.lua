@@ -1,7 +1,7 @@
 --REResource.lua
 --REFramework Script for managed RE Engine files 
 --by alphaZomega
---July 27 2022
+--July 26 2023
 
 local EMV = require("EMV Engine")
 
@@ -2951,13 +2951,18 @@ UserFile = {
 				end
 			end
 			
+			local self_idx = cmd_materials[1] and tonumber(cmd_materials[1].anim_object.name:match(".*_0(.+)_?"))
+			
 			for i, body_part in ipairs(self.RSZ.objects[1].fields[1].value) do
-				for j, cluster in ipairs(body_part.fields[2].value) do
-					local mat_idx = EMV.find_index(cmd_materials, cluster.title, "name")
-					material = mat_idx and cmd_materials[mat_idx]
-					if material then
-						for k, var_name in ipairs(self.sf6_cmd_param_names) do 
-							recurse(cluster, var_name)
+				local part_type = body_part.fields[1].value
+				if not self_idx or part_type == self_idx then
+					for j, cluster in ipairs(body_part.fields[2].value) do
+						local mat_idx = EMV.find_index(cmd_materials, cluster.title, "name")
+						material = mat_idx and cmd_materials[mat_idx]
+						if material then
+							for k, var_name in ipairs(self.sf6_cmd_param_names) do 
+								recurse(cluster, var_name)
+							end
 						end
 					end
 				end
