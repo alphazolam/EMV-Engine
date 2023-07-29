@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---July 26, 2023
+--July 29, 2023
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -1254,7 +1254,7 @@ local ImguiTable = {
 		if is_obj then 
 			name = elem_key .. ":	" .. logv(element)
 		else
-			if not pcall(function() for k, v in pairs(element) do goto exit end ::exit:: end) then return element.__type.name end
+			if element.__type and not pcall(function() for k, v in pairs(element) do goto exit end ::exit:: end) then return element.__type.name end
 			if (element.new or element.update) and can_index(element) then --or (can_index(element) and element.new and (element.name .. ""))
 				name = elem_key .. ":	" .. tostring(element.name) .. "	[Object] (" .. get_table_size(element) .. " elements)"
 			elseif isArray(element) then
@@ -4456,7 +4456,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	local indexable = can_index(m_obj)
 	
 	if typedef:is_a("System.Array") or td_name:match("<(.+)>") then --arrays
-		name = (o_tbl.elements and o_tbl.elements[1] and (o_tbl.elements[1]:get_type_definition():get_full_name().."["..#o_tbl.elements.."] -- "..get_mgd_obj_name(o_tbl.elements[1]))) or td_name:match("<(.+)>") 
+		name = (o_tbl.elements and can_index(o_tbl.elements[1]) and (o_tbl.elements[1]:get_type_definition():get_full_name().."["..#o_tbl.elements.."] -- "..get_mgd_obj_name(o_tbl.elements[1]))) or td_name:match("<(.+)>") 
 		name = name or (o_tbl.name_full and o_tbl.name_full:gsub("%[%]", "")) or td_name:gsub("%[%]", "")
 	elseif o_tbl.skeleton then
 		name = o_tbl.skeleton[idx]
@@ -4525,6 +4525,49 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	--log.info("Name is " .. tostring(name))
 	return name or ""
 end
+
+--GUI Control Object class
+local GUITree = {
+	
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o.obj = args.obj
+		o.name = o.obj:get_type_definition():get_full_name()
+		o.Name = get_mgd_obj_name(o.obj)
+		local child = o.obj.get_Child and o.obj:get_Child()
+		if child then
+			o.children = child and {}
+			while child ~= nil do
+				table.insert(o.children, self:new({obj=child}))
+				child = child:get_Next()
+			end
+		end
+		
+		return setmetatable(o, self)
+	end,
+	
+	display_imgui = function(self)
+		if self.children and imgui.tree_node("GUI Children") then
+			for i, child in ipairs(self.children) do
+				if imgui.tree_node_colored(child.obj:get_address(), child.name, child.Name) then
+					if not child.children then
+						imgui.set_next_item_open(true)
+					end
+					if imgui.tree_node(child.name) then
+						imgui.managed_object_control_panel(child.obj)
+						imgui.tree_pop()
+					end
+					if child.children then 
+						child:display_imgui()
+					end
+					imgui.tree_pop()
+				end
+			end
+			imgui.tree_pop()
+		end
+	end,
+}
 
 --Class for containing fields and properties and their metadata -------------------------------------------------------------------------------------------
 local VarData = {
@@ -4937,6 +4980,8 @@ local REMgdObj = {
 			o_tbl.children = lua_get_enumerator(obj:call("get_Children"), o_tbl)
 			o_tbl.child_folders = lua_get_enumerator(obj:call("get_Folders"), o_tbl) or {}
 			o_tbl.scn_path = read_unicode_string(obj:get_address()+0x38, true)
+		elseif otype:is_a("via.gui.Control") then
+			o_tbl.gui = GUITree:new{obj=obj}
 		end
 		
 		local propdata = metadata_methods[o_tbl.name_full] or get_fields_and_methods(otype)
@@ -6261,9 +6306,9 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 				arr_tbl.element_names[idx] = element_name
 			end]]
 			
-			local disp_name = idx .. ". " .. (element_name or tostring(element)) .. ((arr_tbl.set or o_tbl.is_arr) and "" or "*") 
+			local disp_name = (idx-1) .. ". " .. (element_name or tostring(element)) .. ((arr_tbl.set or o_tbl.is_arr) and "" or "*") 
 			
-			if (not prop.is_lua_type and not is_lua_type(item_type)) then --special thing for reading elements that are objects (read_field could also work though)
+			--[[if (not prop.is_lua_type and not is_lua_type(item_type) and not element_name:find("[Ss]fix")) then --special thing for reading elements that are objects (read_field could also work though)
 				imgui.text("")
 				imgui.same_line()
 				--if imgui.tree_node_str_id(key_name .. element_name .. idx, disp_name ) then
@@ -6275,14 +6320,14 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 						element._.Name = element._.Name or disp_name
 						arr_tbl.element_names[idx] = element._.Name
 						--element._.is_open = true
-					end]]
+					end]-]
 					imgui.tree_pop()
 				--elseif element._ then
 				--	element._.is_open = nil
 				end
-			else
+			else]]
 				tbl_changed, element = read_field(parent_managed_object, nil, prop, disp_name, item_type, key_name, element, idx)
-			end
+			--end
 			
 			if tbl_changed then 
 				tbl_was_changed = true
@@ -6691,6 +6736,8 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 				o_tbl.go:action_monitor(m_obj)
 			elseif o_tbl.name == "UserVariablesHub" then
 				show_imgui_uservariables(m_obj)
+			elseif o_tbl.gui then
+				o_tbl.gui:display_imgui()
 			end
 			
 			if ((o_tbl.components or o_tbl.is_component) or next(o_tbl.propdata.simple_methods)) and imgui.tree_node_str_id(key_name .. "Methods", "Simple Methods") then 
@@ -6872,6 +6919,7 @@ clear_object = function(xform)
 	end
 end
 
+
 --Material class and its supporting functions --------------------------------------------------------------------------------------------------
 --Class for holding one RE Engine material:
 local Material = {
@@ -7050,7 +7098,7 @@ local Material = {
 			self.multi[v] = self.multi[v] or {}
 			changed, self.multi[v].do_multi = imgui.checkbox("Change Multiple", self.multi[v].do_multi)
 			
-			if self.is_cmd and (var_name:find("Customize") or (UserFile and find_index(UserFile.sf6_cmd_param_names, var_name))) then
+			if self.is_cmd and ((var_name:find("Customize") and var_name ~= "CustomizeColor_BlendSwitch") or (UserFile and find_index(UserFile.sf6_cmd_param_names, var_name))) then
 				imgui.same_line()
 				imgui.text_colored("CMD", 0xFFAAFFFF)
 			end
@@ -10513,6 +10561,7 @@ EMV = {
 	BHVT = BHVT,
 	Hotkey = Hotkey,
 	ImguiTable = ImguiTable,
+	GUITree = GUITree,
 	default_SettingsCache = default_SettingsCache,
 	static_objs = static_objs,
 	static_funcs = static_funcs,

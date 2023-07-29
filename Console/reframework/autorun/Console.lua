@@ -1,6 +1,6 @@
 --RE Engine Console Script by alphaZomega
 --Adds an interactive lua REPL / Console to REFramework
---June 26, 2022
+--June 29, 2023
 
 --if true then return end
 --EMV local functions and tables:
@@ -249,7 +249,11 @@ local function show_history(do_minimal, new_first_history_idx)
 			command = History.history_idx[History.current_history_idx]
 			if command then 
 				--command = string.gsub(History.history_idx[History.current_history_idx], '[ \t]+%f[\r\n%z]', '') --remove tailing spaces
-				command = command:gsub(" +$", "")
+				if not pcall(function() 
+					command = command:gsub(" +$", "") 
+				end) then 
+					History.history_idx[History.current_history_idx] = nil
+				end
 			end 
 			history_input_this_frame = true
 		end
@@ -522,13 +526,17 @@ local function dump_history()
 		local used_cmds = {}
 		local diff = 0
 		for i, cmd in ipairs(reverse_table(History.history_idx or {})) do 
-			local clean_cmd = cmd:gsub(" +$", "")
-			if not used_cmds[clean_cmd] then
-				used_cmds[clean_cmd] = true
-				table.insert(new_history_idx, 1, clean_cmd)
-				history_cmds_only[clean_cmd] = " "
-			else
-				diff = diff + 1
+			if not pcall(function()
+				local clean_cmd = cmd and cmd:gsub(" +$", "")
+				if not used_cmds[clean_cmd] then
+					used_cmds[clean_cmd] = true
+					table.insert(new_history_idx, 1, clean_cmd)
+					history_cmds_only[clean_cmd] = " "
+				else
+					diff = diff + 1
+				end
+			end) then
+				print("Erroneous command: " .. tostring(cmd))
 			end
 		end
 		local new_first_history_idx = History.first_history_idx - diff

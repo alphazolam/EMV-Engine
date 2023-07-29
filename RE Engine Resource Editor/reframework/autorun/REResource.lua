@@ -1,7 +1,7 @@
 --REResource.lua
 --REFramework Script for managed RE Engine files 
 --by alphaZomega
---July 26 2023
+--July 29, 2023
 
 local EMV = require("EMV Engine")
 
@@ -2896,11 +2896,6 @@ UserFile = {
 											end
 											process_field_tbl(cc_field, "Color", material.variables[cc_idx])
 										end
-										local met_idx = material.var_names_dict["CustomizeMetal_"..c-1] 
-										if material.variables[met_idx] and material.variables[met_idx] ~= material.orig_vars[met_idx] then
-											process_field_tbl(cc_field.fields[3].value.fields[1].value, "Enable", true)
-											process_field_tbl(cc_field.fields[3].value.fields[1].value, "_Value", material.variables[met_idx])
-										end
 										local rgh_idx = material.var_names_dict["CustomizeRoughness_"..c-1] 
 										if material.variables[rgh_idx] and material.variables[rgh_idx] ~= material.orig_vars[rgh_idx] then
 											process_field_tbl(cc_field.fields[3].value.fields[2].value, "Enable", true)
@@ -2908,8 +2903,13 @@ UserFile = {
 										end
 										local blend_idx = material.var_names_dict["CustomizeColor_"..(c-1).. "_BlendRate"] 
 										if material.variables[blend_idx] and material.variables[blend_idx] ~= material.orig_vars[blend_idx] then
+											process_field_tbl(cc_field.fields[3].value.fields[1].value, "Enable", true)
+											process_field_tbl(cc_field.fields[3].value.fields[1].value, "_Value", material.variables[blend_idx])
+										end
+										local met_idx = material.var_names_dict["CustomizeMetal_"..c-1] 
+										if material.variables[met_idx] and material.variables[met_idx] ~= material.orig_vars[met_idx] then
 											process_field_tbl(cc_field.fields[3].value.fields[3].value, "Enable", true)
-											process_field_tbl(cc_field.fields[3].value.fields[3].value, "_Value", material.variables[blend_idx])
+											process_field_tbl(cc_field.fields[3].value.fields[3].value, "_Value", material.variables[met_idx])
 										end
 									end
 								elseif idx==0 or material.variables[idx] ~= material.orig_vars[idx] then
