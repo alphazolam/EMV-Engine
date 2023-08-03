@@ -291,6 +291,12 @@ function table.binsert(t, value, fcomp)
 	return pos
 end
 
+function table.extend(tbl_a, tbl_b)
+	for i, item in ipairs(tbl_b) do
+		table.insert(tbl_a, item)
+	end
+end
+
 --Find index where a string would be inserted into an alphabetically-ordered list of strings
 --[[function table.bfind(t, value, fcompval, reverse)
 	fcompval = fcompval or function(value) return value end
@@ -4054,9 +4060,11 @@ local function log_value(value, value_name, layer_limit, layer, verbose, return_
 					if val_type == "number" then  
 						value = sdk.to_managed_object(value) 
 					end 
-					local typedef = value:get_type_definition()
-					if not typedef then return "" end
-					msg = {typedef:get_full_name()}
+					local typedef 
+					if not pcall(function()
+						typedef = value:get_type_definition()
+						msg = typedef and {typedef:get_full_name()}
+					end) or not typedef then return "" end
 					if msg[1] == "via.GameObject" and value:call("get_Valid") then
 						msg[1] = value:call("get_Name")
 					elseif typedef:is_a("via.Component") then
@@ -4462,7 +4470,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 		name = o_tbl.skeleton[idx]
 	elseif (type(m_obj) == "number") or (type(m_obj) == "boolean") or not can_index(m_obj) then
 		name = typedef:get_name()
-	elseif indexable and (m_obj.x or m_obj[0]) then
+	elseif indexable and (m_obj.x or m_obj.__is_mat4) then
 		pcall(function()
 			name = (((o_tbl.is_vt or o_tbl.is_obj) and not o_tbl.is_lua_type) and (m_obj:get_type_definition():get_method("ToString()") and m_obj:call("ToString()")))
 		end)
@@ -4529,20 +4537,35 @@ end
 --GUI Control Object class
 local GUITree = {
 	
+	child_lists = {},
+	
 	new = function(self, args, o)
 		o = o or {}
 		self.__index = self
 		o.obj = args.obj
 		o.name = o.obj:get_type_definition():get_full_name()
 		o.Name = get_mgd_obj_name(o.obj)
-		local child = o.obj.get_Child and o.obj:get_Child()
-		if child then
-			o.children = child and {}
-			while child ~= nil do
-				table.insert(o.children, self:new({obj=child}))
-				child = child:get_Next()
+
+		o.children = args.children or o.children or self.child_lists[o.obj]
+		if not o.children then
+			local child = o.obj.get_Child and o.obj:get_Child()
+			if child then
+				o.children = child and {}
+				while child ~= nil do
+					table.insert(o.children, self:new({obj=child}))
+					child = child:get_Next()
+				end
 			end
 		end
+		
+		if get_table_size(self.child_lists) > 50 then
+			local k = next(self.child_lists)
+			for i=1, 50 do
+				self.child_lists[k] = nil
+				k = next(self.child_lists, k)
+			end
+		end
+		self.child_lists[o.obj] = o.children
 		
 		return setmetatable(o, self)
 	end,
@@ -4700,6 +4723,7 @@ local VarData = {
 		if o.field and o.value_org then
 			if o.field and (o.name == "_entries" or o.name == "mSlots") then
 				o_tbl.elements, o_tbl.element_names  = {}, {}
+				o_tbl.dict = {}
 				local key_type, value_type
 				for i, element in ipairs(lua_get_system_array(o.value_org, nil, true)) do
 					if element.get_field then
@@ -4721,6 +4745,7 @@ local VarData = {
 							if key then
 								table.insert(o_tbl.elements, value)
 								table.insert(o_tbl.element_names, key)
+								o_tbl.dict[key] = value
 							end
 						else --populate HashSets:
 							value_type = value_type or element:get_type_definition():get_field("value"):get_type()
@@ -4736,8 +4761,13 @@ local VarData = {
 				o_tbl.item_type = sdk.find_type_definition(o.ret_type:get_full_name():gsub("%[%]", ""))
 				o_tbl.elements, o_tbl.element_names, o_tbl.item_data = {}, {}, {}
 				for i, element in ipairs(lua_get_system_array(o.value_org, true)) do --
-					o_tbl.elements[i] = element:get_field("mValue") or element
-					o_tbl.element_names[i] = element:get_type_definition():get_name()
+					if not can_index(element) then
+						o_tbl.elements[i] = element
+						o_tbl.element_names[i] = logv(element)
+					else
+						o_tbl.elements[i] = element.mValue
+						o_tbl.element_names[i] = element:get_type_definition():get_name()
+					end
 				end
 			end
 		end
@@ -5070,7 +5100,7 @@ local REMgdObj = {
 			end
 		end
 		
-		o_tbl.do_auto_expand = ((o_tbl.fields or o_tbl.props) and not o_tbl.item_type and not o_tbl.is_arr and o_tbl.name~="Transform" and not o_tbl.name:find("^Wrapped")) or nil --and not o_tbl.is_vt --(o_tbl.is_arr and not o_tbl.elements[1])
+		o_tbl.do_auto_expand = ((o_tbl.fields or o_tbl.props) and not o_tbl.item_type and not o_tbl.is_arr and not o_tbl.dict and o_tbl.name~="Transform" and not o_tbl.name:find("^Wrapped")) or nil --and not o_tbl.is_vt --(o_tbl.is_arr and not o_tbl.elements[1])
 		o_tbl.key_hash = o_tbl.key_hash or hashing_method(o_tbl.name_full)
 		o_tbl.propdata = propdata
 		o._ = o_tbl
@@ -5802,14 +5832,15 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 			changed, value = imgui.drag_int(display_name, value, 1, -2147483647, 2147483647)
 		end
 	elseif return_type:is_a("via.Color") then
-		if imgui.tree_node_str_id(key_name .. name, display_name) then 
+		--if imgui.tree_node_str_id(key_name .. name, display_name) then 
 			local rgba
-			changed, rgba = imgui.color_picker_argb(display_name, value:get_field("rgba") or 0)
+			--changed, rgba = imgui.color_picker_argb(display_name, value:get_field("rgba") or 0)
+			changed, rgba = imgui.color_edit(display_name, value:get_field("rgba") or 0)
 			if changed then 
 				value:set_field("rgba", rgba)
 			end
-			imgui.tree_pop()
-		end
+			--imgui.tree_pop()
+		--end
 	elseif vd.is_sfix then
 		local new_value = (vd.is_sfix==4 and Vector4f.new(tonumber(value.x:call("ToString()")), tonumber(value.y:call("ToString()")), tonumber(value.z:call("ToString()")), tonumber(value.w:call("ToString()"))))
 		or (vd.is_sfix==3 and Vector3f.new(tonumber(value.x:call("ToString()")), tonumber(value.y:call("ToString()")), tonumber(value.z:call("ToString()"))))
@@ -6297,7 +6328,7 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 	
 	if item_type and arr_tbl.element_names and arr_tbl.mysize > 0 and (is_elements or imgui.tree_node_str_id(display_name, display_name)) then
 		
-		local function display_element(element, idx)
+		local function display_element(element, idx, key)
 			local element_name = (sdk.is_managed_object(element) and element:get_type_definition():get_full_name()) or item_type:get_full_name()--arr_tbl.element_names[i]
 			
 			--local var_metadata = prop or (field and o_tbl.field_data[name:match("%<(.+)%>") or name]
@@ -6306,9 +6337,9 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 				arr_tbl.element_names[idx] = element_name
 			end]]
 			
-			local disp_name = (idx-1) .. ". " .. (element_name or tostring(element)) .. ((arr_tbl.set or o_tbl.is_arr) and "" or "*") 
+			local disp_name = (idx-1) .. ". " .. ((key and "["..key.."] = ") or "") .. (element_name or tostring(element)) .. ((arr_tbl.set or o_tbl.is_arr) and "" or "*") 
 			
-			--[[if (not prop.is_lua_type and not is_lua_type(item_type) and not element_name:find("[Ss]fix")) then --special thing for reading elements that are objects (read_field could also work though)
+			if (not prop.is_lua_type and not is_lua_type(item_type) and not element_name:find("[Ss]fix")) then --special thing for reading elements that are objects (read_field could also work though)
 				imgui.text("")
 				imgui.same_line()
 				--if imgui.tree_node_str_id(key_name .. element_name .. idx, disp_name ) then
@@ -6320,14 +6351,14 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 						element._.Name = element._.Name or disp_name
 						arr_tbl.element_names[idx] = element._.Name
 						--element._.is_open = true
-					end]-]
+					end]]
 					imgui.tree_pop()
 				--elseif element._ then
 				--	element._.is_open = nil
 				end
-			else]]
+			else
 				tbl_changed, element = read_field(parent_managed_object, nil, prop, disp_name, item_type, key_name, element, idx)
-			--end
+			end
 			
 			if tbl_changed then 
 				tbl_was_changed = true
@@ -6351,7 +6382,7 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 				local this_limit = (#tbl < lv+max_sz and #tbl) or lv+max_sz
 				if #tbl < max_sz or imgui.tree_node("Elements " .. lv .. " - " .. this_limit) then
 					for i = lv, (this_limit==lv+max_sz and this_limit-1) or this_limit  do 
-						display_element(tbl[i], i)
+						display_element(tbl[i], i, o_tbl.dict and o_tbl.element_names[i])
 					end
 					if #tbl >= max_sz then
 						imgui.tree_pop()
@@ -6360,7 +6391,7 @@ local function show_managed_objects_table(parent_managed_object, tbl, prop, key_
 			end
 		else
 			for i, element in ipairs(tbl) do 
-				display_element(element, i)
+				display_element(element, i, o_tbl.dict and o_tbl.element_names[i])
 			end
 		end
 		
@@ -6599,12 +6630,12 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 					if o_tbl.was_changed and not imgui.same_line() and imgui.button("Undo Changes") then
 						deferred_calls[m_obj] = {}
 						for name, field_data in pairs(o_tbl.field_data or {}) do 
-							if (field_data.value_org ~= nil) and field_data.was_changed and not (field_data.is_obj or field_data.elements) then
-								table.insert(deferred_calls[m_obj], {field=field_data.field, args=field_data.value_org})
+							if field_data.was_changed and not (field_data.is_obj or field_data.elements) then
+								m_obj[field_data.name] = field_data.value_org
 							end
 						end
 						for i, prop in ipairs(o_tbl.props or {}) do 
-							if (prop.value_org ~= nil) and prop.was_changed and not (prop.is_obj or prop.elements) and not prop.is_count then
+							if prop.was_changed and not (prop.is_obj or prop.elements) and not prop.is_count then
 								table.insert(deferred_calls[m_obj], {func=prop.set, args=prop.value_org})--:to_vec4()})
 							end
 						end
@@ -10199,7 +10230,7 @@ object_explorer = merge_tables({old=object_explorer}, getmetatable(object_explor
 object_explorer.handle_address = function(self, address, skip_ctl_panel)
 	if object_explorer.old then
 		object_explorer.old:handle_address(address)
-		if not (SettingsCache.embed_mobj_control_panel or skip_ctl_panel) and imgui.tree_node("Managed Object Control Panel") then
+		if not skip_ctl_panel and SettingsCache.embed_mobj_control_panel and imgui.tree_node("Managed Object Control Panel") then
 			if type(address)=="number" then
 				address = sdk.to_managed_object(address)
 			end
