@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---July 29, 2023
+--August 4, 2023
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -5615,16 +5615,21 @@ local function resource_ctx_menu(filetype, real_path, lua_obj_tbl)
 	imgui.tooltip("Right click for more options")
 	if imgui.begin_popup_context_item(filetype) then  
 		if imgui.menu_item("Overwrite") then
-			local file = _G[filetype]:new{filepath=real_path}
-			ass = {real_path, true, false, lua_obj_tbl}
-			file:save(real_path, false, true, false, lua_obj_tbl)
-			lua_obj_tbl[filetype] = file
+			lua_obj_tbl[filetype] = _G[filetype]:new{filepath=real_path}
+			lua_obj_tbl[filetype]:save(real_path, false, true, false, lua_obj_tbl)
 		end
-		if imgui.menu_item("Backup") and BitStream.copyFile(real_path, real_path..".bak") and BitStream.checkFileExists(real_path..".bak") then
-			re.msg("Backed up to " .. real_path..".bak")
+		local bak_path = real_path:gsub(_G[filetype].ext2, ".bak".._G[filetype].ext2)
+		if imgui.menu_item("Backup") and BitStream.copyFile(real_path, bak_path) and BitStream.checkFileExists(bak_path) then
+			lua_obj_tbl[filetype] = _G[filetype]:new{filepath=real_path}
+			re.msg("Backed up to " .. bak_path)
 		end
-		if BitStream.checkFileExists(real_path..".bak") and imgui.menu_item("Restore") and BitStream.copyFile(real_path..".bak", real_path) then
-			re.msg("Restored from " .. real_path..".bak")
+		if BitStream.checkFileExists(bak_path) and imgui.menu_item("Restore") and BitStream.copyFile(bak_path, real_path) then
+			lua_obj_tbl[filetype] = _G[filetype]:new{filepath=real_path}
+			re.msg("Restored from " .. bak_path)
+		end
+		if imgui.menu_item("Open") then
+			lua_obj_tbl[filetype] = _G[filetype]:new{filepath=real_path}
+			re.msg("Opened file " .. real_path)
 		end
 		imgui.end_popup() 
 	end
@@ -7449,10 +7454,11 @@ show_imgui_mats = function(anim_object)
 	if _G.RE_Resource and BitStream and mesh then
 		
 		if anim_object.materials.save_path_exists then
+			anim_object.materials.mesh = mesh
 			local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
 			if imgui.button("Save MDF") then
 				local mdfFile = MDFFile:new{filepath=real_path, mobject=mesh}
-				if mdfFile:save(real_path) then 
+				if mdfFile:save(real_path, false, false, true, anim_object.materials) then 
 					re.msg("Saved MDF file to:\n" .. anim_object.materials.save_path_text)
 				end
 				anim_object.materials.MDFFile = mdfFile
@@ -7480,9 +7486,11 @@ show_imgui_mats = function(anim_object)
 					local real_path = anim_object.materials.cmd_save_path_text:gsub("^reframework/data/", "")
 					if imgui.button("Save CMD") then
 						local cmdFile = UserFile:new{filepath=real_path}
-						cmdFile:save(real_path, false, false, anim_object.materials)
-						anim_object.materials.UserFile = cmdFile
-						imgui.same_line()
+						if cmdFile:save(real_path, false, false, true, anim_object.materials) then
+							anim_object.materials.UserFile = cmdFile
+							re.msg("Saved CMD file to:\n" .. real_path)
+						end
+						--imgui.same_line()
 					end
 					resource_ctx_menu("UserFile", real_path, anim_object.materials)
 					imgui.same_line()
@@ -7490,10 +7498,9 @@ show_imgui_mats = function(anim_object)
 				
 				if anim_object.materials.cmd_save_path_text == nil then
 					pcall(function()
-						local esf_no = anim_object.name:match("esf(.+)v")
-						local color_slot = string.format("%03d", anim_object.parent_obj.components_named.PlayerColorController.ColorNum + 1)
-						local costume_slot = anim_object.parent_obj.components_named.PlayerColorController.ColorData:get_Path():match("esf%d%d%d/(.+)/")
-						anim_object.materials.cmd_save_path_text = ("$natives/stm/product/model/esf/esf"..esf_no.."/"..costume_slot.."/esf"..esf_no.."_"..costume_slot.."_cmd_"..color_slot..".user.2")
+						anim_object.parent_obj = anim_object.parent_obj or GameObject:new{xform=anim_object.parent}
+						local col_controller = anim_object.parent_obj.components_named.PlayerColorController
+						anim_object.materials.cmd_save_path_text = "$natives/stm/"..col_controller.ColorData.Datas[col_controller.ColorNum]:get_Path()..".2"
 					end)
 				end
 				
@@ -7507,11 +7514,15 @@ show_imgui_mats = function(anim_object)
 		end
 		
 		imgui.tooltip(tooltip_msg)
-		if anim_object.materials.MDFFile and imgui.tree_node("[MDF Lua]") then 
+		local items_by_filepath = {}
+		for i, item in pairs(ResourceEditor.previousItems) do items_by_filepath[item.filepath] = item end
+		anim_object.materials.MDFFile = items_by_filepath[anim_object.materials.save_path_text:lower()]
+		if anim_object.materials.MDFFile and imgui.tree_node("[MDF File]") then 
 			anim_object.materials.MDFFile:displayImgui()
 			imgui.tree_pop()
 		end
-		if anim_object.materials.UserFile and imgui.tree_node("[CMD Lua]") then 
+		anim_object.materials.UserFile = items_by_filepath[anim_object.materials.cmd_save_path_text:lower()]
+		if anim_object.materials.UserFile and imgui.tree_node("[CMD File]") then 
 			anim_object.materials.UserFile:displayImgui()
 			imgui.tree_pop()
 		end
@@ -10436,6 +10447,13 @@ re.on_frame(function()
 			show_collection()
 			imgui.end_window()
 		end
+		if not SettingsCache.detach_reresource or (imgui.begin_window("RE Engine Resource Editor", true, SettingsCache.transparent_bg and 128 or 0) == false) then 
+			SettingsCache.detach_reresource = false
+		end
+		if SettingsCache.detach_reresource then
+			EMV.displayResourceEditor()
+			imgui.end_window()
+		end
 		--world_positions = {} 
 	end
 	
@@ -10560,13 +10578,14 @@ re.on_draw_ui(function()
 	end
 	
 	if EMV.displayResourceEditor and imgui.tree_node("Resource Editor") then --, {check_add_func=(function(str) return str:lower():find("%.[psm][fcd][bnf]2?%.") end)} --tdb_ver >= 69 and 
+		changed, SettingsCache.detach_reresource = imgui.checkbox("Detach Window", SettingsCache.detach_reresource)
 		EMV.displayResourceEditor()
 		imgui.tree_pop()
 	end
 	
 	if imgui.tree_node("Collection") then --next(Collection) and 
 		imgui.begin_rect()
-			changed, SettingsCache.detach_collection = imgui.checkbox("Detach", SettingsCache.detach_collection); csetting_was_changed = changed or csetting_was_changed
+			changed, SettingsCache.detach_collection = imgui.checkbox("Detach Window", SettingsCache.detach_collection); csetting_was_changed = changed or csetting_was_changed
 			imgui.same_line()
 			show_collection()
 		imgui.end_rect(2)

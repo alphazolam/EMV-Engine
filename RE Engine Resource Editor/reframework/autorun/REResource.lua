@@ -1,7 +1,7 @@
 --REResource.lua
 --REFramework Script for managed RE Engine files 
 --by alphaZomega
---July 29, 2023
+--August 4, 2023
 
 local EMV = require("EMV Engine")
 
@@ -98,6 +98,7 @@ RE_Resource = {
 		
 		argsTbl = (type(args)=="table" and args) or {}
 		o.filepath = argsTbl.filepath or (type(argsTbl[1])=="string" and argsTbl[1]) or (type(args)=="string" and args) or o.filepath
+		o.filepath = o.filepath and o.filepath:gsub("\\", "/"):lower()
 		o.mobject = argsTbl.mobject or (type(argsTbl[1])=="userdata" and argsTbl[1]) or (type(argsTbl[2])=="userdata" and argsTbl[2]) or (type(args)=="userdata" and args) or o.mobject
 		o.bs = args.bs or BitStream:new(o.filepath, args.file) or o.bs
 		o.offsets = {}
@@ -122,7 +123,15 @@ RE_Resource = {
 				end
 			end
 		end
-		
+		if o.filepath then
+			o.cleanPath = ((o.filepath:match("^.+" .. nativesFolderType .. "/(.+)$") or o.filepath))
+			ResourceEditor.previousItems[o.cleanPath] = o
+			if EMV.insert_if_unique(ResourceEditor.recentFiles, o.cleanPath) then
+				ResourceEditor.recentItemIdx = #ResourceEditor.recentFiles
+				ResourceEditor.textBox = "$natives/" .. nativesFolderType .. "/" .. ResourceEditor.recentFiles[ResourceEditor.recentItemIdx] 
+				json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
+			end
+		end
 		return o
 	end,
 	
@@ -217,6 +226,7 @@ RE_Resource = {
 					self.stringsToWrite = self.stringsToWrite or {}
 					table.insert(self.stringsToWrite, {offset=bs:tell(), string=tableToWrite[ fieldTbl[3][2] ]})
 				end
+				
 				bs[ methodType .. methodName ](bs, valueToWrite)
 			end
 		end
@@ -340,14 +350,11 @@ RE_Resource = {
 		currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
 		ResourceEditor.textBox = lowerC
 		
-		if currentItem and currentItem.filepath ~= "" then --(force or not ResourceEditor.previousItems[currentItem.filepath])
-			ResourceEditor.previousItems[currentItem.filepath] = currentItem
-			if EMV.insert_if_unique(ResourceEditor.recentFiles, ((currentItem.filepath:match("^.+" .. nativesFolderType .. "\\(.+)$") or currentItem.filepath) .. numberExt)) then
-				ResourceEditor.recentItemIdx = #ResourceEditor.recentFiles
-			end
+		if currentItem and currentItem.cleanPath ~= "" then
+			ResourceEditor.previousItems[currentItem.cleanPath] = currentItem
 			json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
 			if not noPrompt then
-				re.msg("Opened File: " .. currentItem.filepath)
+				re.msg("Opened File: " .. currentItem.cleanPath)
 			end
 			return true
 		else
@@ -1085,6 +1092,9 @@ RE_Resource = {
 	-- Displays a RE_Resource in imgui with editable fields, showing only the important structs of the file. Contains special functions for RSZ data
 	displayImgui = function(self)
 		
+		imgui.begin_rect()
+		imgui.begin_rect()
+		
 		local font_succeeded = pcall(imgui.push_font, utf16_font)
 		
 		if self.filepath then
@@ -1247,6 +1257,46 @@ RE_Resource = {
 				imgui.tree_pop()
 			end
 			imgui.tooltip("View debug information")
+			
+			-- Update SF6 "CustomizeColors" MDFs, which have very specific gaps between variables (gaps that have different sizes per update):
+			if self.isMDF and self.isCMD then 
+				local recentMDFNames = {}
+				for filepath, item in pairs(ResourceEditor.previousItems) do
+					if item.isMDF and item ~= self then table.insert(recentMDFNames, filepath) end
+				end
+				if imgui.button("Update CMD MDF") then
+					if not self.gapsMDF and recentMDFNames[ResourceEditor.recentMDFIdx] then
+						local path = recentMDFNames[ResourceEditor.recentMDFIdx]
+						self.gapsMDF = ResourceEditor.previousItems[path] or MDFFile:new(path)
+					end
+					if self.gapsMDF then
+						local dict = {}
+						for i, matHeader in ipairs(self.gapsMDF.matHeaders) do
+							dict[matHeader.name] = {paramsSize=matHeader.paramsSize, paramGaps={}} 
+							for p, paramHeader in ipairs(self.gapsMDF.paramHeaders[i]) do
+								dict[matHeader.name].paramGaps[paramHeader.name] = paramHeader.gapSize
+							end
+						end
+						for i, matHeader in ipairs(self.matHeaders) do
+							if dict[matHeader.name] then
+								matHeader.paramsSize = dict[matHeader.name].paramsSize
+								for p, paramHeader in ipairs(self.paramHeaders[i]) do
+									paramHeader.gapSize = dict[matHeader.name].paramGaps[paramHeader.name] or paramHeader.gapSize
+								end
+							end
+						end
+						re.msg("Updated gap sizes")
+					end
+				end
+				imgui.tooltip("Select a current-version MDF file from which to import CMD gap sizes to this file\nUse to fix old MDFs and make them work in updated versions of Street Fighter 6")
+				
+				imgui.same_line()
+				changed, ResourceEditor.recentMDFIdx = imgui.combo("Recent MDFs", ResourceEditor.recentMDFIdx or 1, recentMDFNames)
+				if changed then 
+					local path = recentMDFNames[ResourceEditor.recentMDFIdx]
+					self.gapsMDF = ResourceEditor.previousItems[path] or MDFFile:new(path)
+				end
+			end
 		end
 		
 
@@ -1446,7 +1496,8 @@ RE_Resource = {
 		if font_succeeded then
 			imgui.pop_font()
 		end
-		
+		imgui.end_rect(2)
+		imgui.end_rect(3)
 	end,
 }
 
@@ -3155,7 +3206,9 @@ MDFFile = {
 			for p = 1, self.matHeaders[m].paramCount do 
 				local paramHdr = self:readStruct("paramHeader")
 				paramHdr.paramAbsOffset = self.matHeaders[m].paramsOffset + paramHdr.paramRelOffset
-				--log.info("Reading param " .. p .. " for mat " .. m .. " at " .. paramHdr.paramAbsOffset)
+				paramHdr.gapSize = ((p == 1) and (paramHdr.paramAbsOffset - self.matHeaders[m].paramsOffset)) or (paramHdr.paramAbsOffset - (self.paramHeaders[m][p-1].paramAbsOffset + (self.paramHeaders[m][p-1].componentCount*4)))
+				self.isCMD = self.isCMD or not not paramHdr.paramName:find("CustomizeColor") or nil
+				
 				if paramHdr.componentCount == 4 then
 					paramHdr.parameter = { self.bs:readFloat(paramHdr.paramAbsOffset), self.bs:readFloat(paramHdr.paramAbsOffset+4), self.bs:readFloat(paramHdr.paramAbsOffset+8), self.bs:readFloat(paramHdr.paramAbsOffset+12) }
 				else
@@ -3172,7 +3225,7 @@ MDFFile = {
 	end,
 	
 	-- Saves a new MDF file using data from owned Lua tables
-	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt, mesh)
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt, materials)
 		
 		if not doOverwrite and (not filepath or filepath == self.filepath) then
 			filepath = (filepath or self.filepath):gsub("%.mdf2", ".NEW.mdf2")
@@ -3187,7 +3240,7 @@ MDFFile = {
 		
 		--load REF data into Lua tables for write
 		local vars = {}
-		mesh = mesh or self.mobject
+		local mesh = materials.mesh or self.mobject or materials
 		if mesh then 
 			for m = 1, self.matCount do 
 				local matID = m - 1
@@ -3228,28 +3281,41 @@ MDFFile = {
 		end
 		
 		for i, wstringTbl in ipairs(self.stringsToWrite or {}) do
-			self.bs:writeUInt64(self:tell(), wstringTbl.offset)
+			wstringTbl.at = self:tell()
 			self.bs:writeWString(wstringTbl.string)
 		end
-		self.stringsToWrite = nil
 		
-		
+		self.bs:align(16)
 		for m = 1, self.matCount do
-			self.bs:align(16)
+			
 			self.matHeaders[m].paramsOffset = self:tell()
 			local start = self:tell()
 			for p = 1, self.matHeaders[m].paramCount do 
+				if self.paramHeaders[m][p].gapSize > 0 then
+					self.bs:writeBytes(self.paramHeaders[m][p].gapSize)
+				end
+				self.paramHeaders[m][p].paramRelOffset = self:tell() - start
 				if self.paramHeaders[m][p].componentCount == 1 then 
 					self.bs:writeFloat(self.paramHeaders[m][p].parameter)
 				else
 					self.bs:writeArray(self.paramHeaders[m][p].parameter, "Float")
 				end
-				self.paramHeaders[m][p].paramRelOffset = self:tell() - start
-				--self:writeStruct("paramHeader", self.paramHeaders[m][p], self.paramHeaders[m][p].startOf)
+				self:writeStruct("paramHeader", self.paramHeaders[m][p], self.paramHeaders[m][p].startOf)
 			end
-			self:writeStruct("matHeader", self.matHeaders[m], self.matHeaders[m].startOf)
+			self.bs:writeBytes((start + self.matHeaders[m].paramsSize) - self:tell())
+			
+			local matHdr =  EMV.deep_copy(self.matHeaders[m])
+			matHdr.ukn = matHdr.ukn and 0
+			matHdr.ukn1 = matHdr.ukn1 and 0
+			matHdr.ukn2 = matHdr.ukn2 and 0
+			matHdr.texIDsOffset = matHdr.texIDsOffset and 0
+			self:writeStruct("matHeader", matHdr, matHdr.startOf)
 		end
-		--self.backup = self.bs
+		
+		for i, wstringTbl in ipairs(self.stringsToWrite or {}) do
+			if wstringTbl.at then self.bs:writeUInt64(wstringTbl.at, wstringTbl.offset) end
+		end
+		self.stringsToWrite = nil
 		
 		if not onlyUpdateBuffer and (self.bs:save(filepath) and filepath) then
 			if not noPrompt then re.msg("Saved to " .. filepath) end
@@ -3313,17 +3379,27 @@ MDFFile = {
 	},
 }
 
+
+
 -- MDFFile struct adjustments for different TDB versions:
+if tdb_ver >= 71 then --SF6+
+	table.insert(MDFFile.structs.matHeader, 12, {"UInt64", "texIDsOffset"})
+end
 if tdb_ver >= 69 then --RE8+
-	table.insert(MDFFile.structs.matHeader, 10, {"UInt64", "firstMaterialNameOffset"})
+	table.insert(MDFFile.structs.matHeader, 10, {"UInt64", "firstMaterialNameOffset", {"WString", "firstMaterialName"}})
+end
+if tdb_ver >= 71 then --SF6+
+	table.insert(MDFFile.structs.matHeader, 8, {"UInt", "ukn2"})
+	table.insert(MDFFile.structs.matHeader, 8, {"UInt", "ukn1"})
+	table.insert(MDFFile.structs.matHeader, 7, {"UInt", "ukn"})
+end
+if tdb_ver >= 69 then --RE8+
 	table.insert(MDFFile.structs.matHeader, 6, {"skip", 8})
 end
-
 if tdb_ver >= 68 then --RE3R+
 	table.insert(MDFFile.structs.texHeader, {"skip", 8})
 	MDFFile.structs.paramHeader[4], MDFFile.structs.paramHeader[5] = MDFFile.structs.paramHeader[5], MDFFile.structs.paramHeader[4]
 end
-
 if tdb_ver == 49 then --RE7
 	table.insert(MDFFile.structs.matHeader, 3, {"UInt64", "uknRE7"})
 end
@@ -4096,7 +4172,7 @@ ResourceEditor = {
 ResourceEditor.paths = ResourceEditor.paths and ResourceEditor.paths[game_name] or {}
 
 EMV.displayResourceEditor = function()
-	
+
 	imgui.begin_rect()
 	--imgui.push_font(utf16_font)
 		ResourceEditor.textBox = ResourceEditor.textBox or ""
@@ -4112,7 +4188,7 @@ EMV.displayResourceEditor = function()
 		changed, ResourceEditor.recentItemIdx = imgui.combo("Recent Files", ResourceEditor.recentItemIdx or 1, ResourceEditor.recentFiles)
 		
 		if changed and lastIdx ~= ResourceEditor.recentItemIdx then 
-			ResourceEditor.textBox = "$natives\\" .. nativesFolderType .. "\\" .. ResourceEditor.recentFiles[ResourceEditor.recentItemIdx]
+			ResourceEditor.textBox = "$natives/" .. nativesFolderType .. "/" .. ResourceEditor.recentFiles[ResourceEditor.recentItemIdx]
 			ResourceEditor.currentItemIdx = EMV.find_index(ResourceEditor.paths, ResourceEditor.recentFiles[ResourceEditor.recentItemIdx]) or ResourceEditor.currentItemIdx
 			doOpen = true
 		end
@@ -4140,30 +4216,45 @@ EMV.displayResourceEditor = function()
 			doOpen = true
 		end
 
-		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input SCN/PFB/USER/MDF/Chain File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmuc][fcdsh][bnfea][2ri]?")) then 
-			RE_Resource.openResource(ResourceEditor.textBox)
+		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmuc][fcdsh][bnfea][2ri]?")) then 
+			RE_Resource.openResource(ResourceEditor.textBox:gsub('^%s*(.-)%s*$', '%1'))
 		end
 		
-		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder")
+		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder\nSupported filetypes: SCN, PFB, USER, MDF, Chain ")
 		
 		if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 
-			for path, item in orderedPairs(ResourceEditor.previousItems) do
-				local id = imgui.get_id(path)
-				imgui.push_id(id)
-					local do_clear = imgui.button("X")
-				imgui.pop_id()
-				imgui.same_line()
-				if imgui.tree_node(path) then
-					item:displayImgui()
+			categorized = {}
+			for path, item in pairs(ResourceEditor.previousItems) do
+				local ext = item.ext2:sub(2,-1)
+				local itemType = EMV.find_index(RE_Resource.validExtensions, ext)
+				categorized[ext] = categorized[ext] or {}
+				table.insert(categorized[ext], item)
+			end
+			for ext, tbl in orderedPairs(categorized) do
+				table.sort(tbl, function(a, b) return a.cleanPath < b.cleanPath  end) 
+				if imgui.tree_node(ext:upper().." Files") then
+					imgui.begin_rect()
+						for i, item in ipairs(tbl) do
+							imgui.push_id(i-1337)
+								local do_clear = imgui.button("X")
+							imgui.pop_id()
+							imgui.same_line()
+							if imgui.tree_node(item.cleanPath) then
+								item:displayImgui()
+								imgui.tree_pop()
+							end
+							if do_clear then
+								ResourceEditor.previousItems[item.cleanPath] = nil
+							end
+						end
+					imgui.end_rect(2)
 					imgui.tree_pop()
-				end
-				if do_clear then
-					ResourceEditor.previousItems[path] = nil
 				end
 			end
 			imgui.tree_pop()
 		end
 	--imgui.pop_font()
+	imgui.spacing()
 	imgui.end_rect()
 end
 

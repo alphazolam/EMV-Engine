@@ -230,7 +230,7 @@ BitStream = {
 		local npos = pos or self.pos
 		self.file:seek("set", npos) 
 		if type(strBufferOrSize)=="number" then
-			strBufferOrSize = string.pack("c" .. strBufferOrSize, "\0")
+			strBufferOrSize = ((strBufferOrSize > 0) and string.pack("c" .. strBufferOrSize, "\0")) or ""
 		end
 		self.file:write(strBufferOrSize)
 		if not pos then self.pos = self.file:seek("cur", 0) end
