@@ -7453,6 +7453,7 @@ show_imgui_mats = function(anim_object)
 	local mesh = anim_object.mesh or (anim_object.materials and anim_object.materials[1] and anim_object.materials[1].mesh)
 	if _G.RE_Resource and BitStream and mesh then
 		
+		local items_by_filepath = {}
 		if anim_object.materials.save_path_exists then
 			anim_object.materials.mesh = mesh
 			local real_path = anim_object.materials.save_path_text:gsub("^reframework/data/", "")
@@ -7511,17 +7512,18 @@ show_imgui_mats = function(anim_object)
 			else
 				imgui.text_colored("Save CMD: Failed to initialize reframework\\data\\rsz\\rszsf6.json !\nDownload this file from https://github.com/alphazolam/RE_RSZ", 0xFF0000FF)
 			end
+			anim_object.materials.UserFile = items_by_filepath[anim_object.materials.cmd_save_path_text:lower()]
 		end
 		
 		imgui.tooltip(tooltip_msg)
-		local items_by_filepath = {}
+		
 		for i, item in pairs(ResourceEditor.previousItems) do items_by_filepath[item.filepath] = item end
 		anim_object.materials.MDFFile = items_by_filepath[anim_object.materials.save_path_text:lower()]
 		if anim_object.materials.MDFFile and imgui.tree_node("[MDF File]") then 
 			anim_object.materials.MDFFile:displayImgui()
 			imgui.tree_pop()
 		end
-		anim_object.materials.UserFile = items_by_filepath[anim_object.materials.cmd_save_path_text:lower()]
+		
 		if anim_object.materials.UserFile and imgui.tree_node("[CMD File]") then 
 			anim_object.materials.UserFile:displayImgui()
 			imgui.tree_pop()
