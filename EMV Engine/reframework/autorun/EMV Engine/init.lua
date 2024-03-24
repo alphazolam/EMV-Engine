@@ -1,6 +1,7 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
---August 4, 2023
+--v2.999
+--March 24, 2024
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -974,6 +975,18 @@ function imgui.input_text_colored(white_text, color_text, color, text)
 	imgui.same_line()
 	imgui.text_colored(color_text or "", color or 0xFFE0853D)
 	return changed, value
+end
+
+if isDD2 then
+	local sys_void = sdk.find_type_definition("System.Void")
+	local example = sdk.find_type_definition("System.UInt32"):get_method("Equals")
+	local old_get_ret_type = getmetatable(example).get_return_type
+	
+	getmetatable(example).get_return_type = function(name)
+		local Type = old_get_ret_type(name)
+		asd = os.clock()
+		return Type or sys_void
+	end
 end
 
 --View a table entry as input_text and change the table -------------------------------------------------------------------------------------------------------
@@ -2949,7 +2962,7 @@ end
 --GameObject and component based functions ------------------------------------------------------------------------------------------------
 --Get contents of an Enumerator
 local function lua_get_enumerator(m_obj, o_tbl)
-	if pcall(sdk.call_object_func, m_obj, ".ctor", 0) then
+	if m_obj and pcall(sdk.call_object_func, m_obj, ".ctor", 0) then
 		local elements = {}
 		local fields = m_obj:get_type_definition():get_fields()
 		local wrap_obj
@@ -9222,7 +9235,7 @@ GameObject = {
 			for i, child in ipairs(merge_indexed_tables({self.xform}, self.children) or {}) do
 				if i == 1 or child:get_SameJointsConstraint() then
 					local is_body = ((i == 1) or (get_body_part(child:get_GameObject():get_Name()) == "Body"))
-					for j, joint in ipairs(lua_get_system_array(child:get_Joints())) do 
+					for j, joint in ipairs(lua_get_system_array(child:get_Joints()) or {}) do 
 						if not uniques[joint:get_Name()] then
 							uniques[joint:get_Name()] = true
 							table.insert(poser.all_joints, joint)

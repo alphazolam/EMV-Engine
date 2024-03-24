@@ -99,12 +99,43 @@ end
 
 --RE2, RE3
 local cheats = {
-	["god"] = table.pack({ comp="HitPointController", method="set_NoDamage", get_method="get_NoDamage"}),
-	["God"] = table.pack({ comp="HitPointController", method="set_Invincible", get_method="get_Invincible"}),
-	["hp"] = table.pack({ comp="HitPointController", args_method="set_CurrentHitPoint"}),
+	["god"] = {
+		re2 = function()
+			local hp = EMV.get_player(true).components_named.HitPointController
+			hp:set_NoDamage(not hp:get_NoDamage())
+			return hp:get_NoDamage()
+		end,
+	},
+	["God"] = {
+		re2 = function()
+			local hp = EMV.get_player(true).components_named.HitPointController
+			local is_inv = not hp:get_Invincible()
+			hp:set_Invincible(is_inv)
+			deferred_calls[hp] = is_inv and {func="set_Invincible", args=is_inv, vardata={freeze=true}} or nil
+			return is_inv
+		end,
+	},
+	["hp"] = {
+		re2 = function(amount)
+			if not amount or not tonumber(amount) then return _G.hp end
+			local hp = EMV.get_player(true).components_named.HitPointController
+			hp:set_CurrentHitPoint(tonumber(amount))
+			return hp:get_CurrentHitPoint()
+		end,
+	},
+	
+	
+
+	--["god"] = table.pack({ comp="HitPointController", method="set_NoDamage", get_method="get_NoDamage"}),
+	--["God"] = table.pack({ comp="HitPointController", method="set_Invincible", get_method="get_Invincible"}),
+	--["hp"] = table.pack({ comp="HitPointController", args_method="set_CurrentHitPoint"}),
 	--["noclip"] = table.pack({ comp="CharacterController", method="set_Enabled", active=false }, { comp="GroundFixer", method="set_Enabled", active=false }),
 }
 
+cheats["god"].re3 = cheats["god"].re2
+cheats["God"].re3 = cheats["God"].re2
+cheats["hp"].re3 = cheats["hp"].re2
+--[[
 if isRE8 then 
 	cheats.god = table.pack(
 		{ comp="PlayerUpdaterBase", sub_obj="get_characterCore", field="isEnableDead"}
@@ -114,15 +145,18 @@ if isRE8 then
 		--{ comp="PlayerUpdater", sub_obj="get_characterCore", field="IsEnableDamageReaction"}, 
 		{ comp="PlayerUpdaterBase", sub_obj="get_characterCore", field="IsEnableDamage"}
 	)
-end
+end]]
 
 --Exectutes a string command input, dividing it up into separate sub-commands:
 local run_command = function(input)
 	input = input:gsub(" +$", "")
 	local cht_part =  input:match("^(.+) ")
 	local splitted = (cht_part and cheats[cht_part] and EMV.split(input, " ")) or {}
-	if cheats[splitted[1] or input] then 
-		local active
+	local cheat_fn = cheats[splitted[1] or input] and cheats[splitted[1] or input][reframework:get_game_name()]
+	if cheat_fn then 
+		table.remove(splitted, 1)
+		return cheat_fn(table.unpack(splitted))
+		--[[local active
 		for i, cheat in ipairs(cheats[splitted[1] or input]) do
 			local player = EMV.get_player(true) 
 			local component = player.components_named[cheat.comp]
@@ -147,7 +181,7 @@ local run_command = function(input)
 				end
 			end
 		end
-		return active ~= nil and tostring(active)
+		return active ~= nil and tostring(active)]]
 	elseif input == "clear" then 
 		if History.first_history_idx == #History.history_idx + 1 then 
 			re.msg("Cleared")
@@ -187,6 +221,7 @@ local function show_history(do_minimal, new_first_history_idx)
 					end 
 				imgui.pop_id()
 				imgui.same_line()
+				imgui.set_next_item_width(1920)
 				if do_multiline then
 					changed, command = imgui.input_text_multiline(" ", command)
 				else
@@ -284,6 +319,7 @@ local function show_history(do_minimal, new_first_history_idx)
 			end 
 		imgui.pop_id()
 		imgui.same_line()
+		imgui.set_next_item_width(1920)
 		
 		if do_multiline then
 			changed, command = imgui.input_text_multiline(" ", command)
@@ -464,11 +500,11 @@ local function autocomplete()
 					local tostring_val = tostring(value)
 					elems = merge_tables({}, (try and elems2) or elems) --DONT merge metatable into real table
 					if (tostring_val:find("REManaged") or tostring_val:find("RETransf") or tostring_val:find("ValueType") or tostring_val:find("SystemArray")) then --create REMgdObj class
-						if not metadata[value] then EMV.create_REMgdObj(value, true) end
-						elems = merge_tables(elems, metadata[value] or {})
+						if not _data[value] then EMV.create_REMgdObj(value, true) end
+						elems = merge_tables(elems, _data[value] or {})
 					end
 					for k, v in pairs(elems) do
-						check_sub_table(k, v, level+1, next_key_prefix, metadata[value] and metadata[value]._.methods[k])
+						check_sub_table(k, v, level+1, next_key_prefix, _data[value] and _data[value].methods[k])
 					end
 				end
 			end
@@ -539,7 +575,7 @@ local function dump_history()
 				print("Erroneous command: " .. tostring(cmd))
 			end
 		end
-		local new_first_history_idx = History.first_history_idx - diff
+		local new_first_history_idx = 1--History.first_history_idx - diff
 		if new_first_history_idx < 1 then new_first_history_idx = 1 end
 		local History = {history=history_cmds_only, history_idx=new_history_idx, current_history_idx=History.current_history_idx - diff, first_history_idx=History.first_history_idx - diff} 
 		json.dump_file("Console\\History.json",  EMV.jsonify_table(History))
@@ -682,6 +718,21 @@ local function show_console_settings()
 			old_deferred_calls = {}
 		end
 		
+		if imgui.tree_node("All History") then 
+			for i, command_txt in ipairs(History.history_idx or {}) do
+				imgui.push_id(command_txt)
+				if imgui.button("Again") then 
+					command = command_txt
+					force_command = true
+				end
+				imgui.same_line()
+				imgui.text(command_txt)
+				imgui.pop_id()
+			end
+			read_imgui_element()
+			imgui.tree_pop()
+		end
+		
 		if imgui.tree_node("Global Variables") then 
 			read_imgui_element(_G, nil, "_G")
 			imgui.tree_pop()
@@ -694,11 +745,13 @@ end
 re.on_frame(function()
 
 	if not toks then 
-		History = EMV.jsonify_table(json.load_file("Console\\History.json") or {}, true)
+		if not pcall(function()
+			History = EMV.jsonify_table(json.load_file("Console\\History.json") or {}, true)
+		end) then json.dump_file("Console\\History.json", {}) end
 		History.history = History.history or {}
 		History.history_idx = History.history_idx or {}
 		History.history_metadata =  History.history_metadata or {}
-		History.current_history_idx = History.current_history_idx or 1
+		History.current_history_idx = 1
 		History.first_history_idx = #History.history_idx + 1
 		History.command_output = History.command_output or " "
 		History.current_directory = History.current_directory or ""

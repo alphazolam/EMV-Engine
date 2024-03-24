@@ -14,10 +14,12 @@ local isOldVer = tdb_ver <= 67
 local addFontSize = 3
 local nativesFolderType = ((tdb_ver <= 67) and "x64") or "stm"
 local shift_key_down
-local copyBuffer = {}
+copyBuffer = {}
 local changed
 local re23ConvertJson
 local re23ConvertJsonPath
+local tics = 0
+local rsz_json_filename = ""
 ResourceEditor = nil
 
 local CHINESE_GLYPH_RANGES = {
@@ -56,6 +58,14 @@ end
 
 if rsz_parser and not rsz_parser.IsInitialized() then 
 	rsz_parser.ParseJson("reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json")
+end
+
+local wstring_hashing_fn = function(str, do_utf8)
+	return sdk.find_type_definition("via.murmur_hash"):get_method("calc32"):call(nil, str)
+end
+
+local string_hashing_fn = function(str)
+	return sdk.find_type_definition("via.murmur_hash"):get_method("calc32AsUTF8"):call(nil, str, str:len())
 end
 
 local displayStruct
@@ -114,6 +124,7 @@ RE_Resource = {
 					re.msg("Failed to locate reframework\\data\\rsz\\rsz" .. game_name .. rt_suffix .. ".json !\nDownload this file from https://github.com/alphazolam/RE_RSZ")
 					o.bs = BitStream:new()
 				end
+				
 			end
 			if isRE2 or isRE3 then
 				if BitStream.checkFileExists("rsz\\rsz" .. ((isRE2 and "re3") or "re2") .. rt_suffix .. ".json") then
@@ -190,6 +201,7 @@ RE_Resource = {
 		bs = bs or self.bs
 		local methodType = (doInsert and "insert") or "write"
 		structs = structs or self.structs
+		
 		local struct = structs[structName]
 		local begin = bs:tell()
 		
@@ -250,7 +262,7 @@ RE_Resource = {
 	scanFixStreamOffsets = function(self, startAt, endAt, insertPoint, maxOffset, addedSz, intSize)
 		intSize = ((intSize==4) and 4) or 8
 		maxOffset = maxOffset or (self.bs:fileSize() + addedSz)
-		log.info("\nScanning bitstream from address " .. startAt .. " to " .. endAt .. ", checking for " .. intSize .. "-byte offsets >= " .. insertPoint .. " and < " ..maxOffset .. " in which to add size +" .. addedSz)
+		print("\nScanning bitstream from address " .. startAt .. " to " .. endAt .. ", checking for " .. intSize .. "-byte offsets >= " .. insertPoint .. " and < " ..maxOffset .. " in which to add size +" .. addedSz)
 		if startAt > endAt then return log.info("Cannot fix offsets: start of range is after end of range")	end
 		local offset
 		local bs = self.bs
@@ -264,7 +276,7 @@ RE_Resource = {
 				offset = bs:readUInt64()
 			end
 			if offset >= insertPoint and offset <= maxOffset then
-				log.info("@ position " .. (bs.pos - intSize) .. ": " .. offset .. " " .. " >= " .. insertPoint .. "(limit " .. maxOffset .. "), added +" .. addedSz .. ", new offset: " .. (offset + addedSz))
+				print("@ position " .. (bs.pos - intSize) .. ": " .. offset .. " " .. " >= " .. insertPoint .. "(limit " .. maxOffset .. "), added +" .. addedSz .. ", new offset: " .. (offset + addedSz))
 				if intSize == 4 then
 					bs:writeUInt(offset + addedSz, bs.pos - 4)
 				else
@@ -345,6 +357,8 @@ RE_Resource = {
 			currentItem = UserFile:new(lowerC)
 		elseif lowerC:find("%.chain") then 
 			currentItem = ChainFile:new(lowerC)
+		elseif lowerC:find("%.motlist") then 
+			currentItem = MotlistFile:new(lowerC)
 		end
 		
 		currentItem = (currentItem and currentItem.bs.fileExists and currentItem.bs.size > 0 and currentItem) or nil
@@ -354,24 +368,25 @@ RE_Resource = {
 			ResourceEditor.previousItems[currentItem.cleanPath] = currentItem
 			json.dump_file("rsz\\recent_files.json", ResourceEditor.recentFiles)
 			if not noPrompt then
-				re.msg("Opened File: " .. currentItem.cleanPath)
+				re.msg("Opened File: " .. path)
 			end
 			return true
 		else
-			re.msg("File not found!")
+			re.msg("File not found!\n"..path)
 		end
 	end,
 	
 	displayInstance = function(self, instance, displayName, parentField, parentFieldListIdx, rszBufferFile)
 		
-		local copied, pasted, pasted_with_children
+		local copied, pasted, pasted_with_children, pasted_live_object
 		local id = imgui.get_id(parentFieldListIdx or "") .. (displayName or "[Invalid ObjectId]")
 		
 		local tree_opened = imgui.tree_node_str_id(id, displayName or "")
 		if imgui.begin_popup_context_item(displayName) then  
-			copied = imgui.menu_item("Copy")
-			pasted = copyBuffer.instance and imgui.menu_item("Paste" .. (shift_key_down and " after" or ""))
-			pasted_with_children = copyBuffer.instance and imgui.menu_item("Paste with children after")
+			copied = imgui.menu_item("Copy Instance")
+			pasted = copyBuffer.instance and imgui.menu_item("Paste Instance" .. (shift_key_down and " after" or ""))
+			pasted_with_children = copyBuffer.instance and imgui.menu_item("Paste Instance with children after")
+			pasted_live_object = copyBuffer.liveObject and imgui.menu_item("Paste data from RE Managed Object")
 			imgui.end_popup() 
 		end
 		imgui.same_line()
@@ -536,11 +551,14 @@ RE_Resource = {
 									end
 									imgui.same_line()
 								end
-								if EMV.editable_table_field("value", field.value, field, field.fieldTypeName .. " " .. field.name, {color_text={field.fieldTypeName, field.name, nil}})==1 then --hide_type=true
+								if EMV.editable_table_field("value", field.value, field, field.fieldTypeName .. " " .. field.name, {color_text={field.fieldTypeName, field.name, nil}}) == 1 then --hide_type=true
 									if type(field.value)=="string" and field.value:find("/") and not EMV.find_index(rszBufferFile.owner.resourceInfos or {}, field.value, "resourcePath") then
 										table.insert(rszBufferFile.owner.resourceInfos, {name=field.value, resourcePath=field.value})
 									end
 									rawF.value = (type(field.value)=="boolean" and bool_to_number[field.value]) or field.value
+									if field.fieldTypeName == "Data4" and type(rawF.value) == "number" then
+										rawF.LuaTypeName = (tostring(rawF.value):find("%.") and "Float") or "Int" --change to float or int based on whether there's a decimal
+									end
 								end
 							end
 							
@@ -563,7 +581,36 @@ RE_Resource = {
 			copyBuffer.instance = instance.rawDataTbl or instance
 		end
 		
-
+		if pasted_live_object then
+			local obj = copyBuffer.liveObject
+			local o_tbl = _data[obj] or create_REMgdObj(obj)
+			o_tbl:__update()
+			local thisInstance = instance.rawDataTbl or instance
+			local fields_dict = {}
+			for i, field in ipairs(thisInstance.fields) do
+				fields_dict[field.name] = field
+			end
+			for i, field in ipairs(o_tbl.fields) do
+				local cleanName = field:get_name():match("<(.+)>k__BackingField") or field:get_name()
+				if fields_dict[cleanName] then
+					local new_value = field:get_data(obj)
+					if new_value ~= nil and (not EMV.can_index(new_value) or not new_value.add_ref) then
+						fields_dict[cleanName].value = new_value
+					end
+				end
+			end
+			for i, prop in ipairs(o_tbl.props) do
+				local cleanName = prop.name:gsub("^_", "")
+				if fields_dict[cleanName] then
+					if prop.value ~= nil and (not EMV.can_index(prop.value) or not prop.value.add_ref) then
+						fields_dict[cleanName].value = prop.value
+					end
+				end
+			end
+			copyBuffer.liveObject = nil
+			self:save(nil, true)
+			self:read()
+		end
 		
 		if pasted or pasted_with_children then
 			
@@ -597,7 +644,7 @@ RE_Resource = {
 				table.insert(newTypenames, rsz_parser.GetRSZClassName(instance.typeId)) 
 			end
 			local objectTblInsertPt = rszBufferFile:addInstance(newTypenames, instance.index+addAmt, newInstances, isRSZObject)
-			if parentField.count then
+			if parentField and parentField.count then
 				parentField.count = parentField.count + 1
 				table.insert(parentField.rawField.value, instance.index + #newInstances)
 			end
@@ -750,23 +797,31 @@ RE_Resource = {
 		local function context_menu()
 			if imgui.begin_popup_context_item(displayName .. "GO") then  
 				
-				if imgui.menu_item("Copy") then 
+				local thisName = (gameObject.fInfo and "Folder" or "GameObject")
+				
+				if imgui.menu_item("Copy " .. thisName) then 
 					copyBuffer.gameObject = EMV.deep_copy(gameObject)
 					copyBuffer.gameObject.children = {}
+					copyBuffer.gameObject.gameObjects = {}
+					copyBuffer.gameObject.folders = {}
 					copyBuffer.RSZ = self.RSZ
 				end 
 				
-				if gameObject.children[1] and imgui.menu_item("Copy With Children") then 
+				if gameObject.children[1] and imgui.menu_item("Copy " .. thisName .. " with Children") then 
 					copyBuffer.gameObject = EMV.deep_copy(gameObject)
 					copyBuffer.RSZ = self.RSZ
 				end 
 				
 				if copyBuffer.gameObject then 
+					
+					local targetName = (copyBuffer.gameObject.fInfo and "Folder" or "GameObject")
 					--[[if imgui.menu_item("Save Json") then
 						json.dump_file("RE_Resources\\Saved\\"..copyBuffer.gameObject.name..".json", EMV.jsonify_table(copyBuffer.gameObject))
 					end]]
 					
-					if imgui.menu_item("Paste") then-- .. (shift_key_down and " after" or "")) then 
+					local pasted_as_child = (not gameObject.gameObjects[1] or not gameObject.folders[1]) and imgui.menu_item("Paste " .. targetName .. " to this " .. thisName .. "'s Children") 
+					
+					if imgui.menu_item("Paste " .. targetName) or pasted_as_child then -- .. (shift_key_down and " after" or "")) then 
 						
 						local insertionGObj = gameObject
 						local thisInfo = insertionGObj.gInfo or insertionGObj.fInfo
@@ -816,11 +871,8 @@ RE_Resource = {
 								table.insert(newGInfos, info)
 							end
 							
-							for i, childFolder in ipairs(go.folders or {}) do 
-								recurse(childFolder)
-							end
-							for i, childObj in ipairs(go.children) do 
-								recurse(childObj)
+							for i, child in ipairs(go.children or {}) do 
+								recurse(child)
 							end
 						end
 						
@@ -900,6 +952,7 @@ RE_Resource = {
 						
 						--Insert new GameObjectInfos:
 						for i, newGInfo in ipairs(newGInfos) do 
+							
 							local newInstanceId = EMV.find_index(rszBufferFile.newInstances, newGInfo.gameObject.gameobj.rawDataTbl.id, "id")
 							newGInfo.objectId = EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId")-1
 							--[[if newGInfo.objectId then 
@@ -909,6 +962,7 @@ RE_Resource = {
 									.. newGInfo.gameObject.gameobj.rawDataTbl.id .. " (" .. newGInfo.gameObject.gameobj.rawDataTbl.title .. ")")
 								end) then log.debug("Failed to print objectId debug") end
 							end]]
+							--eee = {newGInfo, newGInfos, newInstanceId, copyBuffer}
 							if newGInfo.parentId ~= -1 then 
 								local oldParent = copyBuffer.RSZ.rawData[copyBuffer.RSZ.objectTable[newGInfo.parentId+1].instanceId]
 								local newParentInstanceId = oldParent and oldParent.id and EMV.find_index(rszBufferFile.newInstances, oldParent.id, "id")
@@ -931,21 +985,27 @@ RE_Resource = {
 						end
 						
 						--Insert new FolderInfos:
+						--local ctr = 1
 						for i, newFInfo in ipairs(newFInfos) do 
 							local newInstanceId = EMV.find_index(rszBufferFile.newInstances, newFInfo.folder.instance.rawDataTbl.id, "id")
-							--testee = {i, newFInfo, newFInfo.folder.instance.rawDataTbl.id, newInstanceId, EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId"), rszBufferFile.newInstances}
-							newFInfo.objectId = EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId")-1
-							if newFInfo.parentId ~= -1 then 
-								local oldParent = copyBuffer.RSZ.rawData[copyBuffer.RSZ.objectTable[newFInfo.parentId+1].instanceId]
-								local newParentInstanceId = oldParent and oldParent.id and EMV.find_index(rszBufferFile.newInstances, oldParent.id, "id")
-								newFInfo.parentId = (EMV.find_index(rszBufferFile.objectTable, newParentInstanceId, "instanceId") or 0) - 1
-							end
-							table.insert(owner.folderInfos, newFInfoInsertPt+i-1, newFInfo)
+							--if newInstanceId then
+								--testee = {i, newFInfo, newFInfo.folder.instance.rawDataTbl.id, newInstanceId, EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId"), rszBufferFile.newInstances, newFInfos}
+								newFInfo.objectId = EMV.find_index(rszBufferFile.objectTable, newInstanceId, "instanceId")-1
+								if newFInfo.parentId ~= -1 then 
+									local oldParent = copyBuffer.RSZ.rawData[copyBuffer.RSZ.objectTable[newFInfo.parentId+1].instanceId]
+									local newParentInstanceId = oldParent and oldParent.id and EMV.find_index(rszBufferFile.newInstances, oldParent.id, "id")
+									newFInfo.parentId = (EMV.find_index(rszBufferFile.objectTable, newParentInstanceId, "instanceId") or 0) - 1
+								end
+								table.insert(owner.folderInfos, newFInfoInsertPt+i-1, newFInfo)
+								--ctr = ctr + 1
+							--end
+							
 						end
 						
-						copyInfo.parentId = thisInfo.parentId
+						--Set parent of pasted object:
+						copyInfo.parentId = (pasted_as_child and ((EMV.find_index(rszBufferFile.objectTable, gameObject.instance.rawDataTbl.index, "instanceId") or (thisInfo.parentId+1)) - 1)) or thisInfo.parentId
 						
-						--tester = {copyBuffer.gameObject, rszBufferFile.rawData, objectTblInsertPt, newInstances, newNames, newObjects, newGInfos, newFInfos, tostring(newGInfoInsertPt), tostring(newFInfoInsertPt), owner.gameObjectInfos }
+						--tester = {copyBuffer.gameObject, rszBufferFile, objectTblInsertPt, newInstances, newNames, newObjects, newGInfos, newFInfos, tostring(newGInfoInsertPt), tostring(newFInfoInsertPt), owner.gameObjectInfos }
 						
 						--Flush RSZ buffer:
 						rszBufferFile:writeBuffer()
@@ -1055,13 +1115,21 @@ RE_Resource = {
 					imgui.end_rect(2)
 					
 					self:displayInstance(gameObject.gameobj, "via.GameObject[" .. gameObject.gameobj.rawDataTbl.index .. "]", nil, nil, rszBufferFile)
+					
 					for i, sortedInstance in ipairs(gameObject.components) do
 						self:displayInstance(sortedInstance, i .. ". " .. sortedInstance.name, nil, nil, rszBufferFile)
 					end
 
-					if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
-						for c, childObject in ipairs(gameObject.children) do
-							self:displayGameObject(childObject, c .. ". " .. childObject.name, rszBufferFile)
+					if gameObject.gameObjects and gameObject.gameObjects[1] and imgui.tree_node("GameObjects") then
+						for c, childGameobj in ipairs(gameObject.gameObjects) do
+							self:displayGameObject(childGameobj, c .. ". " .. childGameobj.name, rszBufferFile)
+						end
+						imgui.tree_pop()
+					end
+					
+					if gameObject.folders and gameObject.folders[1] and imgui.tree_node("Folders") then
+						for c, childFolder in ipairs(gameObject.folders) do
+							self:displayGameObject(childFolder, c .. ". " .. childFolder.name, rszBufferFile)
 						end
 						imgui.tree_pop()
 					end
@@ -1072,15 +1140,23 @@ RE_Resource = {
 				imgui.text("	")
 				imgui.same_line()
 				imgui.begin_rect()
+					
 					self:displayInstance(gameObject.instance, gameObject.instance.name, nil, nil, rszBufferFile) --"via.Folder[" .. gameObject.instance.rawDataTbl.index .. "]"
-					if gameObject.children and gameObject.children[1] then
-						if gameObject.children and gameObject.children[1] and imgui.tree_node("Children") then
-							for c, childFolder in ipairs(gameObject.children) do
-								self:displayGameObject(childFolder, c .. ". " .. childFolder.name, rszBufferFile)
-							end
-							imgui.tree_pop()
+					
+					if gameObject.gameObjects and gameObject.gameObjects[1] and imgui.tree_node("Child GameObjects") then
+						for c, childGameobj in ipairs(gameObject.gameObjects) do
+							self:displayGameObject(childGameobj, c .. ". " .. childGameobj.name, rszBufferFile)
 						end
+						imgui.tree_pop()
 					end
+					
+					if gameObject.folders and gameObject.folders[1] and imgui.tree_node("Child Folders") then
+						for c, childFolder in ipairs(gameObject.folders) do
+							self:displayGameObject(childFolder, c .. ". " .. childFolder.name, rszBufferFile)
+						end
+						imgui.tree_pop()
+					end
+					
 				imgui.end_rect(2)
 			end
 			imgui.tree_pop()
@@ -1560,7 +1636,14 @@ RSZFile = {
 	writeBuffer = function(self)
 		
 		local bs = BitStream:new()
-		if not bs then return re.msg("Failed to create tmpfile") end
+		if not bs then re.msg("Failed to create tmpfile!") end
+		
+		local ctr = 0
+		while not bs and ctr < 1000 do
+			bs = BitStream:new()
+			ctr = ctr + 1
+		end
+		
 		self.bs = bs
 		
 		bs:writeBytes(self.structSizes["header"])
@@ -1571,6 +1654,7 @@ RSZFile = {
 		self.header.instanceOffset = self:tell()
 		self:writeStruct("instanceInfo", self.instanceInfos[0])
 		for i, instanceInfo in ipairs(self.instanceInfos) do
+			instanceInfo.CRC = tonumber("0x"..rsz_parser.GetRSZClassCRC(instanceInfo.typeId))
 			self:writeStruct("instanceInfo", instanceInfo)
 		end 
 		
@@ -1593,6 +1677,7 @@ RSZFile = {
 			for i, RSZUserDataInfo in ipairs(self.RSZUserDataInfos) do
 				bs:align(16)
 				RSZUserDataInfo.RSZOffset = bs:tell()
+				beep = {self.RSZUserDataInfos, i, RSZUserDataInfo.RSZData}
 				RSZUserDataInfo.RSZData.startOfs = bs:tell() + (self.startOfs or 0)
 				RSZUserDataInfo.RSZData:writeBuffer()
 				bs:writeBytes(RSZUserDataInfo.RSZData.bs:getBuffer()) 
@@ -1606,8 +1691,13 @@ RSZFile = {
 		
 		for i, instance in ipairs(self.rawData) do
 			if not instance.userdataFile then 
+				local map = {}
 				for f, field in ipairs(instance.fields or {}) do 
-					self:writeRSZField(field)
+					map[field.name] = field
+				end
+				for i = 1, rsz_parser.GetFieldCount(instance.typeId) do
+					local field_tbl = map[rsz_parser.GetFieldName(instance.typeId, i-1)] or self:makeFieldTable(instance.typeId, i-1, true)
+					self:writeRSZField(field_tbl) --write fields according to the loaded JSON file
 				end
 			end
 		end 
@@ -1831,7 +1921,7 @@ RSZFile = {
 			elseif field.LuaTypeName == "OBB" then
 				bs:writeArray(value, "<f")
 			else
-				last = {field, value}
+				--last = {field, value}
 				bs["write" .. field.LuaTypeName](bs, value)
 			end
 			--log.info("wrote field")
@@ -1947,7 +2037,7 @@ RSZFile = {
 		if not RSZFile.json_dump_map or force then
 			re.msg("Creating data from JSON dumps, this may take a few minutes...")
 			RSZFile.json_dump_names, RSZFile.json_dump_map, RSZFile.json_dump_components = {}, {}, {}
-			local json_dump = json.load_file("rsz\\rsz"..game_name..rt_suffix..".json")
+			local json_dump = json.load_file("rsz\\rsz"..game_name..rt_suffix .. rsz_json_filename ..".json")
 			for hash, tbl in pairs(json_dump) do
 				local simpleName =  (doAll and tbl.name) or tbl.name:match("^(.-%..-%..-)$")
 				if simpleName and #tbl.fields > 0 and not simpleName:find("[<>`,%[%(]") and simpleName:sub(1,7)~="System." then 
@@ -1979,6 +2069,8 @@ RSZFile = {
 				if fieldTbl.alignment == 8 then fieldTbl.LuaTypeName = "GUID" else fieldTbl.LuaTypeName = "Vec4" end
 			elseif fieldTbl.elementSize == 8 then
 				if fieldTbl.alignment == 8 then fieldTbl.LuaTypeName = "Int64" else fieldTbl.LuaTypeName = "Vec2" end
+			elseif fieldTbl.elementSize == 80 and fieldTbl.alignment == 16 then
+				fieldTbl.LuaTypeName = "OBB"
 			elseif fieldTbl.elementSize == 4 or fieldTbl.elementSize % 4 == 0 then
 				local tell = self.bs:tell()
 				local listCount = fieldTbl.isList and self.bs:readInt(tell)
@@ -2049,6 +2141,8 @@ RSZFile = {
 	end,
 	
 	addInstance = function(self, typeNames, atIndex, newInstances, gameObjObjectId)
+		
+		--params = {self, typeNames, atIndex, newInstances, gameObjObjectId}
 		
 		local objectTblInsertPt
 		atIndex = atIndex or #self.instanceInfos+1
@@ -2178,6 +2272,21 @@ RSZFile = {
 		
 		return objectTblInsertPt
 	end,
+	
+	--[[convertObjectToRSZ = function(self, object)
+		local o_tbl = _data[object] or EMV.create_REMgdObj(object)
+		local instances = {}
+		local function recurse_convert(obj)
+			local propdata = EMV.get_fields_and_methods(obj:get_type_definition())
+			local new_rsz = self:createInstance(obj:get_type_definition():get_full_name())
+			for i, field in ipairs(propdata.fields) do
+				
+			end
+			for i, prop in ipairs(propdata.props) do
+				
+			end
+		end
+	end]]
 	
 	customStructDisplayFunction = function(self, struct)
 		if struct.RSZData and imgui.tree_node("RSZ Data") then 
@@ -2425,9 +2534,9 @@ SCNFile = {
 					instance = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].instanceId ].sortedTbl,
 					idx = i,
 				}
-				info.folder.name = tostring(info.folder.instance.name)
-				info.folder.Name = tostring(info.folder.instance.fields[1].value)
-				info.name =  info.folder.name
+				info.folder.name = info.folder.instance.name:gsub("via.Folder", info.folder.instance.title) 
+				info.folder.Name = info.folder.instance.title
+				info.name = info.folder.name
 				
 				if info.parentId == -1 then 
 					table.insert(self.folders, info.folder)
@@ -2436,36 +2545,40 @@ SCNFile = {
 			end
 		end
 		
-		self.gameObjects = {}
 		local gameObjParentMap = {}
-		for i, info in ipairs(self.gameObjectInfos) do 
-			local gameObject = { 
-				gameobj = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].instanceId ].sortedTbl, 
-				--parentObj = self.RSZ.rawData[ self.RSZ.objectTable[info.parentId+1].instanceId ].sortedTbl,
-				components = {}, 
-				children = {}, 
-				idx = i, 
-				gInfo=info 
-			}
-			for j=info.objectId + 2, (info.objectId + info.componentCount + 1) do
-				--testee = {gameObject.components, self.RSZ.rawData, j, self.RSZ.objectTable, self.RSZ.objectTable[j]}
-				table.insert(gameObject.components, self.RSZ.rawData[ self.RSZ.objectTable[j].instanceId ].sortedTbl) --
+		if self.gameObjectInfos then
+			self.gameObjects = {}
+			for i, info in ipairs(self.gameObjectInfos) do 
+				local gameObject = { 
+					gameobj = self.RSZ.rawData[ self.RSZ.objectTable[info.objectId+1].instanceId ].sortedTbl, 
+					--parentObj = self.RSZ.rawData[ self.RSZ.objectTable[info.parentId+1].instanceId ].sortedTbl,
+					components = {},
+					gameObjects = {},
+					folders = {},
+					children = {}, 
+					idx = i, 
+					gInfo=info 
+				}
+				for j=info.objectId + 2, (info.objectId + info.componentCount + 1) do
+					table.insert(gameObject.components, self.RSZ.rawData[ self.RSZ.objectTable[j].instanceId ].sortedTbl) --
+				end
+				
+				info.prefab = info.prefabId and info.prefabId >= 0 and self.prefabInfos[info.prefabId+1]
+				gameObject.gameobj.rawDataTbl.gInfo = info
+				gameObjParentMap[info.objectId] = gameObject
+				info.gameObject = gameObject
+				
+				if info.parentId == -1 then
+					table.insert(self.gameObjects, gameObject)
+				end
+				info.name = tostring(gameObject.gameobj.fields[1].value) --(type(gameObject.gameobj.fields[1].value)=="string" and gameObject.gameobj.fields[1].value) or info.name or ""
+				gameObject.name = info.name .. "[" .. gameObject.idx .. "]"
 			end
-			
-			info.prefab = info.prefabId and info.prefabId >= 0 and self.prefabInfos[info.prefabId+1]
-			gameObject.gameobj.rawDataTbl.gInfo = info
-			gameObjParentMap[info.objectId] = gameObject
-			info.gameObject = gameObject
-			
-			if info.parentId == -1 then
-				table.insert(self.gameObjects, gameObject)
-			end
-			info.name = tostring(gameObject.gameobj.fields[1].value) --(type(gameObject.gameobj.fields[1].value)=="string" and gameObject.gameobj.fields[1].value) or info.name or ""
-			gameObject.name = info.name .. "[" .. gameObject.idx .. "]"
 		end
 		
-		for i, info in ipairs(self.gameObjectInfos) do 
+		for i, info in ipairs(self.gameObjectInfos or {}) do 
 			if gameObjParentMap[info.parentId] then
+				table.insert(gameObjParentMap[info.parentId].gameObjects, info.gameObject)
 				table.insert(gameObjParentMap[info.parentId].children, info.gameObject)
 				info.gameObject.parent = gameObjParentMap[info.parentId]
 			end
@@ -2481,6 +2594,12 @@ SCNFile = {
 				table.insert(folderIdxMap[info.parentId].folders, info.folder)
 				table.insert(folderIdxMap[info.parentId].children, info.folder)
 				info.folder.parent = folderIdxMap[info.parentId]
+				
+			end
+			if self.gameObjects and gameObjParentMap[info.parentId] then 
+				table.insert(gameObjParentMap[info.parentId].folders, info.folder)
+				table.insert(gameObjParentMap[info.parentId].children, info.folder)
+				info.folder.parent = gameObjParentMap[info.parentId]
 			end
 		end
 	end,
@@ -3240,7 +3359,7 @@ MDFFile = {
 		
 		--load REF data into Lua tables for write
 		local vars = {}
-		local mesh = materials.mesh or self.mobject or materials
+		local mesh = (materials and materials.mesh) or self.mobject or materials
 		if mesh then 
 			for m = 1, self.matCount do 
 				local matID = m - 1
@@ -3515,8 +3634,8 @@ ChainFile = {
 				local fileChainSettings = cgroup.settings and self.chainSettings[EMV.find_index(self.chainSettings, cgroup.settings_id, "id") or 0]
 				--bb = fileChainSettings or bb
 				if fileChainSettings then
-					cgroup.settings._ = cgroup.settings._ or EMV.create_REMgdObj(cgroup.settings)
-					for key, tbl in pairs(cgroup.settings._.props_named) do
+					_data[cgroup.settings] = _data[cgroup.settings] or EMV.create_REMgdObj(cgroup.settings)
+					for key, tbl in pairs(_data[cgroup.settings].props_named) do
 						local fileKey = key:gsub("^_", ""); fileKey = fileKey:sub(1,1):lower()..fileKey:sub(2, -1)
 						--print(tostring(fileChainSettings[fileKey]) .. " " .. tostring(fileKey) .. " " .. tostring(key))
 						if fileChainSettings[fileKey] ~= nil then
@@ -3942,8 +4061,719 @@ if tdb_ver >= 66  then --RE2+
 	end
 end
 
+
+MotClipFile = {
+	
+	isClip = true,
+	
+	propertyTypes = {
+		  "Unknown",
+		  "Bool",
+		  "S8",
+		  "U8",
+		  "S16",
+		  "U16",
+		  "S32",
+		  "U32",
+		  "S64",
+		  "U64",
+		  "F32",
+		  "F64",
+		  "Str8",
+		  "Str16",
+		  "Enum",
+		  "Quaternion",
+		  "Array",
+		  "NativeArray",
+		  "Class",
+		  "NativeClass",
+		  "Struct",
+		  "Vec2",
+		  "Vec3",
+		  "Vec4",
+		  "Color",
+		  "Range",
+		  "Float2",
+		  "Float3",
+		  "Float4",
+		  "RangeI",
+		  "Point",
+		  "Size",
+		  "Asset",
+		  "Action",
+		  "Guid",
+		  "Uint2",
+		  "Uint3",
+		  "Uint4",
+		  "Int2",
+		  "Int3",
+		  "Int4",
+		  "OBB",
+		  "Mat4",
+		  "Rect",
+		  "PathPoint3D",
+		  "Plane",
+		  "Sphere",
+		  "Capsule",
+		  "AABB",
+		  "Nullable",
+		  "Sfix",
+		  "Sfix2",
+		  "Sfix3",
+		  "Sfix4",
+		  "AnimationCurve",
+		  "KeyFrame",
+		  "GameObjectRef",
+	},
+	
+	-- Creates a new RE_Resource.MotlistFile
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o = RE_Resource:newResource(args, setmetatable(o, self))
+		o.tracks = {track_names={}}
+		o.props = {prop_names={}}
+		o.keys = {key_names={}}
+		o.strings = {}
+		o.wstrings = {is_w=true}
+		
+		if o.bs:fileSize() > 0 then
+			o:read()
+		end
+		
+		return o
+	end,
+	
+	-- Reads the BitStream and packs the data into organized Lua tables
+	read = function(self, start)
+		
+		self.clipStart = start or self.bs:tell()
+		self.clipPreHeader = self:readStruct("clipPreHeader")
+		
+		self.bs:seek(self.clipPreHeader.headerOffs)
+		self.clipHeader = self:readStruct("clipHeader")
+		
+		self.bs:seek(self.clipHeader.stringsOffs)
+		while self.bs:readUByte(self.bs:tell()) ~= 0 do
+			self.strings[self.bs:tell() - self.clipHeader.stringsOffs] = self.bs:readString()
+		end
+		self.strings.newStrOffset = self.bs:tell() - self.clipHeader.stringsOffs
+		
+		self.bs:seek(self.clipHeader.wstringsOffs)
+		while self.bs:readUShort(self.bs:tell()) ~= 0 do
+			self.wstrings[self.bs:tell() - self.clipHeader.wstringsOffs] = self.bs:readWString()
+		end
+		self.wstrings.newStrOffset = self.bs:tell() - self.clipHeader.wstringsOffs
+		
+		self:getOrderedStrings(self.strings)
+		self:getOrderedStrings(self.wstrings)
+		
+		self.bs:seek(self.clipHeader.keysOffs)
+		for j=1, self.clipHeader.numKeys do
+			self.keys[j] = self:readStruct("key")
+			self.keys[j].name = "	" .. self.keys[j].value .. " @ " .. self.keys[j].frame 
+			self.keys.key_names[j] = j..". "..self.keys[j].name
+		end
+		
+		self.bs:seek(self.clipHeader.propsOffs)
+		for j=1, self.clipHeader.numProps do
+			self.props[j] = self:readStruct("prop")
+			self.props[j].name = self.strings[self.props[j].nameOffs]
+			self.props.prop_names[j] = j..". "..self.props[j].name
+			self.props[j].keys = {}
+			for k=1, self.props[j].keysCount do
+				self.props[j].keys[k] = self.keys[self.props[j].keysStartIdx + k]
+			end
+		end
+		
+		self.bs:seek(self.clipHeader.tracksOffs)
+		for j=1, self.clipHeader.numTracks do
+			self.tracks[j] = self:readStruct("track")
+			self.tracks[j].name = self.wstrings[self.tracks[j].nameOffs * 2]
+			self.tracks.track_names[j] = j..". "..self.tracks[j].name
+			self.tracks[j].props = {}
+			for p=1, self.tracks[j].propCount do
+				self.tracks[j].props[p] = self.props[self.tracks[j].firstPropIdx + p]
+			end
+		end
+		
+		self.bs:seek(self.clipHeader.endClipOffs1+8)
+		self.bs:seek(self.bs:readUInt64())
+		self.endClipStructs = {}
+		for i=1, self.clipHeader.numTracks-1 do
+			self.endClipStructs[i] = self:readStruct("endClipStruct")
+		end
+		
+		self.name = self.tracks[2].name
+	end,
+	
+	save = function(self, clipStart)
+		
+		local bs = BitStream:new()
+		--local diff = clipStart - self.clipStart
+		
+		self:writeStruct("clipPreHeader", self.clipPreHeader, nil, bs)
+		bs:align(16)
+		bs:writeBytes(16)
+		
+		self.clipHeader.numTracks = #self.tracks
+		self.clipHeader.numProps = #self.props
+		self.clipHeader.numKeys = #self.keys
+		
+		self.clipPreHeader.headerOffs = bs:tell()+self.clipStart
+		self:writeStruct("clipHeader", self.clipHeader, nil, bs)
+		
+		self.clipHeader.tracksOffs = bs:tell()+self.clipStart
+		for t, track in ipairs(self.tracks) do
+			if track.newName and track.newName ~= track.name then
+				track.nameOffs = math.floor(self:addString(self.wstrings, track.newName) / 2)
+				track.hash = string_hashing_fn(track.newName)
+				track.whash = wstring_hashing_fn(track.newName)
+			end
+			self:writeStruct("track", track, nil, bs)
+		end
+		
+		bs:align(16)
+		self.clipHeader.propsOffs = bs:tell()+self.clipStart
+		for t, prop in ipairs(self.props) do
+			if prop.newName and prop.newName ~= prop.name then
+				prop.nameOffs = self:addString(self.strings, prop.newName)
+				prop.hash = string_hashing_fn(prop.newName)
+				prop.whash = wstring_hashing_fn(prop.newName)
+			end
+			self:writeStruct("prop", prop, nil, bs)
+		end
+		
+		bs:align(16)
+		self.clipHeader.keysOffs = bs:tell()+self.clipStart
+		for t, key in ipairs(self.keys) do
+			if key.do_string then
+				key.value = math.floor(self:addString(self.wstrings, key.string) / 2)
+			end
+			self:writeStruct("key", key, nil, bs)
+		end
+		
+		bs:align(16)
+		self.clipHeader.stringsOffs = bs:tell()+self.clipStart
+		self.clipHeader.stringsOffs1 = self.clipHeader.stringsOffs
+		self.clipHeader.stringsOffs2 = self.clipHeader.stringsOffs
+		self.clipHeader.stringsOffs3 = self.clipHeader.stringsOffs
+		for n, str in ipairs(self:getOrderedStrings(self.strings)) do
+			bs:writeString(str)
+		end
+		
+		bs:align(16)
+		self.clipHeader.wstringsOffs = bs:tell()+self.clipStart
+		for n, wstr in ipairs(self:getOrderedStrings(self.wstrings)) do
+			bs:writeWString(wstr)
+		end
+		
+		bs:align(16)
+		self.clipHeader.endClipOffs = bs:tell()+self.clipStart
+		self.clipHeader.endClipOffs1 = bs:tell()+self.clipStart
+		bs:writeUInt64(0)
+		bs:writeUInt64(self.clipHeader.endClipOffs+16)
+		
+		for e, endClipStruct in ipairs(self.endClipStructs) do
+			self:writeStruct("endClipStruct", endClipStruct, nil, bs)
+		end
+		
+		self:writeStruct("clipPreHeader", self.clipPreHeader, 0, bs)
+		self:writeStruct("clipHeader", self.clipHeader, self.clipPreHeader.headerOffs-self.clipStart, bs)
+		
+		return bs:getBuffer()
+	end,
+	
+	getOrderedStrings = function(self, strings_tbl)
+		local ordered, ord_offsets = {}, {}
+		for offset, str in pairs(strings_tbl) do
+			if tonumber(offset) then 
+				table.insert(ordered, offset)
+			end
+		end
+		table.sort(ordered)
+		for i, offset in ipairs(ordered) do
+			ordered[i] = strings_tbl[offset]
+			ord_offsets[i] = offset
+		end
+		strings_tbl.ordered = ordered
+		strings_tbl.ord_offsets = ord_offsets
+		
+		return ordered
+	end,
+	
+	addString = function(self, strings_tbl, str)
+		for offs, name in pairs(strings_tbl) do 
+			if name == str then return offs end
+		end
+		local offset = strings_tbl.newStrOffset
+		strings_tbl[offset] = str
+		strings_tbl.newStrOffset = strings_tbl.newStrOffset + str:len() + 1 --/ ((strings_tbl.is_w and 2) or 1)
+		return offset
+	end,
+	
+	customStructDisplayFunction = function(self, struct)
+		if struct.firstPropIdx then --tracks
+			changed, struct.newName = imgui.input_text("Name", struct.newName or struct.name)
+			changed, struct.firstPropIdx = imgui.combo("First Property", struct.firstPropIdx, self.props.prop_names)
+			for i=struct.firstPropIdx+1, struct.propCount+struct.firstPropIdx-1 do
+				imgui.text(i..". "..self.props[i].name)
+			end
+		end
+		if struct.keysStartIdx then --props
+			changed, struct.propertyType = imgui.combo("Property Type", struct.propertyType + 1, self.propertyTypes)
+			struct.propertyType = struct.propertyType - 1
+			changed, struct.newName = imgui.input_text("Name", struct.newName or struct.name)
+			changed, struct.keysStartIdx = imgui.combo("First Key", struct.keysStartIdx, self.keys.key_names)
+			for i=struct.keysStartIdx+1, struct.keysCount+struct.keysStartIdx-1 do
+				imgui.text(i..". "..self.keys[i].name)
+			end
+		end
+		if struct.interpolationType then --keys
+			changed, struct.do_string = imgui.checkbox("Use String", struct.do_string)
+			if struct.do_string then 
+				changed, struct.strIdx = imgui.combo("Select String", struct.strIdx or self.wstrings[struct.value], self.wstrings.ordered)
+				if changed or not struct.string then 
+					struct.string = self.wstrings[self.wstrings.ord_offsets[struct.strIdx] ]
+					struct.value = self.wstrings.ord_offsets[struct.strIdx] or struct.value
+				end
+				changed, struct.string = imgui.input_text("String", struct.string)
+			end
+		end
+	end,
+	
+	-- Structures comprising a MotClip file:
+	structs = {
+		clipPreHeader = {
+			{"skip", 8},
+			{"UInt64", "headerOffs"},
+			{"UInt64", "endClipStructsRelocation"},
+			{"skip", 4},
+			{"UInt", "uknIntA"},
+			{"UInt", "uknIntB"},
+		},
+		
+		clipHeader = {
+			{"UInt", "magic"},
+			{"UInt", "version"},
+			{"Float", "numFrames"},
+			{"UInt", "numTracks"},
+			{"UInt", "numProps"},
+			{"UInt", "numKeys"},
+			{"UInt64", "tracksOffs"},
+			{"UInt64", "propsOffs"},
+			{"UInt64", "keysOffs"},
+			{"UInt64", "stringsOffs"},
+			{"UInt64", "stringsOffs1"},
+			{"UInt64", "stringsOffs2"},
+			{"UInt64", "stringsOffs3"},
+			{"UInt64", "wstringsOffs"},
+			{"UInt64", "endClipOffs"},
+			{"UInt64", "endClipOffs1"},
+		},
+		
+		track = {
+			{"UShort", "headerOffs"},
+			{"UShort", "propCount"},
+			{"UInt", "nodeType"},
+			{"UInt", "hash"},
+			{"UInt", "whash"},
+			{"UInt64", "nameOffs"},
+			{"UInt64", "nameOffs1"},
+			{"UInt64", "firstPropIdx"},
+		},
+		
+		prop = {
+			{"Float", "startFrame"},
+			{"Float", "endFrame"},
+			{"Int", "hash"},
+			{"Int", "whash"},
+			{"UInt64", "nameOffs"},
+			{"UInt64", "dataOffs"},
+			{"UInt64", "keysStartIdx"},
+			{"UShort", "keysCount"},
+			{"Short", "arrayIdx"},
+			{"UByte", "speedpointNum"},
+			{"UByte", "propertyType"},
+			{"UByte", "uknByte"},
+			{"UByte", "uknByte1"},
+			{"UInt64", "lastKeyOffs"},
+		},
+		
+		key = {
+			{"Float", "frame"},
+			{"Float", "rate"},
+			{"UByte", "interpolationType"},
+			{"UByte", "uknByte"},
+			{"skip", 6},
+			{"Int64", "value"},
+			{"skip", 8},
+		},
+		
+		endClipStruct = {
+			{"Int", "Ukn0"},
+			{"Int", "Ukn1"},
+			{"Int", "Ukn2"},
+			{"Int", "Ukn3"},
+			{"Int", "Ukn4"},
+			{"Int", "Ukn5"},
+			{"Int", "Ukn6"},
+		},
+		
+		structOrder = {"clipPreHeader", "clipHeader", "track", "prop", "key", "endClipStruct"}
+	},
+	
+}
+
+
+MotFile = {
+	
+	isMot = true,
+	ext2 = ".mot",
+	
+	-- Creates a new RE_Resource.MotlistFile
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o = RE_Resource:newResource(args, setmetatable(o, self))
+		if o.bs:fileSize() > 0 then
+			o:read()
+		end
+		o:seek(0)
+		return o
+	end,
+	
+	-- Reads the BitStream and packs the data into organized Lua tables
+	read = function(self, start)
+		self.bs:seek(start or 0)
+		self.offsets = {}
+		self.header = self:readStruct("header")
+		
+		local has_boneheaders = (self.header.boneHeaderOffset < self.bs:fileSize() and self.header.offsToBoneHdrOffset ~= self.header.motSize)
+		
+		self.bs:seek(self.header.boneClipHdrOffs)
+		self.motBytes = self.bs:extractBytes(self.header.clipFileOffsetsOffs - self.bs:tell())
+		
+		self.bs:seek(self.header.clipFileOffsetsOffs)
+		self.clipFileOffsets = {}
+		for i=1, self.header.clipCount do
+			self.clipFileOffsets[i] = self.bs:readUInt64()
+		end
+		
+		self.clips = {}
+		for i, clipFileOffs in ipairs(self.clipFileOffsets) do
+			self.bs:seek(clipFileOffs)
+			self.clips[i] = MotClipFile:new{bs=self.bs}
+		end
+		
+		if has_boneheaders then
+			self.bs:seek(self.header.offsToBoneHdrOffset)
+			self.boneHeaders = self:readStruct("boneHeaders")
+			self.bs:seek(self.boneHeaders.boneHeadersOffset)
+			self.boneHeaders.bytes = self.bs:extractBytes(self.boneHeaders.boneHeaderCount * 80)
+			self.boneHeaders.strings = {}
+			self.boneHeaders.firstBnNameOffset = self.bs:readUInt64(self.boneHeaders.boneHeadersOffset)
+			self.bs:seek(self.boneHeaders.firstBnNameOffset)
+			while self.bs:readUShort(self.bs:tell()) ~= 0 do
+				table.insert(self.boneHeaders.strings, self.bs:readWString())
+			end
+		end
+		
+		self.name = self.header.motName
+		self.bs = BitStream:new(self.bs:extractStream(self.bs:tell(), 0))
+	end,
+	
+	-- Saves a new Mot file using data from owned Lua tables
+	save = function(self, filepath)
+		
+		local oldFileSize = self.bs:fileSize()
+		self.bs = BitStream:new()
+		
+		self.bs:seek(0)
+		self:writeStruct("header", self.header)
+		
+		self.bs:seek(self.header.boneClipHdrOffs, nil, true)
+		self.bs:writeBytes(self.motBytes)
+		
+		if self.boneHeaders then
+			self.bs:align(16)
+			self.header.offsToBoneHdrOffset = self.bs:tell()
+			self.bs:writeUInt64(self.bs:tell()+16)
+			self.bs:writeUInt64(self.boneHeaders.boneHeaderCount)
+			self.bs:writeBytes(self.boneHeaders.bytes)
+			self.bs:align(16)
+			local bnHdrsEnd = self.bs:tell()
+			local diff = bnHdrsEnd - self.boneHeaders.firstBnNameOffset
+			for i, wstring in ipairs(self.boneHeaders.strings) do
+				self.bs:writeWString(wstring)
+			end
+			self:scanFixStreamOffsets(self.header.offsToBoneHdrOffset+16,  bnHdrsEnd, bnHdrsEnd, oldFileSize, diff)
+		end
+		
+		self.bs:align(16)
+		self.header.clipFileOffsetsOffs = self.bs:tell()
+		
+		
+		if self.clips[1] then
+			self.bs:writeBytes(8 * #self.clips) --clip file offsets
+			for c, clip in ipairs(self.clips) do
+				self.bs:align(16)
+				local oldClipOffset = self.clipFileOffsets[c]
+				self.clipFileOffsets[c] = self.bs:tell()
+				local clipBytes = clip:save(self.clipFileOffsets[c])
+				self.bs:writeBytes(clipBytes)
+				local diff = self.clipFileOffsets[c] - oldClipOffset
+				self:scanFixStreamOffsets(self.clipFileOffsets[c],  self.bs:tell(), oldClipOffset, oldFileSize, diff) 
+			end
+		end
+		
+		self.bs:align(16)
+		self.header.motNameOffset = self.bs:tell()
+		self.bs:writeWString(self.header.motName)
+		self.bs:align(16)
+		
+		self.header.motSize = self.bs:tell()
+		if not self.boneHeaders then
+			self.header.offsToBoneHdrOffset = self.header.motSize
+		end
+		
+		self.bs:seek(self.header.clipFileOffsetsOffs)
+		for c, clipFileOffset in ipairs(self.clipFileOffsets) do
+			self.bs:writeUInt64(clipFileOffset)
+		end
+		
+		self:writeStruct("header", self.header, 0)
+	end,
+	
+	--Is used during displayImgui to add extra stuff to structs 
+	customStructDisplayFunction = function(self, struct)
+		if struct[1] then
+			for i, clip in ipairs(self.clips) do
+				if imgui.tree_node(i..". "..clip.tracks[2].name) then
+					clip:displayImgui()
+					imgui.tree_pop()
+				end
+			end
+		end
+	end,
+	
+	-- Structures comprising a MOT file:
+	structs = {
+		header = {
+			{"UInt", "version"},
+			{"UInt", "magic"},
+			{"UInt", "ukn00"},
+			{"UInt", "motSize"},
+			{"UInt64", "offsToBoneHdrOffset", {"UInt64", "boneHeaderOffset"}},
+			{"UInt64", "boneClipHdrOffs"},
+			{"skip", 8},
+			{"skip", 8},
+			{"UInt64", "clipFileOffsetsOffs"},
+			{"UInt64", "jmapOffset"},
+			{"UInt64", "Offs2"},
+			{"skip", 8},
+			{"skip", 8},
+			{"UInt64", "motNameOffset", {"WString", "motName"}},
+			{"Float", "frameCount"},
+			{"Float", "blending"},
+			{"Float", "uknFloat0"},
+			{"Float", "uknFloat1"},
+			{"UShort", "boneCount"},
+			{"UShort", "boneClipCount"},
+			{"UByte", "clipCount"},
+			{"UByte", "uknPointer3Count"},
+			{"UShort", "FrameRate"},
+			{"UShort", "uknPointerCount"},
+			{"UShort", "uknShort"},
+		},
+		
+		boneHeaders = {
+			{"UInt64", "boneHeadersOffset"},
+			{"UInt64", "boneHeaderCount"},
+		},
+		
+		clips = {},
+		
+		structOrder = {"header", "clips",}
+	},
+}
+
+-- Class for Chain physics files
+MotlistFile = {
+	
+	--Chain file extensions by game
+	extensions = {
+		re2 = ((tdb_ver==66) and ".21") or ".46",
+		re3 = ((tdb_ver==68) and ".39") or ".46",
+		re4 = ".663",
+		re8 = ".39",
+		re7 = ((tdb_ver==49) and ".5") or ".46",
+		dmc5 =".21",
+		mhrise = ".48",
+		sf6 = ".52",
+	},
+	
+	isMotlist = true,
+	ext2 = ".motlist",
+	
+	-- Creates a new RE_Resource.MotlistFile
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o = RE_Resource:newResource(args, setmetatable(o, self))
+		if o.bs:fileSize() > 0 then
+			o:read()
+		end
+		o:seek(0)
+		return o
+	end,
+	
+	-- Reads the BitStream and packs the data into organized Lua tables
+	read = function(self, start)
+		self.bs:seek(start or 0)
+		self.offsets = {}
+		self.header = self:readStruct("header")
+		
+		self.pointers = {}
+		self.bs:seek(self.header.pointersOffset)
+		for m = 1, self.header.numOffs do
+			self.pointers[m] = self.bs:readUInt64()
+		end
+		
+		self.mots = {}
+		for m, pointer in ipairs(self.pointers) do
+			if pointer > 0 then
+				self.bs:seek(pointer)
+				print("mot", m)
+				self.mots[m] = MotFile:new({file=self.bs:extractStream(), owner=self})
+			end
+		end
+		
+		self.motionIDs = {}
+		for m = 1, self.header.numOffs do
+			if self.pointers[m] > 0 then
+				self.bs:seek(self.header.motionIDsOffset + self.structSizes.motionID * (m-1))
+				self.motionIDs[m] = self:readStruct("motionID")
+				self.motionIDs[m].name = self.motionIDs[m].motionID
+				self.mots[m].motionID = self.motionIDs[m].motionID
+			end
+		end
+	end,
+	
+	-- Saves a new Motlist file using data from owned Lua tables
+	save = function(self, filepath, onlyUpdateBuffer, doOverwrite, noPrompt)
+		
+		if not doOverwrite and (not filepath or filepath == self.filepath) then 
+			filepath = (filepath or self.filepath):gsub("%.motlist", ".NEW.motlist")
+		end
+		
+		self.bs = BitStream:new()
+		
+		--self.mots[3]:save()
+		--self.bs:writeBytes(self.mots[3].bs:getBuffer())
+		--goto exit
+		
+		self:writeStruct("header", self.header)
+		
+		self.bs:align(4)
+		self.header.motlistNameOffset = self.bs:tell()
+		self.bs:writeWString(self.header.motlistName)
+		
+		self.bs:align(16)
+		self.header.pointersOffset = self.bs:tell()
+		self.bs:writeBytes(8 * #self.mots)
+		
+		self.pointers = {}
+		self.bs:align(16)
+		for m, mot in ipairs(self.mots) do
+			self.pointers[m] = self.bs:tell()
+			mot:save()
+			self.bs:writeBytes(mot.bs:getBuffer())
+			self.bs:align(16)
+		end
+		
+		self.bs:align(16)
+		self.header.motionIDsOffset = self.bs:tell()
+		for i, mot in ipairs(self.mots) do
+			local m_id = self.motionIDs[i] or self.motionIDs[1]
+			m_id.motionID = mot.motionID
+			self:writeStruct("motionID", m_id)
+		end
+		
+		self.bs:align(16)
+		if self.endClip then
+			self.bs:writeBytes(self.endClip.bytes)
+		end
+		
+		self:writeStruct("header", self.header, 0)
+		
+		self.bs:seek(self.header.pointersOffset)
+		for p=1, #self.mots do
+			self.bs:writeUInt64(self.pointers[p])
+		end
+		
+		if not onlyUpdateBuffer and (self.bs:save(filepath) and filepath) then
+			if not noPrompt then re.msg("Saved to " .. filepath) end
+			ResourceEditor.textBox = filepath
+			return true
+		end
+		
+	end,
+	
+	--Is used during displayImgui to add extra stuff to structs 
+	customStructDisplayFunction = function(self, struct)
+		if struct[1] then 
+			for i, mot in ipairs(self.mots) do
+				if imgui.tree_node(mot.header.motName) then 
+					mot:displayImgui()
+					imgui.tree_pop()
+				end
+			end
+		end
+	end,
+	
+	-- Structures comprising a Motlist file:
+	structs = {
+		header = {
+			{"UInt", "version"},
+			{"UInt", "magic"},
+			{"UInt64", "padding"},
+			{"UInt64", "pointersOffset"},
+			{"UInt64", "motionIDsOffset"},
+			{"UInt64", "motlistNameOffset", {"WString", "motlistName"}},
+			{"UInt64", "padding2"},
+			{"UInt", "numOffs"},
+		},
+		mots = {},
+		motionID = {
+			{"UInt", "A"},
+			{"UInt", "B"},
+			{"UShort", "motionID"},
+			{"UShort", "switch"},
+			
+			{"UInt", "D"},
+			{"UInt", "E"},
+			{"UInt", "F"},
+			{"UInt", "G"},
+			{"UInt", "H"},
+			{"UInt", "I"},
+			{"UInt", "J"},
+			{"UInt", "K"},
+			{"UInt", "L"},
+			{"UInt", "M"},
+			{"UInt", "O"},
+			{"UInt", "P"},
+			{"UInt", "Q"},
+			{"UInt", "R"},
+			{"UInt", "S"},
+		},
+		
+		structOrder = {"header", "mots", "motionID"}
+	},
+}
+
 --setup struct sizes:
-for i, class in ipairs({RSZFile, PFBFile, SCNFile, UserFile, MDFFile, ChainFile}) do
+for i, class in ipairs({RSZFile, PFBFile, SCNFile, UserFile, MDFFile, ChainFile, MotlistFile, MotFile, MotClipFile}) do
 	class.structSizes = {}
 	for name, structArray in pairs(class.structs) do
 		local totalBytes = 0
@@ -3953,6 +4783,12 @@ for i, class in ipairs({RSZFile, PFBFile, SCNFile, UserFile, MDFFile, ChainFile}
 		class.structSizes[name] = totalBytes
 	end
 end
+
+
+
+
+
+
 
 
 --scn:saveAsPFB("RE_Resources\\st11_020_kitchen_in2f.pfb.17")
@@ -4152,13 +4988,6 @@ RE_Resource.validExtensions = {
 	["chain"] = ChainFile,
 }
 
-local function imgui_file_picker()
-	imgui.begin_window("File Picker")
-		local current_dir = ""
-	imgui.end_window()
-	local glob = fs.glob
-end
-
 -- Resource Editor UI
 ResourceEditor = {
 	textBox = "",
@@ -4166,7 +4995,8 @@ ResourceEditor = {
 	recentItemIdx = nil,
 	previousItems = {},
 	paths = json.load_file("rsz\\resource_list.json"),
-	recentFiles = json.load_file("rsz\\recent_files.json") or {""}
+	recentFiles = json.load_file("rsz\\recent_files.json") or {""},
+	rszPath = "rsz" .. game_name .. rt_suffix .. ".json",
 }
 
 ResourceEditor.paths = ResourceEditor.paths and ResourceEditor.paths[game_name] or {}
@@ -4215,12 +5045,33 @@ EMV.displayResourceEditor = function()
 			ResourceEditor.textBox = "$natives\\" .. nativesFolderType .. "\\" .. ResourceEditor.paths[ResourceEditor.currentItemIdx]
 			doOpen = true
 		end
+		
+		imgui.same_line()
+		if imgui.button("Pick File") then
+			FilePicker.instance = FilePicker:new({showFilePicker=true, filters={"mdf2", "user", "pfb", "scn", "chain", "motlist", "mot"}}, FilePicker.instance)
+		end
+		
+		if FilePicker.instance then 
+			local path = FilePicker.instance:displayPickerWindow()
+			if path and not RE_Resource.openResource(path) then 
+				FilePicker.instance.showFilePicker = true
+			end
+		end
 
 		if doOpen or (EMV.editable_table_field("textBox", ResourceEditor.textBox, ResourceEditor, "Input File", {always_show=false})==1 and ResourceEditor.textBox and ResourceEditor.textBox:lower():find("%.[psmuc][fcdsh][bnfea][2ri]?")) then 
 			RE_Resource.openResource(ResourceEditor.textBox:gsub('^%s*(.-)%s*$', '%1'))
 		end
 		
 		imgui.tooltip("Access files in the 'REFramework\\data\\' folder.\nStart with '$natives\\' to access files in the natives folder\nSupported filetypes: SCN, PFB, USER, MDF, Chain ")
+		
+		local old_rszpath = ResourceEditor.rszPath
+		if EMV.editable_table_field("rszPath", ResourceEditor.rszPath, ResourceEditor, "RSZ Json Dump", {always_show=false})==1 then 
+			if BitStream.checkFileExists("rsz\\" .. ResourceEditor.rszPath) then
+				rsz_parser.ParseJson("reframework\\data\\rsz\\" .. ResourceEditor.rszPath)
+			else
+				ResourceEditor.rszPath = old_rszpath
+			end
+		end
 		
 		if next(ResourceEditor.previousItems) and imgui.tree_node("Opened Files") then 
 			categorized = {}
@@ -4230,7 +5081,7 @@ EMV.displayResourceEditor = function()
 				categorized[ext] = categorized[ext] or {}
 				table.insert(categorized[ext], item)
 			end
-			for ext, tbl in orderedPairs(categorized) do
+			for ext, tbl in EMV.orderedPairs(categorized) do
 				table.sort(tbl, function(a, b) return a.cleanPath < b.cleanPath  end) 
 				if imgui.tree_node(ext:upper().." Files") then
 					imgui.begin_rect()
@@ -4258,31 +5109,161 @@ EMV.displayResourceEditor = function()
 	imgui.end_rect()
 end
 
---[[local folderTree
-
-local function generateFolderTree(filepath)
-    local parts = {}
-    for part in filepath:gmatch("[^\\]+") do
-        table.insert(parts, part)
-    end
-    local global = folderTree
-    for i, part in ipairs(parts) do
-        if not global[part] then
-            global[part] = {}
-        end
-        global = global[part]
-    end
-    if global ~= folderTree then
-        local static_class = static_class or generateFolderTree(filepath)
-        for k, v in pairs(static_class) do
-            global[k] = v
-			if not dont_double then 
-				global[v] = k
+FilePicker = {
+	
+	new = function(self, args, o)
+		o = o or {}
+		self.__index = self
+		o.currentDir = args.currentDir or o.currentDir or ""
+		o.prefixDir = args.prefixDir or o.prefixDir or "reframework\\data\\"
+		o.newDirText = o.prefixDir .. o.currentDir
+		o.showFilePicker = args.showFilePicker
+		o.doNatives = args.doNatives or o.doNatives or false
+		o.isCancelled = false
+		o.isConfirmed = false
+		o.selectedEntryIdx = 1
+		o.doubleClickTimer = os.clock()
+		o.paths = {}
+		o.pickedItem = ""
+		
+		if args.filters then
+			o.filters = {}
+			for i, filter in ipairs(args.filters) do
+				o.filters[filter:lower()] = true
 			end
-        end
-    end
-end]]
-
+		end
+		
+		return setmetatable(o, self)
+	end,
+	
+	displayImgui = function(self)
+	
+		if self.lastTick == tics then return end
+		self.lastTick = tics
+		
+		imgui.spacing()
+		if not self.showFilePicker then
+			imgui.begin_rect()
+			imgui.begin_rect()
+		end
+		
+		local uniqueEntries = {[".."] = 1}
+		local folders = {}
+		local files = {}
+		self.glob = (self.doRefresh or not self.glob) and fs.glob(".*", self.doNatives and "$natives") or self.glob
+		
+		for i, path in ipairs(self.glob) do
+			path = path:lower()
+			if path:find(self.currentDir) == 1 then
+				local folderPath = path:match(self.currentDir.."(.-\\).+")
+				local entryName = folderPath or path:gsub(self.currentDir, "")
+				if not uniqueEntries[entryName] then
+					uniqueEntries[entryName] = (folderPath and 1) or true
+					if folderPath then
+						folders[#folders+1] = entryName
+					else
+						files[#files+1] = entryName
+					end
+				end
+			end
+		end
+		
+		table.sort(folders, function(a, b) return a < b end)
+		table.sort(files, function(a, b) return a < b end)
+		if self.currentDir ~= "" then
+			table.insert(folders, 1, "..")
+		end
+		for i, path in ipairs(files) do
+			table.insert(folders, path)
+		end
+		self.paths = folders
+		
+		changed, self.newDirText = imgui.input_text("  ", self.newDirText)
+		
+		if changed then
+			local cleanName = self.newDirText:gsub(self.prefixDir, ""):lower()
+			if self.newDirText:find(self.prefixDir) ~= 1 then
+				self.newDirText = self.prefixDir .. self.currentDir
+			elseif self.newDirText:sub(-1, -1) == "\\" then
+				for i, path in ipairs(self.glob) do
+					if path:lower():find(cleanName) then
+						self.currentDir = cleanName
+					end
+				end
+			elseif self.filters and self.filters[cleanName:match("^.+%.(.+)%.") or 0] then
+				self.currentDir = cleanName:match("(.+\\)") or self.currentDir
+			end
+		end
+		
+		if imgui.begin_list_box(" ", #self.paths) then
+			for i, path in ipairs(self.paths) do
+				local fileType = (uniqueEntries[path] == true) and path:match("^.+%.(.+)%.")
+				if uniqueEntries[path] ~= true or not self.filters or self.filters[fileType] ~= nil then
+					if imgui.menu_item(path, fileType, (self.selectedEntryIdx==i), true) then
+						self.selectedEntryIdx = i
+						if os.clock() - self.doubleClickTimer < 0.33 then
+							if path == ".." then
+								self.currentDir = self.currentDir:match("(.+\\).+\\") or ""
+								self.selectedEntryIdx = -1
+							elseif uniqueEntries[path] == 1 then
+								self.currentDir = self.currentDir .. path
+								self.selectedEntryIdx = -1
+								self.doubleClickTimer = 0
+							else
+								self.pickedItem = path
+								self.isConfirmed, self.isCancelled, self.showFilePicker = true, false, false
+							end
+							self.newDirText = self.prefixDir .. self.currentDir
+						end
+						self.doubleClickTimer = os.clock()
+					end
+				end
+			end
+			imgui.end_list_box()
+		end
+		
+		changed, self.doNatives = imgui.checkbox("Natives", self.doNatives)
+		if changed then 
+			self.prefixDir = self.doNatives and "" or "reframework\\data\\"
+			self.newDirText = self.prefixDir
+			self.currentDir = ""
+		end
+		
+		imgui.same_line()
+		self.doRefresh = imgui.button("Refresh") or changed
+		
+		--imgui.text("Selected Item:")
+		--imgui.same_line()
+		--imgui.text_colored(self.pickedItem, 0xFFE0853D)
+		
+		if not self.showFilePicker then
+			imgui.end_rect(4)
+			imgui.end_rect(5)
+		end
+		imgui.spacing()
+	end,
+	
+	displayPickerWindow = function(self)
+		if not self.showFilePicker or (imgui.begin_window("File Picker", true, self.transparentBG and 128 or 0) == false) then 
+			if self.showFilePicker then
+				self.isConfirmed, self.isCancelled = false, true
+			end
+			self.showFilePicker = false
+		end
+		if self.showFilePicker then
+			self:displayImgui()
+			imgui.end_window()
+		end
+		if not self.showFilePicker and (self.isConfirmed or self.isCancelled) then 
+			local output = self.isConfirmed and (self.currentDir..self.pickedItem) or nil
+			if output then
+				self.isConfirmed, self.isCancelled, self.pickedItem = nil
+				return (self.doNatives and ("$natives\\"..nativesFolderType.."\\") or "")..output:gsub("stm\\", ""):gsub("x64\\", "")
+			end
+		end
+	end,
+}
+--[[
 local last_tbl_sz = 0
 local last_timer = 0
 openedFiles = {}
@@ -4293,22 +5274,22 @@ io.tmpfile = function()
 		openedFiles[tmp_file] = tmp_file
 		return tmp_file
 	end
-end
+end]]
 
 --should_setup_dlcs = ((isRE2 or isRE3) and EMV.calln("via.Application", "get_UpTimeSecond()") < 60.0) or nil
 
 re.on_frame(function()
-	
+	tics = tics + 1
 	shift_key_down = EMV.check_key_released(via.hid.KeyboardKey.Shift, 0.0)
 	
 	--for i, file in ipairs(openedFiles) do 
 	--	file:close()
 	--end
-	local tblsize = EMV.get_table_size(openedFiles)
+	--[[local tblsize = EMV.get_table_size(openedFiles)
 	if tblsize > last_tbl_sz or (os.clock() - last_timer) > 5 then 
 		last_timer = os.clock()
 		last_tbl_sz = tblsize
-	end
+	end]]
 	--imgui.text(last_tbl_sz-1)
 	--openedFiles = {}
 	--[[if not folderTree then
