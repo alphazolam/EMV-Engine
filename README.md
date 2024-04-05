@@ -7,8 +7,12 @@ This is a repository of my RE Engine Lua script mods, for use with [praydog](htt
 * Resident Evil 8
 * Resident Evil 2 Remake
 * Resident Evil 3 Remake
+* Resident Evil 4 Remake
 * Monster Hunter Rise: Sunbreak
 * Street Fighter 6
+* Ghosts n' Goblins Resurrection
+* Apollo Justice: Ace Attorney Trilogy
+* Dragon's Dogma 2
 
 ### Requirements
 * [REFramework](https://github.com/praydog/REFramework-nightly/releases)
@@ -452,13 +456,48 @@ RE Engine Resource Editor is a powerful script that can save and load PFB, SCN, 
 
 </details>
 
+# Hooked Method Inspector
+This is a REFramework script that lets you check out the arguments and return values of game methods as they are called, tells you during which modules they were called, and lets you test your own hook code to them on the fly through text boxes.
+It is useful for script development.
+
+![HookedMethodInspector](https://i.imgur.com/hpOkzqW.png)
+
+<details>
+
+<summary>Click Here for Hooked Method Inspector Guide and Screenshots</summary>
+
+Basically the process for this is, you open REFramework's `DeveloperTools` -> `ObjectExplorer` and search for a type, method or field signature of something you are interested in. Find an object that handles it, and right click on one of its TDB methods and say "Hook All Methods".
+Now, do the thing you expect to trigger one of the methods in-game, and watch the `Hooked Methods` menu to see which ones are called when you do it (if any).
+
+![HookedMethodInspector1](https://i.imgur.com/KemvN4c.jpeg)
+
+If you find one that's called, right click on it and `Copy Name` from it. Then paste the name of the parent type + the name of the method into Hooked Method Inspector and click "Hook Method". The `Hook Method` button accepts text formatted like these:
+- `via.Scene.findGameObject(System.String, via.Folder)`
+- `via.Scene:findGameObject(System.String, via.Folder)`
+- `sdk.find_type_definition("via.Scene"):get_method("findGameObject(System.String, via.Folder)")`
+- `via.Scene.findGameObject` (this may get you the wrong result if there are multiple methods with this same name)
+
+Now Hooked Method Inspector will show you each time the method is called and during which module, and what arguments and return values it collected from each call. If an argument or return value is a Managed Object, you can inspect it there with EMV.
+
+Knowing which module a method is called most often during can be helpful to know which reframework callback to do your script work in (like `re.on_application_entry("LateUpdateBehavior")`)
+
+![HookedMethodInspector2](https://i.imgur.com/AUJFrFA.jpeg)
+
+There is also a menu for each hooked method called `Hook Editor`, where you can test hook code on the fly. There is a text box for the Pre-Hook function and a text box for Post-Hook function. Inside these text boxes you are passed `args` and `retval`, just like you are in a regular REFramework hook, and you can handle them in exactly the same way.
+
+![HookedMethodInspector3](https://i.imgur.com/VWnra9A.jpeg)
+
+Check the REFramework docutmentation on [Hooks](https://cursey.github.io/reframework-book/api/sdk.html#sdkhookmethod_definition-pre_function-post_function-ignore_jmp) for more information about them
+
+</details>
+
 # Troubleshooting / Bugs
 * If your game is crashing on startup or when loading certain areas or animations, delete all JSON files in the reframework/data folder related to EMV Engine and Enhanced Model Viewer, as over time they may get corrupted by trying to cache unloadable files.
 * Try playing around with the Garbage Collection settings on newer versions of REFramework if you are getting constant crashes in some games. Generational may be faster than Incremental, but is more unstable
 * It is recommended that you install all five scripts together to avoid errors, as I usually develop them together
 
 # Scripters
-Feel free to make your own extensions to EMV Engine by requiring it at the top of your script, and use the multitude of available utility functions to support your own scripts. Most available functions are described with comments inside *EMV Engine\init.lua*, and all of EMV's exported functions and tables are available in a global table called **EMV** while EMV Engine is running  
+While EMV Engine is mostly an envioronment for script development, feel free to make your own extensions to EMV Engine by requiring it at the top of your script, and use the multitude of available utility functions to support your own scripts. Most available functions are described with comments inside *EMV Engine\init.lua*, and all of EMV's exported functions and tables are available in a global table called **EMV** while EMV Engine is running  
 Just be sure to give credit where it is due, and to link users to this repo for the newest updates to EMV Engine.
 
 ![Bela](https://i.imgur.com/Zd6QBax.jpg)
@@ -467,4 +506,4 @@ Just be sure to give credit where it is due, and to link users to this repo for 
 *\*These scripts are each a work-in-progress and may have bugs or cause crashes across the various game and engine versions*  
 
 							
-					Created by alphaZomega, 2022
+					Created by alphaZomega, 2024
