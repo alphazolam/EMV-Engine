@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
-local  version = "2.0.0" --April 5, 2024
+local  version = "2.0.1" --April 8, 2024
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -51,6 +51,7 @@ SettingsCache = {
 	use_color_bytes = false,
 	show_enable_checkboxes = true,
 	load_resources = true,
+	max_open_time = 30,
 	Collection_data = {
 		collection_xforms = {},
 		worldmatrix = Matrix4x4f.identity(),
@@ -199,8 +200,10 @@ local misc_vars = {
 	tooltip_timers = 0,
 	hovered_this_frame = 0,
 	update_modules = {
+		"UpdateBehavior",
 		"PrepareRendering",
 		"UpdateMotion",
+		"LateUpdateBehavior",
 	},
 	skip_props = {
 		HashCode = true,
@@ -4520,8 +4523,8 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	
 	--log.info("checking name for " .. logv(m_obj))
 	if type(m_obj)~="userdata" or not m_obj.get_type_definition or not is_valid_obj(m_obj) then return "" end
-	o_tbl = o_tbl or m_obj._ --or create_REMgdObj(m_obj)
-	if not o_tbl then return tostring(m_obj) end
+	o_tbl = o_tbl or _data[m_obj] or create_REMgdObj(m_obj)
+	if not o_tbl then return m_obj:get_type_definition():get_full_name() end
 	
 	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition()), nil
 	if not typedef then return tostring(m_obj) end
@@ -5899,14 +5902,17 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	
 	if return_type:is_a("System.Enum") then
 		local enum, value_to_list_order, enum_names = get_enum(return_type)
-		if value_to_list_order then 
-			changed, value = imgui.combo(display_name, value_to_list_order[value], enum_names) 
-			if changed then 
-				value = enum[ enum_names[value]:sub(1, enum_names[value]:find("%(")-1) ]
-			end
-		else
-			changed, value = imgui.drag_int(display_name .. " (Enum)", value, 1, 0, 4294967296)
+		if not value_to_list_order[value] then
+			enum_names = merge_tables({}, enum_names)
+			value_to_list_order = merge_tables({}, value_to_list_order)
+			table.insert(enum_names, tostring(value))
+			value_to_list_order[value] = #enum_names
 		end
+		changed, value = imgui.combo(display_name, value_to_list_order[value], enum_names) 
+		if changed then 
+			value = enum[ enum_names[value]:sub(1, enum_names[value]:find("%(")-1) ]
+		end
+		--changed, value = imgui.drag_int(display_name .. " (Enum)", value, 1, 0, 4294967296)
 	elseif values_type == "number" or values_type == "boolean" or return_type:is_primitive() then
 		if return_type:is_a("System.Single") then
 			changed, value = imgui.drag_float(display_name, value, vd.increment, -100000.0, 100000.0)
@@ -6076,6 +6082,14 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	if changed and not can_set and not is_obj then 
 		imgui.set_tooltip("Cannot set")
 		changed = false
+	end
+
+	if imgui.begin_popup_context_item(value) then  
+		if imgui.menu_item("Reset") then
+			value = vd:get_org_value(element_idx)
+			changed = true
+		end
+		imgui.end_popup() 
 	end
 	
 	--Freeze a field, setting it to the frozen setting every frame: ------------------------
@@ -6305,6 +6319,20 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 							imgui.tree_pop()
 						end
 					end
+				end
+				
+				if vd.ret_type:is_a("System.Enum") and imgui.tree_node("Enum Constructor") then
+					local enum, value_to_list_order, enum_names, echanged = get_enum(return_type)
+					vd.new_enum_tbl = not changed and vd.new_enum_tbl or {value=value}
+					for i, name in ipairs(enum_names) do
+						local sname = name:match("(.+)%(")
+						echanged, vd.new_enum_tbl[i] = imgui.checkbox(name, (vd.new_enum_tbl.value | enum[sname]) == vd.new_enum_tbl.value)
+						if echanged then 
+							vd.new_enum_tbl.value = vd.new_enum_tbl[i] and (vd.new_enum_tbl.value + enum[sname]) or (vd.new_enum_tbl.value - enum[sname])
+							value, changed = vd.new_enum_tbl.value, true
+						end
+					end
+					imgui.tree_pop()
 				end
 				
 				if not vd.is_lua_type then
@@ -10581,6 +10609,40 @@ re.on_application_entry("UpdateMotion", function()
 
 end)
 
+re.on_application_entry("UpdateBehavior", function()
+	if misc_vars.update_modules[SettingsCache.update_module_idx] == "UpdateBehavior" then
+		if figure_mode or forced_mode or cutscene_mode then --Enhanced Model Viewer will update it
+			for xform, obj in pairs(held_transforms) do 
+				obj:update_AnimObject()
+			end
+		else
+			for xform, obj in pairs(held_transforms) do 
+				obj:update()
+			end
+		end
+		for managed_object, args in pairs(deferred_calls) do 
+			deferred_call(managed_object, args)
+		end
+	end
+end)
+
+re.on_application_entry("LateUpdateBehavior", function()
+	if misc_vars.update_modules[SettingsCache.update_module_idx] == "LateUpdateBehavior" then
+		if figure_mode or forced_mode or cutscene_mode then --Enhanced Model Viewer will update it
+			for xform, obj in pairs(held_transforms) do 
+				obj:update_AnimObject()
+			end
+		else
+			for xform, obj in pairs(held_transforms) do 
+				obj:update()
+			end
+		end
+		for managed_object, args in pairs(deferred_calls) do 
+			deferred_call(managed_object, args)
+		end
+	end
+end)
+
 re.on_application_entry("PrepareRendering", function()
 	if misc_vars.update_modules[SettingsCache.update_module_idx] == "PrepareRendering" then
 		if figure_mode or forced_mode or cutscene_mode then --Enhanced Model Viewer will update it
@@ -10592,10 +10654,6 @@ re.on_application_entry("PrepareRendering", function()
 				obj:update()
 			end
 		end
-		
-		--if not isMHR and not isDMC then 
-		--	GameObject.update_all_joint_positions()
-		--end
 		for managed_object, args in pairs(deferred_calls) do 
 			deferred_call(managed_object, args)
 		end
@@ -10708,7 +10766,7 @@ re.on_frame(function()
 			if not (o_tbl.keep_alive or o_tbl.is_frozen) then
 				o_tbl.last_opened = o_tbl.last_opened or uptime
 			end
-			if o_tbl.invalid or (o_tbl.last_opened and (uptime - o_tbl.last_opened) > 5) then
+			if o_tbl.invalid or (o_tbl.last_opened and (uptime - o_tbl.last_opened) > SettingsCache.max_open_time) then
 				_data[instance] = nil
 				log.info("REMgdObj deleting " .. o_tbl.name)
 			elseif not o_tbl.is_vt then
@@ -10903,6 +10961,7 @@ re.on_draw_ui(function()
 	local csetting_was_changed, special_changed
 	
 	if imgui.tree_node("EMV Engine Settings") then
+		imgui.begin_rect()
 		special_changed, SettingsCache.load_json = imgui.checkbox("Remember Settings", SettingsCache.load_json); csetting_was_changed = csetting_was_changed or changed
 		changed, SettingsCache.load_resources = imgui.checkbox("Load Resources", SettingsCache.load_resources); csetting_was_changed = csetting_was_changed or changed
 		changed, SettingsCache.affect_children = imgui.checkbox("Affect Children", SettingsCache.affect_children); csetting_was_changed = csetting_was_changed or changed
@@ -10915,6 +10974,7 @@ re.on_draw_ui(function()
 			changed, SettingsCache.use_pcall = imgui.checkbox("Exception Handling", SettingsCache.use_pcall); csetting_was_changed = csetting_was_changed or changed
 			changed, SettingsCache.update_module_idx = imgui.combo("Update During", SettingsCache.update_module_idx, misc_vars.update_modules); csetting_was_changed = csetting_was_changed or changed
 			changed, SettingsCache.use_color_bytes = imgui.checkbox("Display Colors as Bytes", SettingsCache.use_color_bytes); csetting_was_changed = csetting_was_changed or changed
+			changed, SettingsCache.max_open_time = imgui.drag_float("Object Expiration Time", SettingsCache.max_open_time, 0.5, 0, 10000); csetting_was_changed = csetting_was_changed or changed 
 			
 			if SettingsCache.remember_materials and next(saved_mats) and imgui.tree_node("Saved Material Settings") then
 				--if imgui.button("Clear") then 
@@ -11005,6 +11065,8 @@ re.on_draw_ui(function()
 			
 			imgui.tree_pop()
 		end
+		imgui.text("																			v"..version.."  |  By alphaZomega")
+		imgui.end_rect(2)
 		imgui.tree_pop()
 	end
 	

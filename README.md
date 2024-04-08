@@ -485,7 +485,7 @@ Knowing which module a method is called most often during can be helpful to know
 
 There is also a menu for each hooked method called `Hook Editor`, where you can test hook code on the fly. There is a text box for the Pre-Hook function and a text box for Post-Hook function. Inside these text boxes you are passed `args` and `retval`, just like you are in a regular REFramework hook, and you can handle them in exactly the same way.
 
-![HookedMethodInspector3](https://i.imgur.com/VWnra9A.jpeg)
+![HookedMethodInspector3](https://i.imgur.com/0ew9gPC.jpg)
 
 Check the REFramework docutmentation on [Hooks](https://cursey.github.io/reframework-book/api/sdk.html#sdkhookmethod_definition-pre_function-post_function-ignore_jmp) for more information about them
 
@@ -493,8 +493,6 @@ Check the REFramework docutmentation on [Hooks](https://cursey.github.io/reframe
 
 # Troubleshooting / Bugs
 * If your game is crashing on startup or when loading certain areas or animations, delete all JSON files in the reframework/data folder related to EMV Engine and Enhanced Model Viewer, as over time they may get corrupted by trying to cache unloadable files.
-* Try playing around with the Garbage Collection settings on newer versions of REFramework if you are getting constant crashes in some games. Generational may be faster than Incremental, but is more unstable
-* It is recommended that you install all five scripts together to avoid errors, as I usually develop them together
 
 # Scripters
 While EMV Engine is mostly an envioronment for script development, feel free to make your own extensions to EMV Engine by requiring it at the top of your script, and use the multitude of available utility functions to support your own scripts. Most available functions are described with comments inside *EMV Engine\init.lua*, and all of EMV's exported functions and tables are available in a global table called **EMV** while EMV Engine is running  
