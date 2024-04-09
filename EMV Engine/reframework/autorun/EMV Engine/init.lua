@@ -197,6 +197,7 @@ if static_objs.main_view ~= nil then
 end
 
 local misc_vars = {
+	is_any_ctx_menu_open = false,
 	tooltip_timers = 0,
 	hovered_this_frame = 0,
 	update_modules = {
@@ -4545,7 +4546,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 		end)
 		name = name or typedef:get_name()
 	elseif typedef:is_a("via.Component") then 
-		name = td_name .. ((typedef:is_a("via.Transform") and (" (" .. get_GameObject(m_obj, true) .. ")")) or "")
+		name = td_name .. " (" .. get_GameObject(m_obj, true) .. ")"
 	elseif typedef:is_a("via.GameObject") then
 		try, name = pcall(sdk.call_object_func, m_obj, "get_Name")
 		name = try and name
@@ -6076,6 +6077,15 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	
 	--imgui.pop_item_width()
 	
+	if not misc_vars.is_any_ctx_menu_open and imgui.begin_popup_context_item(key_name .. name .. tostring(value)) then  
+		misc_vars.is_any_ctx_menu_open = true
+		if imgui.menu_item("Reset") then
+			vd:set_freeze(nil, element_idx)
+			value = vd:get_org_value(element_idx)
+			changed, vd.was_changed, vd.timer_start = true, nil
+		end
+		imgui.end_popup() 
+	end
 	
 	local can_set = (field or vd.field or prop.set or vd.is_arr_element)
 	changed = changed or was_changed
@@ -6084,14 +6094,6 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		changed = false
 	end
 
-	if imgui.begin_popup_context_item(value) then  
-		if imgui.menu_item("Reset") then
-			value = vd:get_org_value(element_idx)
-			changed = true
-		end
-		imgui.end_popup() 
-	end
-	
 	--Freeze a field, setting it to the frozen setting every frame: ------------------------
 	if not o_tbl.is_vt then
 		local freeze, freeze_changed = vd.freeze
@@ -6102,10 +6104,10 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		if not is_obj and (((freeze ~= nil) and (field or prop.set) and (vd.value_org ~= nil))) then --freezing / resetting values 
 			
 			imgui.push_id(vd.name or field:get_name() .. "F")
-				if (freeze == false) and vd.timer_start and ((uptime - vd.timer_start) > 5.0) then 
-					vd:set_freeze(nil, element_idx)
-					vd.timer_start = nil
-				end
+				--if (freeze == false) and vd.timer_start and ((uptime - vd.timer_start) > 5.0) then 
+				--	vd:set_freeze(nil, element_idx)
+				--	vd.timer_start = nil
+				--end
 				
 				--vd.display_name is used when embedding the prop in a different menu
 				if freeze and not vd.display_name and not imgui.same_line() and imgui.button(freeze and "Unfreeze" or "Freeze") then
@@ -6129,7 +6131,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				end
 			::exit::
 			imgui.pop_id()
-		elseif changed or was_changed then 
+		elseif (changed or was_changed) and not misc_vars.is_any_ctx_menu_open then 
 			o_tbl.was_changed = true
 			vd.was_changed = true
 			vd:set_freeze(freeze or false, element_idx)
@@ -10742,7 +10744,7 @@ end
 
 --On Frame ------------------------------------------------------------------------------------------------------------------------------------------------
 re.on_frame(function()
-	
+	misc_vars.is_any_ctx_menu_open = nil
 	if isGNG and os.clock() < 30.0 then return end
 	
 	re.msgs_this_frame = 0
