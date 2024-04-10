@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
-local  version = "2.0.1" --April 8, 2024
+local  version = "2.0.2" --April 8, 2024
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -4524,7 +4524,7 @@ get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
 	
 	--log.info("checking name for " .. logv(m_obj))
 	if type(m_obj)~="userdata" or not m_obj.get_type_definition or not is_valid_obj(m_obj) then return "" end
-	o_tbl = o_tbl or _data[m_obj] or create_REMgdObj(m_obj)
+	o_tbl = o_tbl or _data[m_obj] or (m_obj.get_type_definition and create_REMgdObj(m_obj))
 	if not o_tbl then return m_obj:get_type_definition():get_full_name() end
 	
 	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition()), nil
@@ -6077,7 +6077,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	
 	--imgui.pop_item_width()
 	
-	if not misc_vars.is_any_ctx_menu_open and imgui.begin_popup_context_item(key_name .. name .. tostring(value)) then  
+	if not is_obj and misc_vars.is_any_ctx_menu_open and imgui.begin_popup_context_item(key_name .. name .. tostring(value)) then  
 		misc_vars.is_any_ctx_menu_open = true
 		if imgui.menu_item("Reset") then
 			vd:set_freeze(nil, element_idx)
