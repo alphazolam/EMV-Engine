@@ -4520,11 +4520,11 @@ get_fields_and_methods = function(typedef)
 end
 
 --Get the most appropriate name for a managed object element
-get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant)
+get_mgd_obj_name = function(m_obj, o_tbl, idx, only_relevant, skip_if_fail)
 	
 	--log.info("checking name for " .. logv(m_obj))
 	if type(m_obj)~="userdata" or not m_obj.get_type_definition or not is_valid_obj(m_obj) then return "" end
-	o_tbl = o_tbl or _data[m_obj] or (m_obj.get_type_definition and create_REMgdObj(m_obj))
+	o_tbl = o_tbl or _data[m_obj] or (m_obj.get_type_definition and not skip_if_fail and create_REMgdObj(m_obj))
 	if not o_tbl then return m_obj:get_type_definition():get_full_name() end
 	
 	local typedef, name = (o_tbl.is_lua_type and (o_tbl.item_type or o_tbl.ret_type or o_tbl.type)) or (can_index(m_obj) and m_obj.get_type_definition and m_obj:get_type_definition()), nil
@@ -4614,7 +4614,7 @@ local GUITree = {
 		self.__index = self
 		o.obj = args.obj
 		o.name = o.obj:get_type_definition():get_full_name()
-		o.Name = get_mgd_obj_name(o.obj)
+		o.Name = get_mgd_obj_name(o.obj, nil, nil, nil, true)
 
 		o.children = args.children or o.children or self.child_lists[o.obj]
 		if not o.children then
@@ -5031,7 +5031,7 @@ local REMgdObj = {
 		
 		if not obj or type(obj) == "number" or not can_index(obj) or not obj.get_type_definition then
 			print("REMgdObj Failed step 1")
-			return 
+			return nil
 		end
 		
 		o = o or _data[obj] or {}
@@ -5135,7 +5135,7 @@ local REMgdObj = {
 		o.name_methods = propdata.name_methods
 		o.item_type = propdata.item_type
 		o.name_methods = propdata.name_methods
-		o.Name = get_mgd_obj_name(obj, o)
+		o.Name = get_mgd_obj_name(obj, o) or ""
 		
 		--initial properties setup:
 		if next(propdata.getters) then
