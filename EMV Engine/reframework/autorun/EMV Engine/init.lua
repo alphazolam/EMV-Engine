@@ -1,6 +1,6 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
-local  version = "2.0.2" --April 8, 2024
+local  version = "2.0.3" --May 19, 2024
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -3186,8 +3186,9 @@ local function add_resource_to_cache(resource_holder, paired_resource_holder, da
 		local ext = ret_type and (SettingsCache.typedef_names_to_extensions[ret_type:get_name()] or ret_type:get_name():gsub("ResourceHolder", ""):lower()) or " "
 		return 1, " ", ext
 	end
+	try, name = pcall(resource_holder.call, resource_holder, "ToString()")
 	
-	local resource_path = resource_holder:call("ToString()"):match("^.+%[@?(.+)%]")
+	local resource_path = try and name:match("^.+%[@?(.+)%]")
 	
 	if not resource_path then 
 		local ext = ret_type and (SettingsCache.typedef_names_to_extensions[ret_type:get_name()] or ret_type:get_name():gsub("ResourceHolder", ""):lower()) or " "
@@ -4192,13 +4193,13 @@ local ChainNode = {
 		o.group_obj = args.group_obj
 		o.idx = args.idx
 		o.name = args.name or " "
-		local try, hash = pcall(sdk.call_object_func, o.group_obj.group, "getNodeJointNameHash", o.idx)
-		if try then 
-			o.hash = hash
+		--local try, hash = pcall(sdk.call_object_func, o.group_obj.group, "getNodeJointNameHash", o.idx)
+		--if try then 
+			o.hash = o.group_obj.group:getNodeJointNameHash(o.idx)
 			o.pos = o.group_obj.group:call("getNodePosition", o.idx)
 			o.joint = o.group_obj.xform:call("getJointByHash", o.hash)
 			if o.joint then o.name = o.joint:call("get_Name") end
-		end
+		--end
 		
 		return setmetatable(o, self)
 	end,
@@ -4232,15 +4233,18 @@ local ChainGroup = {
 		end
 
 		local function get_setting_id(group)
-			local setting = group:read_qword(0x18)
-			if setting == 0 then return end
+			if not pcall(function()
+				local setting = group:read_qword(0x18)
+				if setting == 0 then return end
 
-			local data = read_uint64(setting + 0x20)
-			if data == 0 then return end
+				local data = read_uint64(setting + 0x20)
+				if data == 0 then return end
 
-			local settingdata = read_uint64(data + 0x8)
-			if settingdata == 0 then return end
-
+				local settingdata = read_uint64(data + 0x8)
+				if settingdata == 0 then return end
+			end) then 
+				return 0 
+			end
 			return read_uint32(settingdata + 0x18) 
 		end
 		
@@ -5253,7 +5257,7 @@ local REMgdObj = {
 				o_tbl.gameobj = o_tbl.gameobj or _data[o_tbl.owner].gameobj
 				o_tbl.gameobj_name = o_tbl.gameobj_name or _data[o_tbl.owner].gameobj_name
 				if not o_tbl.folder and o_tbl.gameobj then 
-					o_tbl.key_hash = o_tbl.gameobj and hashing_method(get_gameobj_path(o_tbl.gameobj) .. o_tbl.name_full)
+					o_tbl.key_hash = hashing_method((get_gameobj_path(o_tbl.gameobj) or "") .. o_tbl.name_full)
 				end
 				o_tbl.folder = o_tbl.folder or _data[o_tbl.owner].folder
 			end
@@ -5902,18 +5906,23 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 	--imgui.push_item_width(256)
 	
 	if return_type:is_a("System.Enum") then
-		local enum, value_to_list_order, enum_names = get_enum(return_type)
-		if not value_to_list_order[value] then
-			enum_names = merge_tables({}, enum_names)
-			value_to_list_order = merge_tables({}, value_to_list_order)
-			table.insert(enum_names, tostring(value))
-			value_to_list_order[value] = #enum_names
+		if value ~= nil then
+			local enum, value_to_list_order, enum_names = get_enum(return_type)
+			if not value_to_list_order[value] then
+				enum_names = merge_tables({}, enum_names)
+				value_to_list_order = merge_tables({}, value_to_list_order)
+				table.insert(enum_names, tostring(value))
+				aaas = {vd, value, tostring(value), value_to_list_order, enum_names, return_type:get_full_name(), parent_managed_object, field}
+				value_to_list_order[value] = #enum_names
+			end
+			changed, value = imgui.combo(display_name, value_to_list_order[value], enum_names) 
+			if changed then 
+				value = enum[ enum_names[value]:sub(1, enum_names[value]:find("%(")-1) ]
+			end
+			--changed, value = imgui.drag_int(display_name .. " (Enum)", value, 1, 0, 4294967296)
+		else
+			imgui.text(display_name .. "		nil")
 		end
-		changed, value = imgui.combo(display_name, value_to_list_order[value], enum_names) 
-		if changed then 
-			value = enum[ enum_names[value]:sub(1, enum_names[value]:find("%(")-1) ]
-		end
-		--changed, value = imgui.drag_int(display_name .. " (Enum)", value, 1, 0, 4294967296)
 	elseif values_type == "number" or values_type == "boolean" or return_type:is_primitive() then
 		if return_type:is_a("System.Single") then
 			changed, value = imgui.drag_float(display_name, value, vd.increment, -100000.0, 100000.0)
@@ -7239,7 +7248,7 @@ local Material = {
 			
 			local can_reset = (self.variables[v] ~= self.orig_vars[v])
 			if can_reset then imgui.begin_rect() imgui.begin_rect() end
-			if imgui.button(var_name) then 
+			if imgui.button(var_name.." ") then 
 				self.anim_object.update_materials = true
 				self.variables[v] = self.variable_types[v] == 4 and Vector4f.new(self.orig_vars[v].x, self.orig_vars[v].y, self.orig_vars[v].z, self.orig_vars[v].w) or self.orig_vars[v]
 				table.insert(self.deferred_vars, v)
@@ -10111,12 +10120,10 @@ GameObject = {
 		if self.components_named.MotionFsm2 then
 			self:action_monitor()
 		end
-		--[[
-		if self and self.materials and self.materials[1] and imgui.tree_node_ptr_id(self.materials[1].mesh:get_address() - 1235, "Materials") then
+		if self and self.materials and self.materials[1] and imgui.tree_node_ptr_id(self.components_named.Mesh:get_address() - 1235, "Materials") then
 			show_imgui_mats(self) 
 			imgui.tree_pop()
 		end
-		self:action_monitor()]]
 	end,
 	
 	load_json_mesh = function(self)
