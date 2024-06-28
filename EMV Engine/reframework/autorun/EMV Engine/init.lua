@@ -1,6 +1,11 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
-local  version = "2.0.3" --May 19, 2024
+local  version = "2.0.4" --June 28, 2024
+
+--Added sound player for ContainerApps
+--Fixed some issues with browsing via.motion.Motion
+--Fixed some issues with playing animations in the 'Animations' menu
+
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
 _G["is" .. reframework.get_game_name():sub(1, 3):upper()] = true --sets up the "isRE2", "isRE3" etc boolean
@@ -4242,6 +4247,7 @@ local ChainGroup = {
 
 				local settingdata = read_uint64(data + 0x8)
 				if settingdata == 0 then return end
+				return read_uint32(settingdata + 0x18) 
 			end) then 
 				return 0 
 			end
@@ -4704,11 +4710,12 @@ local VarData = {
 		
 		if o.mysize then --this whole thing gets so so much more complicated from counting list props as props
 			o.value_org = {}
-			for i=0, o.mysize-1 do
+			for ii=0, o.mysize-1 do
 				if SettingsCache.use_pcall then 
-					try, out = pcall(obj.call, obj, o.full_name, i)
+					try, out = pcall(obj.call, obj, o.full_name, ii)
 				else
-					try, out = true, obj:call(o.full_name, i)
+					--fail = {o, obj, o.full_name, tostring(ii)}
+					try, out = true, obj:call(o.full_name, ii)
 				end
 				if try and (out ~=nil) then
 					example = example or out
@@ -4728,7 +4735,7 @@ local VarData = {
 			elseif SettingsCache.use_pcall then
 				try, out = pcall(sdk.call_object_func, obj, o.full_name)
 			else
-				fail = {obj, o.full_name}
+				--fail = {obj, o.full_name}
 				try, out = true, obj:call(o.full_name)
 			end
 		end
@@ -4964,7 +4971,7 @@ local VarData = {
 					o_tbl:__set_owner(self.cvalue)
 				end
 			end) then
-				log.error("Error updating property, check global variable 'bad_prop'")
+				print("Error updating property, check global variable 'bad_prop'")
 				bad_prop = {self, obj, o_tbl, obj.__set_owner}
 			end
 		end
@@ -4978,8 +4985,8 @@ local VarData = {
 						self.cvalue = self.value
 					end
 				else
-					table.remove(o_tbl.props, idx)
-					log.info("Removed field/prop " .. self.name .. " from " .. o_tbl.name)
+					--table.remove(o_tbl.props, idx)
+					--print("Removed field/prop " .. self.name .. " from " .. o_tbl.name)
 				end
 				
 			elseif self.get:get_num_params() == 1 then --and (forced_update or o_tbl.keep_updating or (self.mysize and self.mysize == 1) or math.random(1, 5) == 1) then
@@ -4995,9 +5002,9 @@ local VarData = {
 					self.value = {}
 					for j=0, (self.mysize and self.mysize-1) or 0 do 
 						if not self:update_item(o_tbl, j) then 
-							table.remove(o_tbl.props, idx)
-							log.info("Removed field/prop " .. self.name .. " from " .. o_tbl.name)
-							goto continue
+							--table.remove(o_tbl.props, idx)
+							--print("Removed field/prop " .. self.name .. " from " .. o_tbl.name)
+							--goto continue
 						end
 					end
 					self.cvalue = ((should_update_cvalue and (self.value[1] ~= nil)) and self.value) or self.cvalue or self.value
@@ -5153,7 +5160,7 @@ local REMgdObj = {
 							local full_name = propdata.method_full_names[method_name]
 							local full_name_method = o.type:get_method(full_name)
 							method_name = method_name:sub(4, -1) 
-							if full_name_method and propdata.getters[method_name] and (not SettingsCache.exception_methods[o.name_full] or not SettingsCache.exception_methods[o.name_full][method_name]) and not misc_vars.skip_props[method_name] then
+							if full_name_method and propdata.getters[method_name] and not misc_vars.skip_props[method_name] and (not SettingsCache.exception_methods[o.name_full] or not SettingsCache.exception_methods[o.name_full][method_name]) then --
 								local method = propdata.getters[method_name]
 								local prop = VarData:new{
 									o_tbl=o,
@@ -6054,7 +6061,7 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 		else
 			if prop and not vd.is_vt and not is_valid_obj(value) then
 				local idx = find_index(o_tbl.props, prop)
-				if idx then table.remove(o_tbl.props, idx) end --its broken
+			--	if idx then table.remove(o_tbl.props, idx) end --its broken
 			elseif vd.is_static then
 				imgui.same_line()
 				imgui.text_colored(Name, 0xFFE0853D)
@@ -6907,6 +6914,24 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 				show_imgui_uservariables(m_obj)
 			elseif o_tbl.gui then
 				o_tbl.gui:display_imgui()
+			elseif m_obj._TriggerInfoList and o_tbl.go and o_tbl.name:find("Container") then
+				o_tbl.go:imgui_sounds()
+			elseif o_tbl.name == "EPVStandardData" and player and player.components_named.EPVStandard then
+				if imgui.tree_node("Effects") then
+					if imgui.tree_node("EPV") then 
+						read_imgui_element(player.components_named.EPVStandard)
+						imgui.tree_pop()
+					end					
+					for i , effect in pairs(m_obj.Elements.mItems or m_obj.Elements._items) do
+						if i % 5 ~= 0 then imgui.same_line() end
+						if imgui.button(effect:get_dispName()) then 
+							--local cnt = player.components_named.EPVStandard:call("requestEffect(System.Collections.Generic.IEnumerable`1<via.effect.script.EPVStandardData.Element>, via.GameObject)", m_obj:getElementsFromIndex(i), player.gameobj)
+							--player.components_named.EPVStandard:call("processContainer", m_obj:getElementsFromIndex(i), cnt)
+							deferred_calls[player.components_named.EPVStandard] = { func="requestEffect(System.Collections.Generic.IEnumerable`1<via.effect.script.EPVStandardData.Element>, via.GameObject)", args={m_obj:getElementsFromIndex(i):add_ref(), player.gameobj} }
+						end
+					end
+					imgui.tree_pop()
+				end
 			end
 			
 			if not is_xform and ((o_tbl.components or o_tbl.is_component) or next(o_tbl.propdata.simple_methods)) and imgui.tree_node_str_id(key_name .. "Methods", "Simple Methods") then 
@@ -6968,7 +6993,9 @@ function imgui.managed_object_control_panel(m_obj, key_name, field_name)
 									for i = j, (this_limit==j+max_elem_sz and this_limit-1) or this_limit  do 
 										local field = o_tbl.propdata.fields[ ordered_idxes[i] ]
 										if field == nil then break end
-										was_changed = show_field(m_obj, field, key_name) or was_changed
+										--if field
+										was_changed = show_field(m_obj, field, key_name) or was_changed 
+										
 									end
 									if #ordered_idxes >= max_elem_sz then
 										imgui.tree_pop()
@@ -8986,6 +9013,9 @@ GameObject = {
 					table.insert(o.behaviortrees, bhvt)
 					--log.info(json.log(bhvt.names) .. " " ..  get_table_size(bhvt.names) .. " " .. o.behaviortrees.total_actions .. " " .. tostring(bhvt.names_indexed and #bhvt.names_indexed))
 				end
+				if component._TriggerInfoList and typedef:get_name():find("Container") then
+					o.sound_container = component
+				end
 			end
 		end
 		
@@ -9684,14 +9714,16 @@ GameObject = {
 				local minfo = sdk.create_instance("via.motion.MotionInfo"):add_ref()
 				for i, name in ipairs({"ActiveMotionBank", "DynamicMotionBank"}) do
 					for j, motionbank in ipairs(lua_get_system_array(aw.motion:call("get_"..name), true)) do 
-						local bank_id = motionbank:get_BankID()
-						local name = motionbank:get_MotionList(); name = name and name:ToString():match("^.+%[.+/(.+)%.motlist%]")
-						if name then
-							aw.mixed_banks[bank_id] = aw.mixed_banks[bank_id] or {name=name}
-							for k=0, aw.motion:getMotionCount(bank_id) - 1 do
-								aw.motion:call("getMotionInfoByIndex(System.UInt32, System.UInt32, via.motion.MotionInfo)", bank_id, k, minfo)
-								table.insert(aw.all_mots, {bank=bank_id, id=minfo:get_MotionID(), name=minfo:get_MotionName()})
-								aw.mixed_banks[bank_id][minfo:get_MotionID()] = aw.all_mots[#aw.all_mots].name:gsub("esf%d%d%d_", "")
+						if motionbank.get_BankID then
+							local bank_id = motionbank:get_BankID()
+							local name = motionbank:get_MotionList(); name = name and name:ToString():match("^.+%[.+/(.+)%.motlist%]")
+							if name then
+								aw.mixed_banks[bank_id] = aw.mixed_banks[bank_id] or {name=name}
+								for k=0, aw.motion:getMotionCount(bank_id) - 1 do
+									aw.motion:call("getMotionInfoByIndex(System.UInt32, System.UInt32, via.motion.MotionInfo)", bank_id, k, minfo)
+									table.insert(aw.all_mots, {bank=bank_id, id=minfo:get_MotionID(), name=minfo:get_MotionName()})
+									aw.mixed_banks[bank_id][minfo:get_MotionID()] = aw.all_mots[#aw.all_mots].name:gsub("esf%d%d%d_", "")
+								end
 							end
 						end
 					end
@@ -9807,8 +9839,9 @@ GameObject = {
 									for m, layer in ipairs(aw.layers) do
 										if aw.enabled_layers[m] then
 											layer:set_Resource(nil)
+											layer:call("changeMotion(System.UInt32, System.UInt32, System.Single, System.Single, via.motion.InterpolationMode, via.motion.InterpolationCurve)", bank_id, motion_id, 0.0, 20.0, 2, 0)
 											--deferred_calls[layer] = {func="changeMotion(System.UInt32, System.UInt32, System.Single)", args={{bank_id, motion_id, 0.0}}}
-											layer:call("changeMotion(System.UInt32, System.UInt32, System.Single)", bank_id, motion_id, 0.0)
+											--layer:call("changeMotion(System.UInt32, System.UInt32, System.Single)", bank_id, motion_id, 0.0)
 										end
 									end
 									deferred_calls[self.xform] = {func="set_Position", args=aw.reset_pos}
@@ -10113,6 +10146,10 @@ GameObject = {
 			imgui.tree_pop()
 		end
 		
+		if self.sound_container then
+			self:imgui_sounds()
+		end
+		
 		if self.components_named.Motion then
 			self:imgui_motion()
 		end
@@ -10120,8 +10157,32 @@ GameObject = {
 		if self.components_named.MotionFsm2 then
 			self:action_monitor()
 		end
-		if self and self.materials and self.materials[1] and imgui.tree_node_ptr_id(self.components_named.Mesh:get_address() - 1235, "Materials") then
+		
+		if self and self.materials and self.materials[1] and self.components_named.Mesh and imgui.tree_node_ptr_id(self.components_named.Mesh:get_address() - 1235, "Materials") then
 			show_imgui_mats(self) 
+			imgui.tree_pop()
+		end
+	end,
+	
+	imgui_sounds = function(self)
+		if imgui.tree_node("Sound Player") then
+			local do_stop = imgui.button("Stop All")
+			
+			imgui.begin_rect()
+			for i, trig in pairs(self.sound_container._TriggerInfoList._items) do
+				if trig then
+					if i % 10 ~= 1 then imgui.same_line() end
+					if imgui.button(trig._TriggerId) then
+						local snd_req = self.sound_container:call("createRequestInfo(soundlib.SoundTriggerInfo, via.GameObject, via.GameObject, System.UInt32, System.Boolean, System.Boolean, System.UInt32, via.simplewwise.CallbackType, System.Action`1<soundlib.SoundManager.RequestInfo>, System.Action`1<soundlib.SoundManager.RequestInfo>, System.Action`1<soundlib.SoundManager.RequestInfo>, System.Action`1<soundlib.SoundManager.RequestInfo>)", trig, self.gameobj, self.gameobj, trig._OffsetJointHash, false, false, 0, 0, nil, nil, nil, nil):add_ref()
+						snd_req["<Container>k__BackingField"] = self.sound_container
+						self.sound_container:call("trigger(soundlib.SoundManager.RequestInfo)", snd_req)
+					end
+					if do_stop then
+						self.sound_container:call("stopTriggered(System.UInt32, via.GameObject, System.UInt32)", trig._TriggerId, self.gameobj, 1)
+					end
+				end
+			end
+			imgui.end_rect(2)
 			imgui.tree_pop()
 		end
 	end,
