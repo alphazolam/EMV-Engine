@@ -1,10 +1,8 @@
 --EMV_Engine by alphaZomega
 --Console, imgui and support classes and functions for REFramework
-local  version = "2.0.4" --June 28, 2024
+local  version = "2.0.5" --July 15, 2024
 
---Added sound player for ContainerApps
---Fixed some issues with browsing via.motion.Motion
---Fixed some issues with playing animations in the 'Animations' menu
+--Fixed bug with Chain Groups not showing for via.motion.chain
 
 
 --Global variables --------------------------------------------------------------------------------------------------------------------------
@@ -4238,7 +4236,8 @@ local ChainGroup = {
 		end
 
 		local function get_setting_id(group)
-			if not pcall(function()
+			local output = 0
+			pcall(function()
 				local setting = group:read_qword(0x18)
 				if setting == 0 then return end
 
@@ -4247,11 +4246,9 @@ local ChainGroup = {
 
 				local settingdata = read_uint64(data + 0x8)
 				if settingdata == 0 then return end
-				return read_uint32(settingdata + 0x18) 
-			end) then 
-				return 0 
-			end
-			return read_uint32(settingdata + 0x18) 
+				output = read_uint32(settingdata + 0x18) 
+			end)  
+			return output
 		end
 		
 		o = o or {}
@@ -5919,7 +5916,6 @@ local function read_field(parent_managed_object, field, prop, name, return_type,
 				enum_names = merge_tables({}, enum_names)
 				value_to_list_order = merge_tables({}, value_to_list_order)
 				table.insert(enum_names, tostring(value))
-				aaas = {vd, value, tostring(value), value_to_list_order, enum_names, return_type:get_full_name(), parent_managed_object, field}
 				value_to_list_order[value] = #enum_names
 			end
 			changed, value = imgui.combo(display_name, value_to_list_order[value], enum_names) 
